@@ -1,0 +1,29 @@
+version: '3.7'
+services:
+  postgres_test:
+    image: joeauty1/bitnami-postgresql:11
+    environment:
+      POSTGRES_DB: postgres_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+   
+  api:
+    image: gcr.io/redactics-prod-310503/api:${CIRCLE_SHA1}
+    command: npm run test
+    environment:
+      NODE_ENV: test
+      FIREBASE_SERVICE_ACCOUNT: '${FIREBASE_SERVICE_ACCOUNT}'
+      PGHOST: postgres_test
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres_test
+      PGPORT: 5432
+      JWT_SECRET: NCjN+wr3uSB4XGcXTXBCvZ4FyrkXMsXBo3KbIOlksHKuntMVK0Txo4lrBdqdO2byZnxyxUI+I+Uq3iLIWDYvbg==
+      JWT_TTL: 24h
+      COOKIE_MAX_AGE: "86400000"
+      DOCKER_REGISTRY_URL: http://localhost:5000
+      CHARTMUSEUM_URL: http://localhost:8090
+      WEB_URL: http://localhost:8000
+      LATEST_CHART_VERSION: 3.0.0
+    links:
+      - postgres_test

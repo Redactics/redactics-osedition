@@ -1,0 +1,43 @@
+version: '3.7'
+services:
+  postgres_test:
+    image: postgres:11
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: postgres_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-test:/var/lib/postgresql/data
+      - ./init-uuid-ossp.sql:/docker-entrypoint-initdb.d/init-uuid-ossp.sql
+   
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run test
+    environment:
+      LOCAL: 1
+      NODE_ENV: test
+      PGHOST: postgres_test
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres_test
+      PGPORT: 5432
+      JWT_SECRET: NCjN+wr3uSB4XGcXTXBCvZ4FyrkXMsXBo3KbIOlksHKuntMVK0Txo4lrBdqdO2byZnxyxUI+I+Uq3iLIWDYvbg==
+      JWT_TTL: 24h
+      COOKIE_MAX_AGE: "86400000"
+      DOCKER_REGISTRY_URL: http://localhost:5000
+      CHARTMUSEUM_URL: http://localhost:8090
+      WEB_URL: http://localhost:8000
+      LATEST_CHART_VERSION: 3.0.0
+    volumes:
+      - .:/src
+    links:
+      - postgres_test
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres-test:
