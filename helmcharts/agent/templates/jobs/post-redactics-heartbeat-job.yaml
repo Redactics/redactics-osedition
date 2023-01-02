@@ -1,0 +1,78 @@
+################################
+## Post heartbeat to Redactics API
+#################################
+{{- $nodeSelector := or .Values.heartbeat.nodeSelector .Values.nodeSelector }}
+{{- $affinity := or .Values.heartbeat.affinity .Values.affinity }}
+{{- $tolerations := or .Values.heartbeat.tolerations .Values.tolerations }}
+{{- $securityContext := include "airflowSecurityContext" (list . .Values.heartbeat) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-run-redactics-heartbeat
+  labels:
+    tier: airflow
+    component: run-redactics-heartbeat
+    release: {{ .Release.Name }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    heritage: {{ .Release.Service }}
+{{- with .Values.labels }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+  {{- $annotations := dict }}
+  {{- if .Values.heartbeat.useHelmHooks }}
+    {{- $_ := set $annotations "helm.sh/hook" "post-install,post-upgrade" }}
+    {{- $_ := set $annotations "helm.sh/hook-weight" "3" }}
+    {{- $_ := set $annotations "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded" }}
+  {{- end }}
+  {{- with $annotations := merge $annotations .Values.migrateDatabaseJob.jobAnnotations }}
+  annotations:
+    {{- $annotations | toYaml | nindent 4 }}
+  {{- end }}
+spec:
+  template:
+    metadata:
+      labels:
+        tier: airflow
+        component: run-redactics-heartbeat
+        release: {{ .Release.Name }}
+{{- with .Values.labels }}
+{{ toYaml . | indent 8 }}
+{{- end }}
+      {{- if or .Values.airflowPodAnnotations .Values.heartbeat.annotations }}
+      annotations:
+        {{- if .Values.airflowPodAnnotations }}
+        {{- toYaml .Values.airflowPodAnnotations | nindent 8 }}
+        {{- end }}
+        {{- if .Values.heartbeat.annotations }}
+        {{- toYaml .Values.heartbeat.annotations | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      securityContext: {{ $securityContext | nindent 8 }}
+      restartPolicy: OnFailure
+      nodeSelector:
+{{ toYaml $nodeSelector | indent 8 }}
+      affinity:
+{{ toYaml $affinity | indent 8 }}
+      tolerations:
+{{ toYaml $tolerations | indent 8 }}
+      {{- if or .Values.registry.secretName .Values.registry.connection }}
+      imagePullSecrets:
+        - name: {{ template "registry_secret" . }}
+      {{- end }}
+      containers:
+        - name: run-redactics-heartbeat
+          image: {{ .Values.heartbeat.image.registry }}/{{ .Values.heartbeat.image.repository }}:{{ .Values.heartbeat.image.tag }}
+          imagePullPolicy: {{ .Values.images.airflow.pullPolicy }}
+          envFrom:
+          {{- include "custom_airflow_environment_from" . | default "\n  []" | indent 10 }}
+{{- if .Values.heartbeat.extraVolumeMounts }}
+{{ toYaml .Values.heartbeat.extraVolumeMounts | nindent 12 }}
+{{- end }}
+{{- if .Values.heartbeat.extraContainers }}
+{{- toYaml .Values.heartbeat.extraContainers | nindent 8 }}
+{{- end }}
+      volumes:
+{{- if .Values.heartbeat.extraVolumes }}
+{{ toYaml .Values.heartbeat.extraVolumes | nindent 8 }}
+{{- end }}

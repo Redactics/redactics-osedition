@@ -372,11 +372,6 @@ export async function helmCmd(req: Request, res: Response) {
 
         helmArgs.postgresql.persistence.size += i.diskSize;
       });
-
-      helmArgs.workflows.push({
-        id: d.dataValues.uuid,
-        workflowType: d.dataValues.workflowType,
-      });
     });
 
     if (!inputs.length) {
@@ -400,15 +395,11 @@ export async function helmCmd(req: Request, res: Response) {
       };
     }
 
-    // convert workflows to base64
-    const workflowsJSON = JSON.stringify(helmArgs.workflows);
-    const buff = Buffer.from(workflowsJSON);
-    const workflowsB64 = buff.toString('base64');
-
     const chartUrl = process.env.NODE_ENV === 'development' ? './helmcharts/agent' : 'redactics/agent';
     helmArgs.agentUpgradeAvailable = !!((agent.dataValues.lastAgentVersion
       && (String(process.env.LATEST_CHART_VERSION) || '') !== agent.dataValues.lastAgentVersion));
-    const helmUpgrade = (helmArgs.agentUpgradeAvailable && process.env.NODE_ENV !== 'development') ? 'helm repo update && helm upgrade --install' : 'helm upgrade --install';
+    let helmUpgrade = (agent.dataValues.lastHeartBeatDate) ? '' : 'helm repo add redactics https://chartmuseum.redactics.com && '
+    helmUpgrade += (helmArgs.agentUpgradeAvailable && process.env.NODE_ENV !== 'development') ? 'helm repo update && helm upgrade --install' : 'helm upgrade --install';
 
     const helmCmdArray = [
       `${helmUpgrade} --cleanup-on-fail --create-namespace -n ${agent.namespace} --version ${process.env.LATEST_CHART_VERSION} redactics ${chartUrl}`,
@@ -436,7 +427,6 @@ export async function helmCmd(req: Request, res: Response) {
     } else {
       helmCmdSet.push('--set "postgresql.persistence.enabled=false"');
     }
-    helmCmdSet.push(`--set "workflows=${workflowsB64}"`);
 
     // convert to readable string
     let helmCmdString = helmCmdArray.concat(helmCmdSet).join(' \\\\n');
@@ -662,24 +652,8 @@ export async function helmConfig(req: Request, res: Response) {
     };
 
     if (process.env.NODE_ENV === 'development') {
-      helmArgs.postgresql.image = {
-        registry: 'localhost:5010',
-      };
-      helmArgs.images = {
-        airflow: {
-          repository: 'localhost:5010/airflow',
-        },
-      };
-      helmArgs.httpNas = {
-        image: {
-          registry: 'localhost:5010',
-        },
-      };
-      helmArgs.heartbeat = {
-        image: {
-          registry: 'localhost:5010',
-        },
-      };
+      helmArgs.redactics.env = "development";
+      
       // enable access to logs via web GUI
       helmArgs.workers = {
         persistence: {
