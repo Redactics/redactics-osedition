@@ -1,43 +1,6 @@
 import { Request } from "express"
 
-export interface UserRecord {
-  id?: number;
-  uuid?: string;
-  apiKey?: string;
-  companyId?: number;
-  email: string;
-  password?: string;
-  salt?: string;
-  firstName: string;
-  lastName: string;
-  emailValidated: boolean;
-}
-
-export interface CompanyRecord {
-  name: string;
-  createdByUser?: number;
-  primaryUseCase: string;
-  tosAgree: number;
-}
-
-export interface CompanyUserRecord {
-  userId: number;
-  companyId: number;
-}
-
-export interface CompanyInviteRecord {
-  companyId?: number;
-  email: string;
-}
-
-export interface EmailValidationRecord {
-  userId: number;
-  context: string;
-  expiresAt?: Date;
-}
-
 export interface RedactRulePresetRecord {
-  companyId: number;
   ruleId: number;
   isDefault: boolean;
   presetName: string;
@@ -76,7 +39,6 @@ export interface ScanFieldRecord {
 }
 
 export interface AgentRecord {
-  companyId?: number;
   name: string;
   namespace: string;
   nodeSelector?: string;
@@ -100,7 +62,6 @@ export interface HelmCmdRecord {
 }
 
 export interface WorkflowCreate {
-  companyId: number;
   name: string;
   agentId?: number;
   workflowType: string;
@@ -108,7 +69,6 @@ export interface WorkflowCreate {
 }
 
 export interface WorkflowUpdate {
-  companyId?: number;
   name: string;
   agentId?: number;
   schedule?: string;
@@ -134,7 +94,6 @@ export interface MaskingRule {
 }
 
 export interface RedactRuleRecord {
-  companyId?: number;
   workflowId: number;
   databaseTable: string;
   table: string;
@@ -146,7 +105,6 @@ export interface RedactRuleRecord {
 export interface InputRecord {
   id?: string;
   uuid?: string;
-  companyId?: number;
   inputName: string;
   inputType?: string;
   diskSize?: number;
@@ -203,7 +161,6 @@ export interface DataRepoRecord {
 }
 
 export interface WorkflowJobRecord {
-  companyId?: number;
   workflowId?: number;
   workflowType: string;
   status: string;
@@ -239,9 +196,4 @@ export interface WorkflowJobListEntry {
   progress: number;
   workflowName?: string;
   workflowId?: string;
-}
-
-export interface RedacticsRequest extends Request {
-  currentUser: UserRecord;
-  token?: any;
 }

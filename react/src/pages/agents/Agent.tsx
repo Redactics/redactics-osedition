@@ -289,7 +289,7 @@ class Agent extends React.Component<IProps, IState> {
           <DialogTitle id="delete-agent-title">Delete This Agent?</DialogTitle>
           <DialogContent>
             <DialogContentText id="delete-agent-description">
-              Clicking <b>Delete</b> will delete the settings for this agent, but to remove this agent from your cluster locally, please enter the following (assuming this namespace contains only Redactics assets). Any workflows associated with this agent will need to be reassigned to a new agent for the config to be put to use.
+              Clicking <b>Delete</b> will delete the settings for this agent, but to remove this agent from your cluster locally, please enter the following (assuming this namespace contains only Redactics configurations). Any workflows associated with this agent will need to be reassigned to a new agent for the config to be put to use.
 
               <Box mt={4}>
                 <CopyToClipboard text={uninstallCmd} onCopy={this.props.clipboardCopy}>

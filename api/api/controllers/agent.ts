@@ -3,7 +3,7 @@ import YAML from 'yaml';
 import { formatDistance } from 'date-fns';
 import logger from '../config/winston';
 import {
-  RedacticsRequest, AgentRecord, HelmCmdRecord, HelmCmdHistory, AgentConnection, AgentInputRecord,
+  AgentRecord, HelmCmdRecord, HelmCmdHistory, AgentConnection, AgentInputRecord,
 } from '../types/redactics';
 
 import Agent from '../models/agent';
@@ -25,14 +25,13 @@ function getApiKey(req: Request) {
   return '';
 }
 
-export async function getAgent(req: RedacticsRequest, res: Response) {
+export async function getAgent(req: Request, res: Response) {
   try {
     let agents = await Agent.findAll({
       where: {
         disabled: {
           [Op.not]: true,
         },
-        companyId: req.currentUser.companyId,
       },
       order: [
         ['createdAt', 'ASC'],
@@ -45,7 +44,6 @@ export async function getAgent(req: RedacticsRequest, res: Response) {
         disabled: {
           [Op.not]: true,
         },
-        companyId: req.currentUser.companyId,
       }
     });
 
@@ -53,7 +51,6 @@ export async function getAgent(req: RedacticsRequest, res: Response) {
     agents = agents.map((c: any) => {
       const agent = c.dataValues;
       delete agent.id;
-      delete agent.companyId;
       if (agent.inputs) {
         agent.inputs.forEach((ci:any) => {
           const input = inputs.find((i:any) => {
@@ -74,7 +71,7 @@ export async function getAgent(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function createAgent(req: RedacticsRequest, res: Response) {
+export async function createAgent(req: Request, res: Response) {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -93,7 +90,6 @@ export async function createAgent(req: RedacticsRequest, res: Response) {
     const webserverKey = await crypto.randomBytes(16).toString('hex');
 
     const agent:AgentRecord = req.body;
-    agent.companyId = req.currentUser.companyId;
     agent.fernetKey = fernetKey;
     agent.webserverKey = webserverKey;
     agent.generatedAirflowDBPassword = cryptoRandomString({ length: 24 });
@@ -101,9 +97,30 @@ export async function createAgent(req: RedacticsRequest, res: Response) {
 
     const agentCreate = await Agent.create(agent);
     const response = agentCreate.dataValues;
+
+    // create agentinput records
+    let inputs = await Input.findAll({
+      where: {
+        disabled: {
+          [Op.not]: true,
+        },
+      }
+    })
+    let agentInputPromises:any[] = [];
+    req.body.inputs.forEach((inputUuid:string) => {
+      let input = inputs.find((i:any) => {
+        return (i.dataValues.uuid === inputUuid)
+      });
+      let agentInputRecord:AgentInputRecord = {
+        inputId: input.dataValues.id,
+        agentId: response.id,
+      }
+      agentInputPromises.push(AgentInput.create(agentInputRecord));
+    });
+    await Promise.all(agentInputPromises);
+
     // strip primary key from response since we use UUIDs instead
     delete response.id;
-    delete response.companyId;
 
     return res.send(response);
   } catch (e) {
@@ -112,7 +129,7 @@ export async function createAgent(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function updateAgent(req: RedacticsRequest, res: Response) {
+export async function updateAgent(req: Request, res: Response) {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -123,9 +140,6 @@ export async function updateAgent(req: RedacticsRequest, res: Response) {
         uuid: req.params.uuid,
       },
     });
-    if (agent.dataValues.companyId !== req.currentUser.companyId) {
-      return res.status(403).json({ errors: 'invalid agent' });
-    }
 
     // validate input ids
     const inputs = await Input.findAll({
@@ -133,7 +147,6 @@ export async function updateAgent(req: RedacticsRequest, res: Response) {
         disabled: {
           [Op.not]: true,
         },
-        companyId: req.currentUser.companyId
       }
     });
     const inputUuids:string[] = [];
@@ -175,7 +188,6 @@ export async function updateAgent(req: RedacticsRequest, res: Response) {
 
     // strip primary key from response since we use UUIDs instead
     delete response.id;
-    delete response.companyId;
 
     return res.send(response);
   } catch (e) {
@@ -184,7 +196,7 @@ export async function updateAgent(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function deleteAgent(req: RedacticsRequest, res: Response) {
+export async function deleteAgent(req: Request, res: Response) {
   try {
     // assure agent ownership
     const agent = await Agent.findOne({
@@ -192,9 +204,6 @@ export async function deleteAgent(req: RedacticsRequest, res: Response) {
         uuid: req.params.uuid,
       },
     });
-    if (agent.dataValues.companyId !== req.currentUser.companyId) {
-      return res.status(403).json({ errors: 'invalid agent' });
-    }
 
     // soft delete
     agent.disabled = true;
@@ -287,7 +296,6 @@ export async function heartbeat(req: Request, res: Response) {
     const response = agentUpdate[1].dataValues;
     // strip sensitive/irrelevant data
     delete response.id;
-    delete response.companyId;
     delete response.fernetKey;
 
     return res.send(response);
@@ -297,12 +305,11 @@ export async function heartbeat(req: Request, res: Response) {
   }
 }
 
-export async function helmCmd(req: RedacticsRequest, res: Response) {
+export async function helmCmd(req: Request, res: Response) {
   try {
     const agent = await Agent.findOne({
       where: {
         uuid: req.params.uuid,
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -315,7 +322,6 @@ export async function helmCmd(req: RedacticsRequest, res: Response) {
     const workflows = await Workflow.findAll({
       where: {
         agentId: agent.dataValues.id,
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -451,7 +457,6 @@ export async function helmCmd(req: RedacticsRequest, res: Response) {
         agentId: agent.id,
         cmd: helmCmdString,
         createdAt: new Date(),
-        invokedBy: req.currentUser.id,
       };
       helmCmdRecord = await HelmCmd.create(helmCmdCreate);
     }
@@ -485,11 +490,10 @@ export async function helmCmd(req: RedacticsRequest, res: Response) {
     let invokedBy = '';
     helmCmdList.forEach((c:any) => {
       if (latest || c.dataValues.heartbeat) {
-        invokedBy = `${c.dataValues.User.dataValues.firstName} ${c.dataValues.User.dataValues.lastName}`;
         helmCmdHistory.push({
           uuid: c.dataValues.uuid,
           cmd: c.dataValues.completeCmd,
-          title: latest ? `Latest (${formatDistance(c.dataValues.createdAt, new Date(), { addSuffix: true })}, executed by ${invokedBy})` : `${formatDistance(c.dataValues.createdAt, new Date(), { addSuffix: true })}, executed by ${invokedBy}`,
+          title: latest ? `Latest (${formatDistance(c.dataValues.createdAt, new Date(), { addSuffix: true })}` : `${formatDistance(c.dataValues.createdAt, new Date(), { addSuffix: true })}`,
         });
       }
       latest = false;
@@ -507,12 +511,11 @@ export async function helmCmd(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function helmConfig(req: RedacticsRequest, res: Response) {
+export async function helmConfig(req: Request, res: Response) {
   try {
     const agent = await Agent.findOne({
       where: {
         uuid: req.params.uuid,
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -536,7 +539,6 @@ export async function helmConfig(req: RedacticsRequest, res: Response) {
     const workflows = await Workflow.findAll({
       where: {
         agentId: agent.id,
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -646,29 +648,8 @@ export async function helmConfig(req: RedacticsRequest, res: Response) {
       schema: 'redactics_tmp',
     });
 
-    const regauth:any = {};
-    const auth = `${req.currentUser.email}:${req.currentUser.apiKey}`;
-    let buff = Buffer.from(auth);
-    const authB64 = buff.toString('base64');
-    const registryUrl:string = process.env.DOCKER_REGISTRY_URL || '';
-    regauth[registryUrl] = {};
-    regauth[registryUrl].username = req.currentUser.email;
-    regauth[registryUrl].password = req.currentUser.apiKey;
-    regauth[registryUrl].email = req.currentUser.email;
-    regauth[registryUrl].auth = authB64;
-
-    const dockerconfig:any = {};
-    dockerconfig.auths = regauth;
-
-    const dockerconfigJSON = JSON.stringify(dockerconfig);
-    buff = Buffer.from(dockerconfigJSON);
-    const dockerconfigB64 = buff.toString('base64');
-
     const helmArgs:any = {
-      redactics: {
-        apiKey: req.currentUser.apiKey,
-        dockerconfigjson: dockerconfigB64,
-      },
+      redactics: {},
       airflow: {
         fernetKey: agent.dataValues.fernetKey,
         webserverSecretKey: agent.dataValues.webserverKey,
@@ -730,7 +711,6 @@ export async function helmConfig(req: RedacticsRequest, res: Response) {
     const helmConfigYAML = YAML.stringify(helmArgs);
     const helmConfigObj:any = YAML.parseDocument(helmConfigYAML.replace(/httpNas/g, 'http-nas'));
     // console.log(helmConfigObj.contents.items)
-    helmConfigObj.contents.items[0].value.items[1].value.comment = ' Redactics Docker registry config';
     helmConfigObj.contents.items[1].value.items[0].value.comment = ' used for encrypting your input credentials (do not alter)';
     helmConfigObj.contents.items[1].value.items[1].value.comment = ' for web and other security related functions (do not alter)';
 

@@ -13,7 +13,6 @@ export async function getInputs(req: RedacticsRequest, res: Response) {
   try {
     let inputs = await Input.findAll({
       where: {
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -28,7 +27,6 @@ export async function getInputs(req: RedacticsRequest, res: Response) {
     inputs = inputs.map((i:any) => {
       let inputRecord:InputRecord = i.dataValues;
       delete inputRecord.id;
-      delete inputRecord.companyId;
       return inputRecord;
     })
 
@@ -48,7 +46,6 @@ export async function saveInputs(req: RedacticsRequest, res: Response) {
     const inputUuids:string[] = [];
     const inputs = await Input.findAll({
       where: {
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -61,7 +58,6 @@ export async function saveInputs(req: RedacticsRequest, res: Response) {
     const savedInputs:string[] = [];
     Object.values(req.body.inputs).forEach((i:any) => {
       const inputRecord:InputRecord = {
-        companyId: req.currentUser.companyId,
         inputName: i.inputName,
         inputType: i.inputType,
         exportData: i.exportData,

@@ -96,9 +96,7 @@ interface IState {
   showSaveSnackbar: boolean;
   agentName: string;
   nodeSelector: string;
-  applyAgentInstallOption: string;
-  helmArgs: any;
-  showAuthCmdsDialog: boolean;
+  selectedInputs: string[];
   showInstallAgentDialog: boolean;
 }
 
@@ -128,20 +126,17 @@ class Agents extends React.Component<IProps, IState> {
       disableCancel: false,
       agentName: '',
       nodeSelector: '',
-      applyAgentInstallOption: '',
-      helmArgs: {},
+      selectedInputs: [],
       errors: {
         agentName: false,
         namespace: false,
         configPath: false,
         illegalChars: ''
       },
-      showAuthCmdsDialog: false,
       showInstallAgentDialog: false,
     };
 
     this.handleChange = this.handleChange.bind(this);
-    this.handleAuthCmds = this.handleAuthCmds.bind(this);
     this.handleInstallAgent = this.handleInstallAgent.bind(this);
     this.handleClose = this.handleClose.bind(this);
     this.handleErrors = this.handleErrors.bind(this);
@@ -184,8 +179,15 @@ class Agents extends React.Component<IProps, IState> {
       });
       const data = await response.json();
 
+      // select all possible inputs for initial state
+      let selectedInputs:string[] = [];
+      data.inputs.forEach((input:InputRecord) => {
+        selectedInputs.push(input.uuid);
+      });
+
       this.setState({
         inputs: data.inputs,
+        selectedInputs,
       })
     } catch (err) {
       // console.log(err);
@@ -218,6 +220,7 @@ class Agents extends React.Component<IProps, IState> {
         method: 'delete',
       });
       this.fetchAgents();
+      this.fetchInputs();
     } catch (err) {
       // console.log('CATCH ERR', error);
     }
@@ -225,7 +228,20 @@ class Agents extends React.Component<IProps, IState> {
 
   handleChange(event:any) {
     const state:any = {};
-    state[event.target.name] = event.target.value;
+    if (event.target.name.match(/^inputsource_/)) {
+      const inputUuid = event.target.name.replace(/^inputsource_/, '');
+      if (event.target.checked && !state.selectedInputs.includes(inputUuid)) {
+        state.selectedInputs.push(inputUuid);
+      }
+      else {
+        state.selectedInputs = state.selectedInputs.filter((uuid:string) => {
+          return (uuid !== inputUuid)
+        });
+      }
+    }
+    else {
+      state[event.target.name] = event.target.value;
+    }
 
     this.setState(state);
   }
@@ -299,12 +315,6 @@ class Agents extends React.Component<IProps, IState> {
     return errorsFound;
   }
 
-  handleAuthCmds() {
-    this.setState({
-      showAuthCmdsDialog: true
-    })
-  }
-
   handleInstallAgent() {
     this.setState({
       showInstallAgentDialog: true,
@@ -318,7 +328,6 @@ class Agents extends React.Component<IProps, IState> {
 
   handleClose() {
     this.setState({
-      showAuthCmdsDialog: false,
       showInstallAgentDialog: false,
     });
   }
@@ -404,16 +413,12 @@ class Agents extends React.Component<IProps, IState> {
           namespace: this.state.namespace,
           nodeSelector,
           configPath: this.state.configPath,
+          inputs: this.state.selectedInputs,
         }),
       });
 
-      const data = await response.json();
-
-      const { agents } = this.state;
-      agents.push(data);
-
+      this.fetchAgents();
       state.showInstallAgentDialog = false;
-      state.showAuthCmdsDialog = (agents.length === 1) ? true : false;
 
       this.setState(state);
     } catch (err) {
@@ -533,6 +538,7 @@ class Agents extends React.Component<IProps, IState> {
                     name={("inputsource_" + input.uuid)}
                     color="primary"
                     onChange={this.handleChange}
+                    checked={this.state.selectedInputs.includes(input.uuid)}
                   />
                 }
                 label={input.inputName}
@@ -551,92 +557,6 @@ class Agents extends React.Component<IProps, IState> {
   }
 
   /* eslint-disable max-len */
-
-  showAuthenticationCmds() {
-    const cmd = `helm repo add redactics ${this.context.chartMuseumUrl}`;
-    const dockerLogin = `docker login ${this.context.dockerRegistryUrl} -u ${this.context.email}`;
-
-    return (
-      <Box>
-        <Grid
-          justify="space-between"
-          container
-          spacing={10}
-        >
-
-          <Grid item xs={1}>
-            <Typography variant="h1">
-              1
-            </Typography>
-          </Grid>
-
-          <Grid item xs={11}>
-            <p>
-              Add the Redactics Chartmuseum repo to your local Helm config. This allows Helm to pull the Redactics Helm chart from this repo.
-            </p>
-
-            <Box mt={4}>
-              <CopyToClipboard text={cmd} onCopy={this.clipboardCopy}>
-                <Button variant="outlined" size="small" color="secondary"><ClipboardIcon /></Button>
-              </CopyToClipboard>
-
-              <pre>
-                {cmd}
-              </pre>
-            </Box>
-            
-          </Grid>
-        </Grid>
-
-        <Grid
-          justify="space-between"
-          container
-          spacing={10}
-        >
-          <Grid item xs={1}>
-            <Typography variant="h1">
-              2
-            </Typography>
-          </Grid>
-
-          <Grid item xs={11}>
-            <p>
-              Authenticate to the Redactics registry. This will allow your Kubernetes cluster to pull the required Redactics container images from this registry.
-            </p>
-
-            <Box mt={4}>
-              <CopyToClipboard text={dockerLogin} onCopy={this.clipboardCopy}>
-                <Button variant="outlined" size="small" color="secondary"><ClipboardIcon /></Button>
-              </CopyToClipboard>
-
-              <pre>
-                {dockerLogin}
-              </pre>
-            </Box>
-
-            <Box>
-              <p>When prompted for your password your password is your Redactics API key:</p>
-
-              <CopyToClipboard text={this.context.apiKey} onCopy={this.clipboardCopy}>
-                <Button variant="outlined" size="small" color="secondary"><ClipboardIcon /></Button>
-              </CopyToClipboard>
-
-              <pre>
-                {this.context.apiKey}
-              </pre>
-            </Box>
-          </Grid>
-        </Grid>
-
-        <DialogActions>
-          <Button color="secondary" variant="contained" onClick={this.handleClose}>
-            Okay
-          </Button>
-        </DialogActions>
-      </Box>
-    )
-  }
-
   /* eslint-disable no-restricted-syntax */
 
   getAgentHeartbeatData() {
@@ -676,19 +596,6 @@ class Agents extends React.Component<IProps, IState> {
 
     return (
       <React.Fragment>
-        <Dialog
-          open={this.state.showAuthCmdsDialog}
-          onClose={this.handleClose}
-          aria-labelledby="dialog-title"
-          aria-describedby="dialog-description"
-          maxWidth={this.state.configMaxWidth}
-        >
-          <DialogTitle id="dialog-title">Authentication Instructions</DialogTitle>
-          <DialogContent>
-            {this.showAuthenticationCmds()}
-          </DialogContent>
-        </Dialog>
-
         <Dialog
           open={this.state.showInstallAgentDialog}
           onClose={this.handleClose}
@@ -731,10 +638,6 @@ class Agents extends React.Component<IProps, IState> {
 
             <Grid item>
               <Box mb={4}>
-              <Button variant="contained" color="secondary" size="small" onClick={this.handleAuthCmds}>
-                  <LockOpenIcon />
-                  Authentication Instructions
-                </Button>&nbsp;
                 <Button variant="contained" color="secondary" size="small" onClick={this.handleInstallAgent}>
                   <AddIcon />
                   Install New Agent
