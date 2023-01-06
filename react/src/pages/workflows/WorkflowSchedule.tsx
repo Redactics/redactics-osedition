@@ -58,14 +58,6 @@ interface IState {
 }
 
 class DatabaseSchedule extends React.Component<IProps, IState> {
-  disabledAlert(workflowType:string) {
-    return (workflowType === "multiTenantWebERL") ? (
-      <Box mb={4}>
-        <InfoIcon style={{ color: blue[500], fontSize: 25 }} /> <b>Scheduling is not supported with web-based workflows, this job will run immediately once you click the "Save and Run Workflow" button, below.</b>
-      </Box>
-    ) : null;
-  }
-
   render() {
     return (
       <React.Fragment>
@@ -75,10 +67,9 @@ class DatabaseSchedule extends React.Component<IProps, IState> {
           </Typography>
 
           <Box mt={4}>
-            {this.disabledAlert(this.props.workflowType)}
             <RadioGroup aria-label="exportSchedule" name="exportSchedule" onChange={this.props.handleExportSchedule} value={String(this.props.exportSchedule)}>
-              <FormControlLabel disabled={this.props.workflowType === "multiTenantWebERL"} value="false" control={<Radio />} label="Do Not Automate Workflow" />
-              <FormControlLabel disabled={this.props.workflowType === "multiTenantWebERL"} value="true" control={<Radio />} label="Schedule/Automate Workflow" />
+              <FormControlLabel value="false" control={<Radio />} label="Do Not Automate Workflow" />
+              <FormControlLabel value="true" control={<Radio />} label="Schedule/Automate Workflow" />
             </RadioGroup>
           </Box>
 

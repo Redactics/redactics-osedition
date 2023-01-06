@@ -75,7 +75,7 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
       return (
         <Box>
           <Button variant="contained" color="secondary" size="small" onClick={this.props.addMaskingRule}>
-            <AddIcon />&nbsp;&nbsp;Add Database Field Containing PII
+            <AddIcon />&nbsp;&nbsp;Add Table Field Containing PII
           </Button>
         </Box>
       )
@@ -89,7 +89,7 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                 <TableCell style={{ paddingLeft: 0 }}>
                   <FormControl variant="outlined" margin="dense">
                     <InputLabel>
-                      Database and Table Name
+                      Input and Table Name
                     </InputLabel>
                     <Select
                       value={row.databaseTable}

@@ -243,10 +243,10 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                 <TableCell>{this.dataFeedName(df.dataFeed)}</TableCell>
                 <TableCell>{this.dataFeedSummary(df)}</TableCell>
                 <NWTableCell>
-                  <Button disabled={this.props.workflow.workflowType === "multiTenantWebERL"} variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditDataFeed(df)}>
+                  <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditDataFeed(df)}>
                     <EditIcon/>&nbsp;Edit
                   </Button>&nbsp;
-                  <Button disabled={this.props.workflow.workflowType === "multiTenantWebERL"} variant="contained" color="default" size="small" onClick={() => this.props.deleteDataFeed(df)}>
+                  <Button variant="contained" color="default" size="small" onClick={() => this.props.deleteDataFeed(df)}>
                     <DeleteIcon />&nbsp;Delete
                   </Button>
                 </NWTableCell>
@@ -300,14 +300,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
     };
   }
 
-  disabledAlert(workflowType:string) {
-    return (workflowType === "multiTenantWebERL") ? (
-      <Box mt={4}>
-        <InfoIcon style={{ color: blue[500], fontSize: 25 }} /> <b>Definable Data Feeds are not supported with web-based workflows.</b>
-      </Box>
-    ) : null;
-  }
-
   render() {
     const namespaceTip = this.props.dataFeed.feedSecrets.length ? (
       <p>
@@ -336,7 +328,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                 {this.showErrors()}
 
                 <Box display={(this.props.dataFeed.dataFeed === '') ? 'block' : 'none'}>
-                  {this.disabledAlert(this.props.workflow.workflowType)}
                   <List component="nav" aria-label="data feed selection">
                     <ListItem disabled={!(this.props.workflow.workflowType === "ERL")} button onClick={() => this.props.handleDataFeed('dataRepository')}>
                       <ListItemText

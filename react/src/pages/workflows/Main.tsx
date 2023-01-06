@@ -214,17 +214,9 @@ class Workflows extends React.Component<IProps, IState> {
       });
 
       const data = await response.json();
-      const { workflows } = this.state;
-      if (this.state.newWorkflowType === "multiTenantWebERL") {
-        // handle preset input
-        data.inputs[0].tables.forEach((table:string) => {
-          data.allDatabaseTables.push(data.inputs[0].inputName + ": " + table);
-        })
-      }
-      workflows.push(data);
+      this.refreshWorkflows();
 
       this.setState({
-        workflows,
         newWorkflowDialog: false,
         newWorkflowName: '',
         newWorkflowAgent: '',
@@ -445,7 +437,6 @@ class Workflows extends React.Component<IProps, IState> {
                     }
                   >
                     <MenuItem key="ERL" value="ERL">ERL (Extract, Redact, Load)</MenuItem>
-                    <MenuItem key="multiTenantWebERL" value="multiTenantWebERL">Web-based ERL Testing</MenuItem>
                     <MenuItem key="mockDatabaseMigration" value="mockDatabaseMigration">Database Clone for Migration Dry-run</MenuItem>
                   </Select>
                 </FormControl>

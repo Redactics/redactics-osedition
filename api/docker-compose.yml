@@ -24,18 +24,11 @@ services:
       PGPASSWORD: postgres
       PGDATABASE: postgres
       PGPORT: 5432
-      JWT_SECRET: NCjN+wr3uSB4XGcXTXBCvZ4FyrkXMsXBo3KbIOlksHKuntMVK0Txo4lrBdqdO2byZnxyxUI+I+Uq3iLIWDYvbg==
-      JWT_TTL: 7d
-      COOKIE_MAX_AGE: "604800000" # 1 week
-      DOCKER_REGISTRY_URL: http://localhost:5000
       CHARTMUSEUM_URL: http://localhost:8090
       WEB_URL: http://localhost:8000
       LATEST_CHART_VERSION: 3.0.0
       CLI_URL: https://github.com/Redactics/cli/archive/refs/tags/2.4.0.zip
       CLI_VERSION: 2.4.0
-      AIRFLOW_API_URL: "http://host.docker.internal:8080" # Kubernetes port forwarding
-      AIRFLOW_BASIC_AUTH_USER: "airflow"
-      AIRFLOW_BASIC_AUTH_PASS: "gpqCxqMbsEwksE]=Engbyh4U"
     volumes:
       - .:/src
     links:

@@ -202,13 +202,6 @@ class JobListing extends React.Component<IProps, IState> {
 
   workflowType(job:WorkflowJob) {
     switch (job.workflowType) {
-      case 'multiTenantWebERL':
-        return (
-          <Typography variant="h5" gutterBottom>
-            Web-based ERL Testing
-          </Typography>
-        )
-
       case 'ERL':
         return (
           <Typography variant="h5" gutterBottom>

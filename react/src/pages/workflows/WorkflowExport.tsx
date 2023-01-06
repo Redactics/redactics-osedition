@@ -125,21 +125,12 @@ class WorkflowExport extends React.Component<IProps, IState> {
     )
   }
 
-  disabledAlert(workflowType:string) {
-    return (workflowType === "multiTenantWebERL") ? (
-      <Box mt={4}>
-        <InfoIcon style={{ color: blue[500], fontSize: 25 }} /> <b>Web-based workflows only support exporting all rows, and not rows from a specific time period.</b>
-      </Box>
-    ) : null;
-  }
-
   displayRowsData() {
     const table = this.props.currentDatabaseTable;
     if (!this.props.tableOutputOptions[table]) { return; }
 
     return (
       <Box mt={4}>
-          {this.disabledAlert(this.props.workflow.workflowType)}
          <RadioGroup aria-label="exportRows" name="exportRows" value={this.props.tableOutputOptions[table].exportRows} onChange={(event) => this.props.handleTableOutputChanges(event, table)}>
           <FormControlLabel value="all" control={<Radio />} label="All Rows" />
           <FormControlLabel disabled={!(this.props.workflow.workflowType === "ERL")} value="specific" control={<Radio />} label="Rows From a Specific Time Period" />

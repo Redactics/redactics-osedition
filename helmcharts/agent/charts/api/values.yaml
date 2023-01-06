@@ -1,0 +1,37 @@
+env: public
+replicas: 1
+
+image:
+  repository: redactics/api
+  tag: latest
+  pullPolicy: Always
+
+probes:
+  readinessProbe:
+    initialDelaySeconds: 15
+  livenessProbe:
+    initialDelaySeconds: 30
+
+ingress:
+  enabled: false
+
+postgres:
+  host: redactics-postgresql
+  user: postgres
+  port: 5432
+  password: postgres
+  database: redactics
+
+redactics:
+  chartMuseumUrl: https://chartmuseum.redactics.com
+  webUrl: https://app.redactics.com
+  cliUrl: https://github.com/Redactics/cli/archive/refs/tags/2.4.0.zip
+  cliVersion: 2.4.0
+
+resources:
+  limits:
+    cpu: 250m
+    memory: 1Gi
+  requests:
+    cpu: 10m
+    memory: 250Mi

@@ -117,12 +117,8 @@ interface IState {
   scheduleSelection: string;
   schedule: string;
   exportSchedule: boolean;
-  userSearchEmailField: string;
-  userSearchEmailDBTable: string;
-  userSearchEmailColumn: string;
   maskingRuleValues: RedactRule[];
   maskingRules: RedactRule[];
-  generateSoftDeleteQueries: boolean;
   numMaskingRules: number;
   newRuleKey: number;
   input: WorkflowInputRecord;
@@ -132,7 +128,6 @@ interface IState {
   newInputKey: number;
   newDataFeedKey: number;
   addTable: string;
-  missingInput: boolean;
   transformExpanded: boolean;
   outputExpanded: boolean;
   allDatabaseTables: string[];
@@ -198,13 +193,10 @@ class Workflow extends React.Component<IProps, IState> {
     this.deleteExportTableColumn = this.deleteExportTableColumn.bind(this);
     this.handleTableOutputChanges = this.handleTableOutputChanges.bind(this);
     this.validateOutputSettings = this.validateOutputSettings.bind(this);
-    this.validateForgetUserFields = this.validateForgetUserFields.bind(this);
     this.deleteWorkflowConfirmation = this.deleteWorkflowConfirmation.bind(this);
     this.cancelWorkflowConfirmation = this.cancelWorkflowConfirmation.bind(this);
     this.clipboardCopy = this.clipboardCopy.bind(this);
     this.handleSnackbarClose = this.handleSnackbarClose.bind(this);
-    this.handleSoftDeletionFields = this.handleSoftDeletionFields.bind(this);
-    this.handleSoftDeleteEmailAddressField = this.handleSoftDeleteEmailAddressField.bind(this);
     this.markAddToS3UploadList = this.markAddToS3UploadList.bind(this);
     this.addAllToS3UploadList = this.addAllToS3UploadList.bind(this);
     this.getExportFileNames = this.getExportFileNames.bind(this);
@@ -250,30 +242,14 @@ class Workflow extends React.Component<IProps, IState> {
       });
     }
 
-    // const availableUserEmailRelations:string[] = [];
-    // if (this.props.workflow.redactrules && this.props.workflow.redactrules.length) {
-    //   const userSearchEmailField = (this.props.workflow.userSearchEmailField) ? this.props.workflow.userSearchEmailField.split('.')[0] : '';
-    //   const usedTables = (this.props.workflow.userSearchEmailRelations && this.props.workflow.userSearchEmailRelations.length) ? this.props.workflow.userSearchEmailRelations.map((r:string) => r.split('.')[0]) : [];
-    //   this.props.workflow.redactrules.forEach((rule:RedactRule) => {
-    //     if (rule.table !== userSearchEmailField && !usedTables.includes(rule.table)
-    //       && !availableUserEmailRelations.includes(rule.table)) {
-    //       availableUserEmailRelations.push(rule.table);
-    //     }
-    //   });
-    // }
-
     const thisAgentSearch = this.props.agents.find(
       (a:AgentRecord) => ((a.uuid === this.props.workflow.agentId)),
     );
     const agentNamespace = (thisAgentSearch) ? thisAgentSearch.namespace : '';
 
-    const userSearchEmailDBTable = (this.props.workflow.userSearchEmailField) ? this.props.workflow.userSearchEmailDBTable : '';
-    const userSearchEmailColumn = (this.props.workflow.userSearchEmailField) ? this.props.workflow.userSearchEmailColumn : '';
-
     const state:IState = {
       agentId: this.props.workflow.agentId,
       newRuleKey: 0,
-      missingInput: (this.props.workflow.allDatabaseTables && this.props.workflow.allDatabaseTables.length) ? false : true,
       transformExpanded: (this.props.workflow.allDatabaseTables && this.props.workflow.allDatabaseTables.length) ? true : false,
       outputExpanded: false,
       allDatabaseTables: this.props.workflow.allDatabaseTables,
@@ -300,10 +276,6 @@ class Workflow extends React.Component<IProps, IState> {
       schedule: this.props.workflow.schedule || 'None',
       tableOutputOptions: [],
       exportTableDataConfig: this.props.workflow.exportTableDataConfig || [],
-      generateSoftDeleteQueries: this.props.workflow.generateSoftDeleteQueries || false,
-      userSearchEmailField: this.props.workflow.userSearchEmailField || '',
-      userSearchEmailDBTable: userSearchEmailDBTable || "",
-      userSearchEmailColumn: userSearchEmailColumn || "",
       addTable: '',
       displayExportTableSchema: 'none',
       displayExportTableData: 'none',
@@ -505,25 +477,6 @@ class Workflow extends React.Component<IProps, IState> {
     // console.log(maskingRuleValues)
   }
 
-  // saveFeedback() {
-  //   let showDialog = (this.state.numInputs === this.state.inputs.length) ? false : true;
-  //   const digitalTwinAdded = this.state.dataFeeds.find((df:DataFeed) => {
-  //     return (df.dataFeed === "digitalTwin" && df.uuid.match(/^new/)) ? true : false;
-  //   }) ? true : false;
-  //   if (digitalTwinAdded) { showDialog = true; }
-
-  //   this.setState({
-  //     showDialog,
-  //   });
-
-  //   if (showDialog) {
-  //     return 'dialog';
-  //   }
-  //   else {
-  //     return 'snackbar';
-  //   }
-  // }
-
   async saveChanges(workflowId:string) {
     // console.log(this.state);
 
@@ -556,10 +509,6 @@ class Workflow extends React.Component<IProps, IState> {
       maskingRules: this.state.maskingRuleValues,
       schedule: this.state.schedule,
       exportTableDataConfig: [dataConfig],
-      generateSoftDeleteQueries: !!(this.state.generateSoftDeleteQueries),
-      userSearchEmailField: this.state.userSearchEmailField,
-      userSearchEmailDBTable: this.state.userSearchEmailDBTable,
-      userSearchEmailColumn: this.state.userSearchEmailColumn,
       deltaUpdateField: this.state.deltaUpdateField,
       migrationNamespace: this.props.workflow.migrationNamespace,
       migrationDatabase: this.props.workflow.migrationDatabase,
@@ -572,7 +521,7 @@ class Workflow extends React.Component<IProps, IState> {
     //console.log(this.state);
 
     if (this.validateRedactionRules() && this.validateOutputSettings() && 
-      this.validateForgetUserFields() && this.validateMigrationMockFields()) {
+      this.validateMigrationMockFields()) {
       try {
         const response = await fetch(`${this.context.apiUrl}/workflow/${workflowId}`, {
           method: 'put',
@@ -628,12 +577,6 @@ class Workflow extends React.Component<IProps, IState> {
               columnExclusionProhibited: true,
             });
           }
-          return;
-        }
-
-        if (this.props.workflow.workflowType === "multiTenantWebERL") {
-          // redirect to jobs page
-          window.location.href = "/workflows/jobs";
           return;
         }
 
@@ -693,9 +636,18 @@ class Workflow extends React.Component<IProps, IState> {
     });
   }
 
+  missingInput() {
+    let tablesProvided = false;
+    const inputs = this.props.workflow.inputs.find((input:WorkflowInputRecord) => {
+      if (input.tables && input.tables.length) { tablesProvided = true; }
+      return (input.enabled === true)
+    });
+    return (inputs && tablesProvided) ? false : true;
+  }
+
   validateRedactionRules() {
     // skip validation if GUI disabled
-    if (this.state.missingInput) { return true; }
+    if (this.missingInput()) { return true; }
 
     const rules:string[] = [];
     let dupeRedactRuleFound = false;
@@ -753,20 +705,6 @@ class Workflow extends React.Component<IProps, IState> {
         invalidOutputSettingField: true
       })
       return false;
-    }
-
-    return true;
-  }
-
-  validateForgetUserFields() {
-    if (this.state.generateSoftDeleteQueries) {
-      if (!this.state.userSearchEmailDBTable || !this.state.userSearchEmailColumn || 
-        !this.legalName(this.state.userSearchEmailColumn)) {
-        this.setState({
-          invalidForgetUserFields: true
-        })
-        return false;
-      }
     }
 
     return true;
@@ -995,38 +933,6 @@ class Workflow extends React.Component<IProps, IState> {
     );
   }
 
-  handleSoftDeletionFields(event:any) {
-    const state:any = {};
-    if (event.target.name === 'generateSoftDeleteQueries') {
-      state[event.target.name] = event.target.checked;
-    } else {
-      state[event.target.name] = event.target.value;
-    }
-
-    this.setState(state);
-  }
-
-  handleSoftDeleteEmailAddressField(event:any) {
-    const state:IState = this.state;
-    let tableName:string = "";
-    if (event.target.name === "userSearchEmailDBTable") {
-      let tableArr:string[] = event.target.value.split(': ');
-      tableName = tableArr[(tableArr.length - 1)];
-
-      state.userSearchEmailField = tableName + "." + state.userSearchEmailColumn;
-      state.userSearchEmailDBTable = event.target.value;
-    }
-    else if (event.target.name === "userSearchEmailColumn") {
-      let tableArr:string[] = state.userSearchEmailDBTable.split(': ');
-      tableName = tableArr[(tableArr.length - 1)];
-
-      state.userSearchEmailField = tableName + "." + event.target.value;
-      state.userSearchEmailColumn = event.target.value;
-    }
-
-    this.setState(state);
-  }
-
   markAddToS3UploadList(event:any, fileName:string) {
     const state:IState = this.state;
 
@@ -1137,6 +1043,7 @@ class Workflow extends React.Component<IProps, IState> {
 
   triggerEditInputDialog(input:WorkflowInputRecord, workflowType:string) {
     // dereference
+    console.log("INPUT", input);
     const inputCopy:WorkflowInputRecord = {
       inputName: input.inputName,
       uuid: input.uuid,
@@ -1232,12 +1139,11 @@ class Workflow extends React.Component<IProps, IState> {
       });
     })
 
-    state.missingInput = (state.inputs.length) ? false : true;
+    const missingInput = this.missingInput();
 
     this.setState({
-      transformExpanded: (state.missingInput) ? false : true,
-      outputExpanded: (state.missingInput) ? false : true,
-      missingInput: state.missingInput,
+      transformExpanded: (missingInput) ? false : true,
+      outputExpanded: (missingInput) ? false : true,
       allDatabaseTables: state.allDatabaseTables,
       inputs: state.inputs
     });
@@ -1323,7 +1229,6 @@ class Workflow extends React.Component<IProps, IState> {
 
     if (this.state.input.uuid.match(/^new/)) {
       this.setState({
-        missingInput: false,
         tableOutputOptions: state.tableOutputOptions,
         allDatabaseTables: state.allDatabaseTables,
         errors: state.errors,
@@ -1335,7 +1240,6 @@ class Workflow extends React.Component<IProps, IState> {
     }
     else {
       this.setState({
-        missingInput: false,
         maskingRuleValues: state.maskingRuleValues,
         numMaskingRules: state.numMaskingRules,
         allDatabaseTables: state.allDatabaseTables,
@@ -1472,14 +1376,12 @@ class Workflow extends React.Component<IProps, IState> {
 
   transformExpansion(event:any, expanded:boolean) {
     this.setState({
-      //transformExpanded: (expanded && !this.state.missingInput) ? true : false
       transformExpanded: (expanded) ? true : false
     })
   }
 
   outputExpansion(event:any, expanded:boolean) {
     this.setState({
-      //outputExpanded: (expanded && !this.state.missingInput) ? true : false
       outputExpanded: (expanded) ? true : false
     })
   }
@@ -1702,9 +1604,6 @@ class Workflow extends React.Component<IProps, IState> {
       case 'ERL':
       return 'ERL (Extract, Redact, Load)';
 
-      case 'multiTenantWebERL':
-      return 'Web-based ERL Testing (Multi-tenant)';
-
       case 'mockDatabaseMigration':
       return 'Database Clone for Migration Dry-run';
 
@@ -1812,9 +1711,9 @@ class Workflow extends React.Component<IProps, IState> {
           </Box>
                   
 
-          <Box mt={4} display={(this.props.workflow.workflowType.match(/^(ERL|multiTenantWebERL)/)) ? 'block' : 'none'}>
+          <Box mt={4} display={(this.props.workflow.workflowType.match(/^ERL/)) ? 'block' : 'none'}>
             <Paper variant="outlined">
-              <ExpansionPanel disabled={this.state.missingInput} expanded={this.state.transformExpanded} onChange={(event, expanded) => this.transformExpansion(event, expanded)}>
+              <ExpansionPanel disabled={this.missingInput()} expanded={this.state.transformExpanded} onChange={(event, expanded) => this.transformExpansion(event, expanded)}>
                 <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>Processing/Transformation Settings</Typography>
                 </ExpansionPanelSummary>
@@ -1840,24 +1739,12 @@ class Workflow extends React.Component<IProps, IState> {
                     workflowType={this.props.workflow.workflowType}
                     errors={this.state.errors}
                   />
-
-                  {/* <WorkflowCompliance
-                    generateSoftDeleteQueries={this.state.generateSoftDeleteQueries}
-                    handleSoftDeletionFields={this.handleSoftDeletionFields}
-                    handleSoftDeleteEmailAddressField={this.handleSoftDeleteEmailAddressField}
-                    maskingRuleValues={this.state.maskingRuleValues}
-                    userSearchEmailField={this.state.userSearchEmailField}
-                    allDatabaseTables={this.state.allDatabaseTables}
-                    userSearchEmailDBTable={this.state.userSearchEmailDBTable}
-                    userSearchEmailColumn={this.state.userSearchEmailColumn}
-                    workflowType={this.props.workflow.workflowType}
-                  /> */}
                 </ExpansionPanelDetails>
               </ExpansionPanel>
             </Paper>
           </Box>
 
-          <Box mt={4} display={(this.props.workflow.workflowType.match(/^(ERL|multiTenantWebERL)/)) ? 'block' : 'none'}>
+          <Box mt={4} display={(this.props.workflow.workflowType.match(/^ERL/)) ? 'block' : 'none'}>
             <Paper variant="outlined">
               <ExpansionPanel disabled={(this.state.allDatabaseTables && this.state.allDatabaseTables.length) ? false : true} expanded={this.state.outputExpanded} onChange={(event, expanded) => this.outputExpansion(event, expanded)}>
                 <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
@@ -1937,8 +1824,7 @@ class Workflow extends React.Component<IProps, IState> {
           >
             <Grid item xs={10}>
               <Button variant="contained" color="primary" size="large" disabled={this.state.saveButtonDisabled} onClick={() => this.saveChanges(this.props.workflow.uuid)}>
-                <SaveIcon />&nbsp;
-                {(this.props.workflow.workflowType === "multiTenantWebERL") ? 'Save and Run Workflow' : 'Save Changes'}
+                <SaveIcon />&nbsp;Save Changes
               </Button>
             </Grid>
             <Grid item>

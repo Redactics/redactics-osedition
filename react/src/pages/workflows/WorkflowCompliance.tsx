@@ -58,14 +58,6 @@ interface IState {}
 class DatabaseCompliance extends React.Component<IProps, IState> {
   /* eslint-disable max-len */
 
-  disabledAlert(workflowType:string) {
-    return (workflowType === "multiTenantWebERL") ? (
-      <Box mb={4}>
-        <InfoIcon style={{ color: blue[500], fontSize: 25 }} /> <b>This feature is not supported with web-based workflows.</b>
-      </Box>
-    ) : null;
-  }
-
   render() {
     return (
       <React.Fragment>
@@ -76,7 +68,6 @@ class DatabaseCompliance extends React.Component<IProps, IState> {
                 Forget User Request Settings  
               </Typography>
               <Box mt={2}>
-                {this.disabledAlert(this.props.workflowType)}
                 <Typography variant="body1" gutterBottom>
                   Using the <Link href="/developers" target="_blank">Redactics Agent CLI</Link> you can search for specific users (using their email address) and generate SQL queries for soft deletion (removing PII using the rules defined by this workflow). Click <Link href='/usecases/forgetuser'>here</Link> for more information about how these features work.
                 </Typography>

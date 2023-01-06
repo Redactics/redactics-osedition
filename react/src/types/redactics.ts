@@ -121,10 +121,6 @@ export interface WorkflowUpdate {
   migrationHelmHookWeight?: string;
   // TODO: table data config type
   exportTableDataConfig: any;
-  generateSoftDeleteQueries: boolean;
-  userSearchEmailField?: string;
-  userSearchEmailDBTable?: string;
-  userSearchEmailColumn?: string;
 }
 
 export interface WorkflowRecord extends WorkflowUpdate {

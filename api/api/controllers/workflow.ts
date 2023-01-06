@@ -4,8 +4,8 @@ import Workflow from '../models/workflow';
 import logger from '../config/winston';
 import sequelize from '../db/sequelize';
 import {
-  RedacticsRequest, WorkflowCreate, WorkflowUpdate, AirflowException, OutputMetadata,
-  TaskStart, RedactRuleRecord, InputRecord, WorkflowInputRecord, WorkflowJobRecord, WorkflowJobListEntry,
+  WorkflowCreate, WorkflowUpdate, AirflowException, OutputMetadata,
+  TaskStart, RedactRuleRecord, WorkflowInputRecord, WorkflowJobRecord, WorkflowJobListEntry,
 } from '../types/redactics';
 
 // models
@@ -30,7 +30,7 @@ function getApiKey(req: Request) {
   return '';
 }
 
-export async function getWorkflows(req: RedacticsRequest, res: Response) {
+export async function getWorkflows(req: Request, res: Response) {
   try {
     let redactrulesets = await RedactRuleset.findAll({});
     // type indexedArray
@@ -40,11 +40,7 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
       redactrules[c.id] = c.redactKey;
     });
 
-    let presets = await RedactRulePreset.findAll({
-      where: {
-        companyId: req.currentUser.companyId,
-      },
-    });
+    let presets = await RedactRulePreset.findAll({});
     // type indexedArray
     const presetrules: { [key: number]: string } = {};
 
@@ -57,7 +53,6 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
         disabled: {
           [Op.not]: true,
         },
-        companyId: req.currentUser.companyId,
       },
       order: [
         ['createdAt', 'ASC'],
@@ -67,7 +62,6 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
 
     let agents = await Agent.findAll({
       where: {
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -84,14 +78,12 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
       agentIdKeys.push(a.dataValues.id);
       agentNames[a.dataValues.id] = a.dataValues.name;
       delete a.dataValues.id;
-      delete a.dataValues.companyId;
 
       return a.dataValues;
     });
 
     let allInputs = await Input.findAll({
       where: {
-        companyId: req.currentUser.companyId,
         disabled: {
           [Op.not]: true,
         },
@@ -116,7 +108,6 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
     presets = presets.map((ps: any) => {
       const p = ps;
       delete p.dataValues.id;
-      delete p.dataValues.companyId;
       p.dataValues.rule = redactrules[p.dataValues.ruleId];
       delete p.dataValues.ruleId;
 
@@ -127,7 +118,6 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
       const d = db;
       const { agentId } = d.dataValues;
       delete d.dataValues.id;
-      delete d.dataValues.companyId;
       // replace with UUID
       d.dataValues.agentId = agentIds[agentId];
       // attach agent name for display purposes
@@ -136,7 +126,6 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
         const r = rr;
         delete r.dataValues.id;
         delete r.dataValues.workflowId;
-        delete r.dataValues.companyId;
         r.dataValues.presetUuid = presetrules[r.dataValues.presetId];
         if (r.dataValues.presetUuid) {
           // format ruleset key as a preset
@@ -215,7 +204,7 @@ export async function getWorkflows(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function getWorkflow(req: RedacticsRequest, res: Response) {
+export async function getWorkflow(req: Request, res: Response) {
   try {
     const workflow = await Workflow.findOne({
       where: {
@@ -434,10 +423,9 @@ async function regenERLEvaluationDataFeed(workflow:any) {
   return df.dataValues;
 }
 
-export async function createWorkflow(req: RedacticsRequest, res: Response) {
+export async function createWorkflow(req: Request, res: Response) {
   try {
     const workflowRecord:WorkflowCreate = {
-      companyId: req.currentUser.companyId || 0,
       name: req.body.name,
       workflowType: req.body.workflowType,
       exportTableDataConfig: [],
@@ -448,7 +436,6 @@ export async function createWorkflow(req: RedacticsRequest, res: Response) {
       const agent = await Agent.findOne({
         where: {
           uuid: req.body.agentId,
-          companyId: req.currentUser.companyId,
         },
       });
 
@@ -475,29 +462,26 @@ export async function createWorkflow(req: RedacticsRequest, res: Response) {
     const wfCreate = await Workflow.create(workflowRecord);
     const response = wfCreate.dataValues;
 
-    let inputRecord:InputRecord;
-    if (req.body.workflowType === 'multiTenantWebERL') {
-      // create sample database input
-      inputRecord = {
-        inputType: 'postgresql',
-        inputName: 'Sample Input',
-        exportData: true
+    // create workflow inputs
+    const agentInputs = await AgentInput.findAll({
+      where: {
+        agentId: workflowRecord.agentId,
+      }
+    });
+    const wfInputPromises:any[] = [];
+    agentInputs.forEach((ai:any) => {
+      let workflowInputRecord:WorkflowInputRecord = {
+        enabled: false,
+        inputId: ai.dataValues.inputId, 
+        workflowId: response.id,
+        tables: [],
       };
-      const input = await Input.create(inputRecord);
-      inputRecord.uuid = input.dataValues.uuid;
-      await WorkflowInput.create({
-        workflowId: wfCreate.dataValues.id,
-        inputId: input.dataValues.id,
-        tables: ['athletes', 'marketing_campaign']
-      });
-      response.inputs = [inputRecord];
-      // generate datafeed
-      const dataFeed = await regenERLEvaluationDataFeed(wfCreate);
-      response.datafeeds = [dataFeed];
-    } else {
-      response.inputs = [];
-      response.datafeeds = [];
-    }
+      wfInputPromises.push(WorkflowInput.create(workflowInputRecord));
+    })
+    await Promise.all(wfInputPromises);
+
+    response.inputs = [];
+    response.datafeeds = [];
 
     // strip primary key from response since we display UUIDs instead
     delete response.id;
@@ -528,7 +512,7 @@ async function removeProgressData(uuid:string, workflowJobId:string) {
   // await ref.remove();
 }
 
-async function saveRedactRules(workflow:any, req: RedacticsRequest) {
+async function saveRedactRules(workflow:any, req: Request) {
   let rule;
   let ruleId;
   let preset;
@@ -546,11 +530,7 @@ async function saveRedactRules(workflow:any, req: RedacticsRequest) {
   const redactRuleUuids: string[] = [];
 
   // get all presets and rulesets
-  const presets = await RedactRulePreset.findAll({
-    where: {
-      companyId: req.currentUser.companyId,
-    },
-  });
+  const presets = await RedactRulePreset.findAll({});
   const redactRules = await RedactRuleset.findAll({});
 
   // skip saving blank rules (when GUI section is disabled)
@@ -572,7 +552,6 @@ async function saveRedactRules(workflow:any, req: RedacticsRequest) {
     const databaseTableArr = r.databaseTable.split(': ');
     const table = databaseTableArr[(databaseTableArr.length - 1)];
     const redactRule:RedactRuleRecord = {
-      companyId: req.currentUser.companyId,
       workflowId: workflow.dataValues.id,
       databaseTable: r.databaseTable,
       table,
@@ -591,11 +570,10 @@ async function saveRedactRules(workflow:any, req: RedacticsRequest) {
   return redactRuleUuids;
 }
 
-async function saveInputs(workflow:any, req: RedacticsRequest) {
+async function saveInputs(workflow:any, req: Request) {
   const inputrulePromises:any = [];
   const inputs = await Input.findAll({
     where: {
-      workflowId: workflow.id,
       disabled: {
         [Op.not]: true,
       },
@@ -619,7 +597,6 @@ async function saveInputs(workflow:any, req: RedacticsRequest) {
       tables: i.tables,
       enabled: i.enabled,
     };
-    console.log("INPUT RECORD", inputRecord);
     inputrulePromises.push(WorkflowInput.create(inputRecord));
     savedInputs.push(input.dataValues.uuid);
   });
@@ -639,7 +616,7 @@ async function saveInputs(workflow:any, req: RedacticsRequest) {
   await Promise.all(inputrulePromises);
 }
 
-async function saveERL(req: RedacticsRequest, res: Response) {
+async function saveERL(req: Request, res: Response) {
   const t = await sequelize.transaction();
   let response;
   const dataFeedPromises:any = [];
@@ -671,7 +648,6 @@ async function saveERL(req: RedacticsRequest, res: Response) {
     const agent = await Agent.findOne({
       where: {
         uuid: req.body.agentId,
-        companyId: req.currentUser.companyId,
       },
     });
 
@@ -688,7 +664,6 @@ async function saveERL(req: RedacticsRequest, res: Response) {
     const workflow = await Workflow.findOne({
       where: {
         uuid: req.params.uuid,
-        companyId: req.currentUser.companyId,
       },
     });
     if (!workflow) {
@@ -813,7 +788,6 @@ async function saveERL(req: RedacticsRequest, res: Response) {
     const wfUpdate = await Workflow.update(workflowUpdate, {
       where: {
         uuid: req.params.uuid,
-        companyId: req.currentUser.companyId,
       },
       returning: true,
       plain: true,
@@ -824,19 +798,9 @@ async function saveERL(req: RedacticsRequest, res: Response) {
     delete response.id;
     response.agentId = agent.uuid;
 
-    // determine if ERL workflow is new based on whether it has any jobs to
-    // display UI feedback about updating helm config file
-    const workflowJob:any = await WorkflowJob.findOne({
-      where: {
-        workflowType: 'ERL',
-        companyId: req.currentUser.companyId,
-      },
-    });
-
     return res.send({
       workflow: response,
       redactRuleUuids,
-      updateHelmConfig: (!workflowJob),
     });
   } catch (e) {
     // console.log(e);
@@ -849,7 +813,7 @@ async function saveERL(req: RedacticsRequest, res: Response) {
   }
 }
 
-async function saveMockMigration(req: RedacticsRequest, res: Response) {
+async function saveMockMigration(req: Request, res: Response) {
   const t = await sequelize.transaction();
   let response;
 
@@ -862,7 +826,6 @@ async function saveMockMigration(req: RedacticsRequest, res: Response) {
     const agent = await Agent.findOne({
       where: {
         uuid: req.body.agentId,
-        companyId: req.currentUser.companyId,
       },
     });
 
@@ -884,7 +847,6 @@ async function saveMockMigration(req: RedacticsRequest, res: Response) {
     const workflow = await Workflow.findOne({
       where: {
         uuid: req.params.uuid,
-        companyId: req.currentUser.companyId,
       },
     });
     if (!workflow) {
@@ -910,7 +872,6 @@ async function saveMockMigration(req: RedacticsRequest, res: Response) {
     const wfUpdate = await Workflow.update(workflowUpdate, {
       where: {
         uuid: req.params.uuid,
-        companyId: req.currentUser.companyId,
       },
       returning: true,
       plain: true,
@@ -926,7 +887,6 @@ async function saveMockMigration(req: RedacticsRequest, res: Response) {
     const workflowJob:any = await WorkflowJob.findAll({
       where: {
         workflowType: 'mockDatabaseMigration',
-        companyId: req.currentUser.companyId,
       },
     });
     // loop through jobs and check if outputMetadata contains req.body.migrationDatabase
@@ -946,18 +906,10 @@ async function saveMockMigration(req: RedacticsRequest, res: Response) {
   }
 }
 
-async function buildRedactRuleConfig(workflow:any, req: RedacticsRequest) {
+async function buildRedactRuleConfig(workflow:any, req: Request) {
   const allRedactRuleSets = await RedactRuleset.findAll({});
-  const allRedactRules = await RedactRule.findAll({
-    where: {
-      companyId: req.currentUser.companyId,
-    },
-  });
-  const allRedactRulePresets = await RedactRulePreset.findAll({
-    where: {
-      companyId: req.currentUser.companyId,
-    },
-  });
+  const allRedactRules = await RedactRule.findAll({});
+  const allRedactRulePresets = await RedactRulePreset.findAll({});
 
   const rules = allRedactRules.filter((r:any) => (
     r.dataValues.workflowId === workflow.dataValues.id
@@ -1034,7 +986,7 @@ async function buildRedactRuleConfig(workflow:any, req: RedacticsRequest) {
   return redactRules;
 }
 
-async function saveERLEvaluation(req: RedacticsRequest, res: Response) {
+async function saveERLEvaluation(req: Request, res: Response) {
   const t = await sequelize.transaction();
   try {
     const errors = validationResult(req);
@@ -1046,7 +998,6 @@ async function saveERLEvaluation(req: RedacticsRequest, res: Response) {
     const workflow = await Workflow.findOne({
       where: {
         uuid: req.params.uuid,
-        companyId: req.currentUser.companyId,
       },
     });
     if (!workflow) {
@@ -1164,14 +1115,10 @@ async function saveERLEvaluation(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function updateWorkflow(req: RedacticsRequest, res: Response) {
+export async function updateWorkflow(req: Request, res: Response) {
   switch (req.body.workflowType) {
     case 'ERL':
       saveERL(req, res);
-      break;
-
-    case 'multiTenantWebERL':
-      saveERLEvaluation(req, res);
       break;
 
     case 'mockDatabaseMigration':
@@ -1184,7 +1131,7 @@ export async function updateWorkflow(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function deleteWorkflow(req: RedacticsRequest, res: Response) {
+export async function deleteWorkflow(req: Request, res: Response) {
   try {
     // confirm ownership of database
     const workflow = await Workflow.findOne({
@@ -1209,12 +1156,9 @@ export async function deleteWorkflow(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function getWorkflowJobs(req: RedacticsRequest, res: Response) {
+export async function getWorkflowJobs(req: Request, res: Response) {
   try {
     const wfJobs = await WorkflowJob.findAll({
-      where: {
-        companyId: req.currentUser.companyId,
-      },
       order: [
         ['createdAt', 'DESC'],
       ],
@@ -1265,11 +1209,8 @@ export async function createWorkflowJob(req: Request, res: Response) {
     let validWorkflowType = false;
     switch (req.body.workflowType) {
       case 'ERL':
-      case 'multiTenantWebERL':
       case 'sampletable-athletes':
       case 'sampletable-marketing_campaign':
-      case 'piiscanner':
-      case 'usersearch':
       case 'mockDatabaseMigration':
         validWorkflowType = true;
         break;
@@ -1372,7 +1313,7 @@ export async function postJobException(req: Request, res: Response) {
   }
 }
 
-export async function ackException(req: RedacticsRequest, res: Response) {
+export async function ackException(req: Request, res: Response) {
   try {
     // refactor
     // const company = await Company.findByPk(req.currentUser.companyId);
@@ -1397,7 +1338,7 @@ export async function ackException(req: RedacticsRequest, res: Response) {
 
 /* eslint-disable consistent-return */
 
-export async function ackAll(req: RedacticsRequest, res: Response) {
+export async function ackAll(req: Request, res: Response) {
   try {
     // refactor
     // // get companyId
@@ -1635,7 +1576,7 @@ export async function postJobTaskEnd(req: Request, res: Response) {
   }
 }
 
-export async function markFullCopy(req: RedacticsRequest, res: Response) {
+export async function markFullCopy(req: Request, res: Response) {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

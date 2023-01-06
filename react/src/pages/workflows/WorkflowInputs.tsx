@@ -171,7 +171,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
   }
 
   outputInputs() {
-    if (this.props.inputs.length) {
+    if (this.props.agentInputs.length) {
       if (this.props.workflow.workflowType === "mockDatabaseMigration") {
         const selectedInput = (this.props.inputs && this.props.inputs.length && this.props.inputs[0]) ? this.props.inputs[0].uuid : "";
         return (
@@ -196,10 +196,6 @@ class WorkflowInputs extends React.Component<IProps, IState> {
       else {
         return (
           <Box>
-            <Box mb={4} display={(this.props.workflow.workflowType === "multiTenantWebERL") ? "block" : "none"}>
-              <InfoIcon style={{ color: blue[500], fontSize: 25 }} /> <b>This workflow is constrained to a preset sample database containing two tables. CSV table data: <Link href="https://raw.githubusercontent.com/Redactics/redactics-sampledatasets/master/2020-olympic-athletes/athletes.csv" target="_blank">athletes.csv</Link>, <Link href="https://raw.githubusercontent.com/Redactics/redactics-sampledatasets/master/marketing-campaign/marketing_campaign.csv" target="_blank">marketing_campaign.csv</Link>.</b>
-            </Box>
-
             <Table>
               <TableHead>
                 <TableRow>
@@ -215,7 +211,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                     return (i.uuid === input.uuid)
                   });
                   let inputEnabled:boolean = (workflowInput) ? workflowInput.enabled : false;
-                  let tables:string = (workflowInput && workflowInput.tables && workflowInput.tables.length) ? workflowInput.tables.join(', ') : "";
+                  let tables:string = (workflowInput && workflowInput.tables && workflowInput.tables.length) ? workflowInput.tables.join(', ') : "none selected";
                   return (
                     <TableRow key={input.uuid}>
                       <TableCell>
@@ -245,7 +241,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
     else {
       return (
         <Box>
-          Workflows require at least one input source. Click on <b>Add Input Source</b> to select an input source.
+          Workflows require at least one input source. Ensure at least one is selected within the "Agent Settings" section in the <Link href="/agents">Agents</Link> page.
         </Box>
       )
     }

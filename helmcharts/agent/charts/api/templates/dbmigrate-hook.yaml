@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-api-dbmigrate-{{ .Release.Revision }}
+  annotations:
+    "helm.sh/hook": post-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": hook-succeeded
+  labels:
+    app.kubernetes.io/managed-by: Helm
+spec:
+  template:
+    metadata:
+      name: "api-dbmigrate"
+    spec:
+      restartPolicy: Never
+      initContainers:
+      - name: init-wait-for-dependencies
+        image: redactics/wait-for-postgresql:latest
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["/docker-entrypoint.sh"]
+        args: ["wait_for", "postgresql:{{ .Release.Name }}-postgresql"]
+      containers:
+      - name: db-migrate
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        command: ["db-migrate", "up"]
+        env:
+        - name: NODE_ENV
+          value: {{ .Values.env }}
+        - name: PGHOST
+          value: {{ .Release.Name }}-postgresql
+        - name: PGPORT
+          value: "5432"
+        - name: PGUSER
+          value: postgres
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql
+              key: postgresql-password
+        - name: PGDATABASE
+          value: redactics
