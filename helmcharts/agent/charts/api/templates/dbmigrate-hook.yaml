@@ -22,7 +22,7 @@ spec:
         args: ["wait_for", "postgresql:{{ .Release.Name }}-postgresql"]
       containers:
       - name: db-migrate
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: "{{ .Values.image.repository }}:{{ $.Chart.Version }}"
         command: ["db-migrate", "up"]
         env:
         - name: NODE_ENV

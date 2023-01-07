@@ -28,7 +28,7 @@ spec:
         args: ["wait_for", "postgresql:{{ .Release.Name }}-postgresql"]
       containers:
       - name: api
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: "{{ .Values.image.repository }}:{{ $.Chart.Version }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
@@ -71,4 +71,4 @@ spec:
         - name: CLI_VERSION
           value: {{ .Values.redactics.cliVersion }}
         - name: LATEST_CHART_VERSION
-          value: {{ .Values.redactics.latestChartVersion | toString | quote }}
+          value: {{ $.Chart.Version }}
