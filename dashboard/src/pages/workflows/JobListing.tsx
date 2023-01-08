@@ -106,7 +106,7 @@ class JobListing extends React.Component<IProps, IState> {
 
   async refreshJobListing() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/database/jobs`, {
+      const response = await fetch(`${this.context.apiUrl}/workflow/jobs`, {
           credentials: 'include',
       });
 
@@ -223,20 +223,6 @@ class JobListing extends React.Component<IProps, IState> {
           </Typography>
         )
 
-      case 'piiscanner':
-        return (
-          <Typography variant="h5" gutterBottom>
-            PII Scanner
-          </Typography>
-        )
-
-      case 'usersearch':
-        return (
-          <Typography variant="h5" gutterBottom>
-            Forget User
-          </Typography>
-        )
-
       case 'mockDatabaseMigration':
         return (
           <Typography variant="h5" gutterBottom>
@@ -255,9 +241,9 @@ class JobListing extends React.Component<IProps, IState> {
   }
 
   workflowInfo(job:WorkflowJob) {
-    return (job.databaseId) ? (
+    return (job.workflowId) ? (
       <Box>
-        Workflow: {job.workflowName} (<code>{job.databaseId}</code>)
+        Workflow: {job.workflowName} (<code>{job.workflowId}</code>)
       </Box>
     ) : null;
   }

@@ -16,13 +16,7 @@ from airflow.hooks.base_hook import BaseHook
 from airflow.operators.python_operator import PythonOperator
 from airflow.models import Variable
 
-API_KEY = os.environ['API_KEY']
-
-ENV = os.environ['ENV']
-if ENV == "development":
-    API_HOST = "http://host.docker.internal:3000"
-else:
-    API_HOST = "https://api.redactics.com"
+API_URL = os.environ['API_URL']
 
 default_args = {
     'owner': 'airflow',
@@ -56,8 +50,8 @@ def post_logs(context):
         exception = str(exception)
         stackTrace = str(logs.read())
 
-        headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-        apiUrl = API_HOST + '/database/job/' + Variable.get("st-marketing-campaign-currentWorkflowJobId") + '/postException'
+        headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+        apiUrl = API_URL + '/workflow/job/' + Variable.get("st-marketing-campaign-currentWorkflowJobId") + '/postException'
         payload = {
             'exception': exception,
             'stackTrace': stackTrace
@@ -71,8 +65,8 @@ def post_logs(context):
         except AirflowException as err:
             raise AirflowException(err)
     except:
-        headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-        apiUrl = API_HOST + '/database/job/' + Variable.get("st-marketing-campaign-currentWorkflowJobId") + '/postException'
+        headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+        apiUrl = API_URL + '/workflow/job/' + Variable.get("st-marketing-campaign-currentWorkflowJobId") + '/postException'
         payload = {
             'exception': 'an error occurred, cannot retrieve log output',
             'stackTrace': ''
@@ -88,8 +82,8 @@ def post_logs(context):
 
 def post_taskend(context):
     print('postTaskEnd ' + context["task_instance"].task_id)
-    headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-    apiUrl = API_HOST + '/database/job/' + Variable.get("st-marketing-campaign-currentWorkflowJobId") + '/postTaskEnd'
+    headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+    apiUrl = API_URL + '/workflow/job/' + Variable.get("st-marketing-campaign-currentWorkflowJobId") + '/postTaskEnd'
     payload = {
         'task': context["task_instance"].task_id,
         'totalTaskNum': 2,
@@ -105,8 +99,8 @@ def post_taskend(context):
         raise AirflowException(err)
 
 def init_wf(ds, **kwargs):
-    headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-    apiUrl = API_HOST + '/database/jobs'
+    headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+    apiUrl = API_URL + '/workflow/jobs'
     payload = {
         'workflowType': 'sampletable-marketing_campaign'
     }

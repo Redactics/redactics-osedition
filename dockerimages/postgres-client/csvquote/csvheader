@@ -1,0 +1,38 @@
+#!/bin/sh
+# prints the first row of csv data with index numbers
+USAGE="$0 [-d field_delimiter] [-t] [-q quote_character] [-r record_separator] [filename]"
+
+# same defaults as csvquote
+DEL=','
+QUO='"'
+REC='
+' # newline
+
+while getopts "d:tq:r:" arg; do
+    case $arg in
+        d)
+            DEL=${OPTARG}
+            ;;
+        t)
+            DEL='	' # tab
+            ;;
+        q)
+            QUO=${OPTARG}
+            ;;
+        r)
+            REC=${OPTARG}
+            ;;
+        *)
+            echo $USAGE;
+            exit 1;
+            ;;
+    esac
+done
+
+CSVQUOTE=`which csvquote` || CSVQUOTE="./csvquote"
+if [ ! -f $CSVQUOTE ]; then
+    echo "csvquote program not found. exiting"
+    exit 1
+fi
+
+$CSVQUOTE $@ | head -n 1 | tr "$DEL" '\n' | nl -ba | $CSVQUOTE -u -d "$DEL" -q "$QUO" -r "$REC"

@@ -23,13 +23,6 @@ import TableFullCopy from '../models/tablefullcopy';
 const { validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 
-function getApiKey(req: Request) {
-  if (req.headers['x-api-key']) {
-    return req.headers['x-api-key'];
-  }
-  return '';
-}
-
 export async function getWorkflows(req: Request, res: Response) {
   try {
     let redactrulesets = await RedactRuleset.findAll({});
@@ -1583,7 +1576,7 @@ export async function markFullCopy(req: Request, res: Response) {
       return res.status(422).json({ errors: errors.array() });
     }
 
-    // check on input ownership
+    // check on input existence
     const input = await Input.findOne({
       where: {
         uuid: req.body.inputId,
@@ -1591,11 +1584,6 @@ export async function markFullCopy(req: Request, res: Response) {
     });
     if (!input) {
       return res.status(404).json({ errors: 'invalid input ID' });
-    }
-    const workflow = await Workflow.findByPk(input.dataValues.workflowId);
-    if (!workflow) {
-      // user doesn't own workflow input is associated with
-      return res.status(403).json({ errors: 'invalid input ID' });
     }
 
     const tableFullCopyCheck = await TableFullCopy.findOne({

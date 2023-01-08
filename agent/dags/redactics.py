@@ -28,16 +28,11 @@ cf_file.close()
 dag_name = os.path.basename(__file__).split('.')[0]
 
 ENV = os.environ['ENV']
-NAS_HOST = "http://redactics-http-nas:3000"
-if ENV == "development":
-    API_HOST = "http://host.docker.internal:3000"
-    REGISTRY_URL = "localhost:5010"
-else:
-    API_HOST = "https://api.redactics.com"
-    REGISTRY_URL = "registry.redactics.com"
+API_URL = os.environ['API_URL']
+NAS_HOST = "http://agent-http-nas:3000"
+REGISTRY_URL = "redactics"
 
 NAMESPACE = os.environ['NAMESPACE']
-API_KEY = os.environ['API_KEY']
 AGENT_VERSION = os.environ['AGENT_VERSION']
 NODESELECTOR = os.environ['NODESELECTOR']
 if "DIGITAL_TWIN_PREPARED_STATEMENTS" in os.environ:
@@ -83,8 +78,8 @@ default_args = {
     # 'end_date': datetime(2016, 1, 1),
 }
 
-headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-apiUrl = API_HOST + '/database/' + dag_name
+headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+apiUrl = API_URL + '/workflow/' + dag_name
 request = requests.get(apiUrl, headers=headers)
 wf_config = request.json()
 print(wf_config)
@@ -135,8 +130,6 @@ digitalTwinEnabled = False
 digitalTwinConfig = {}
 s3UploadEnabled = False
 s3UploadConfig = {}
-dataRepositoryEnabled = False
-dataRepositoryConfig = {}
 customEnabled = False
 customConfig = {}
 
@@ -149,9 +142,6 @@ if wf_config.get("dataFeeds") and len(dataFeeds):
         elif feed == "s3upload":
             s3UploadEnabled = True
             s3UploadConfig = options
-        elif feed == "dataRepository":
-            dataRepositoryEnabled = True
-            dataRepositoryConfig = options
         elif feed == "custom":
             customEnabled = True
             customConfig = options
@@ -210,7 +200,6 @@ delta_copy_tasks = 0
 copy_status = {}
 redactics_db_init = db_init()
 totalTasks = 0
-revNumber = Variable.get(dag_name + '-dataRepoRevNumber', default_var=1)
 
 for input in wf_config["inputs"]:
     source_dbs[input["id"]] = get_source_db(input["id"])
@@ -270,13 +259,13 @@ for input in wf_config["inputs"]:
             # table copied but schema has changed - re-copy entire table
             copy_status[table] = "schema-change-detected"
             initial_copies.append(table)
-        elif table in input["fullcopies"] and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
+        elif table in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
             # table copied but schema has not changed - eligible for delta update
             copy_status[table] = "delta"
             delta_copies.append(table)
         else:
             # table not copied yet, or missing delta update field
-            copy_status[table] = "missing-delta-update-field" if not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
+            copy_status[table] = "missing-delta-update-field" if digitalTwinEnabled and not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
             initial_copies.append(table)
         
 print("COPY STATUS")
@@ -311,8 +300,8 @@ try:
                 exception = str(exception)
                 stackTrace = str(logs.read())
 
-                headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-                apiUrl = API_HOST + '/database/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postException'
+                headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+                apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postException'
                 payload = {
                     'exception': exception,
                     'stackTrace': stackTrace
@@ -326,8 +315,8 @@ try:
                 except AirflowException as err:
                     raise AirflowException(err)
             except:
-                headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-                apiUrl = API_HOST + '/database/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postException'
+                headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+                apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postException'
                 payload = {
                     'exception': 'an error occurred, cannot retrieve log output',
                     'stackTrace': ''
@@ -343,12 +332,12 @@ try:
 
         def post_taskend(context):
             print('postTaskEnd ' + context["task_instance"].task_id)
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            apiUrl = API_HOST + '/database/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postTaskEnd'
+            headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+            apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postTaskEnd'
             payload = {
                 'task': context["task_instance"].task_id,
                 'totalTaskNum': Variable.get(dag_name + "-erl-totalTasks"),
-                'lastTask': 'post_metrics'
+                'lastTask': 'apply-prepared-statements'
             }
             payloadJSON = json.dumps(payload)
             request = requests.put(apiUrl, data=payloadJSON, headers=headers)
@@ -360,30 +349,9 @@ try:
                 raise AirflowException(err)
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
-        def post_datarepo(**context):
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies"))
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies"))
-
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            apiUrl = API_HOST + '/datarepo/' + dag_name
-            payload = {
-                'revNumber': revNumber,
-                'tables': initial_copies + delta_copies
-            }
-            payloadJSON = json.dumps(payload)
-            request = requests.post(apiUrl, data=payloadJSON, headers=headers)
-            response = request.json()
-            try:
-                if request.status_code != 200:
-                    raise AirflowException(response)
-                Variable.set(dag_name + "-dataRepoRevNumber", int(revNumber) + 1)
-            except AirflowException as err:
-                raise AirflowException(err)
-
-        @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
         def init_wf(**context):
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            apiUrl = API_HOST + '/database/jobs'
+            headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+            apiUrl = API_URL + '/workflow/jobs'
             payload = {
                 'databaseId': dag_name,
                 'workflowType': 'ERL'
@@ -415,106 +383,14 @@ try:
        
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
         def update_table_status(input_id, table_name, **context):
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            apiUrl = API_HOST + '/database/markFullCopy'
+            headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+            apiUrl = API_URL + '/workflow/markFullCopy'
             payload = {
                 'inputId': input_id,
                 'tableName': table_name
             }
             payloadJSON = json.dumps(payload)
             request = requests.put(apiUrl, data=payloadJSON, headers=headers)
-            response = request.json()
-            try:
-                if request.status_code != 200:
-                    raise AirflowException(response)
-            except AirflowException as err:
-                raise AirflowException(err)
-
-        @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
-        def post_metrics(**context):
-            json_obj = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies"))
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies"))
-            copy_status = json.loads(Variable.get(dag_name + "-erl-copyStatus"))
-            if wf_config.get("export") and len(wf_config["export"]):
-                # calculate number of rows exported
-                num_rows = {}
-                for tables in wf_config["export"]:
-                    for table, settings in tables.items():
-                        num_rows[table] = 0
-
-                for table in initial_copies:
-                    apiUrl = NAS_HOST + "/file/" + dag_name + "%2Ftable-" + table + ".csv/wc"
-                    num_rows[table] += int(requests.get(apiUrl).text)
-                for table in delta_copies:
-                    apiUrl = NAS_HOST + "/file/" + dag_name + "%2Fdelta-table-" + table + "-new.csv/wc"
-                    num_rows[table] += int(requests.get(apiUrl).text)
-                    apiUrl = NAS_HOST + "/file/" + dag_name + "%2Fdelta-table-" + table + "-updated.csv/wc"
-                    num_rows[table] += int(requests.get(apiUrl).text)
-
-                json_obj.append({
-                    "runId": context["dag_run"].id,
-                    "metricName": "initialCopies",
-                    "metricValue": len(initial_copies),
-                    "metricMetadata": initial_copies
-                })
-
-                json_obj.append({
-                    "runId": context["dag_run"].id,
-                    "metricName": "deltaCopies",
-                    "metricValue": len(delta_copies),
-                    "metricMetadata": delta_copies
-                })
-
-                for tables in wf_config["export"]:
-                    for table, settings in tables.items():
-
-                        json_obj.append({
-                            "runId": context["dag_run"].id,
-                            "metricName": "tableRows",
-                            "tableName": table,
-                            "metricValue": num_rows[table],
-                            "metricMetadata": {
-                                "copy_status": copy_status[table]
-                            }
-                        })
-                        json_obj.append({
-                            "runId": context["dag_run"].id,
-                            "metricName": "exportedTable",
-                            "tableName": table,
-                            "metricValue": 1
-                        })
-                        # calculate number of redactions
-                        if len(wf_config["redactRules"]):
-                            for rules in wf_config["redactRules"]:
-                                for rt, fields in rules.items():
-                                    if rt == table:
-                                        num_rules = len(fields)
-
-                                        json_obj.append({
-                                            "runId": context["dag_run"].id,
-                                            "metricName": "redactedFields",
-                                            "tableName": rt,
-                                            "metricValue": num_rules
-                                        })
-                        else:
-                            json_obj.append({
-                                "runId": context["dag_run"].id,
-                                "metricName": "redactedFields",
-                                "tableName": table,
-                                "metricValue": 0
-                            })
-
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            apiUrl = API_HOST + '/metrics'
-            payload = {
-                'databaseId': dag_name,
-                'metrics': json_obj,
-                'workflowJobId': Variable.get(dag_name + "-erl-currentWorkflowJobId")
-            }
-            payloadJSON = json.dumps(payload)
-            print("POST METRICS", payloadJSON)
-            request = requests.post(apiUrl, data=payloadJSON, headers=headers)
             response = request.json()
             try:
                 if request.status_code != 200:
@@ -598,7 +474,7 @@ try:
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     connection = source_dbs[input["id"]]
-                    # always dump table schema (required by dataRepository data feed)
+                    # always dump table schema
                     for tables in wf_config["export"]:
                         for table, settings in tables.items():
                             cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name = '" + table + "' AND table_schema = 'public'").fetchall()
@@ -840,24 +716,6 @@ try:
         delta_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
-        def data_repo_cmd(**context):
-            # data repo upload command
-            cmds=[]
-            revNumber = str(Variable.get(dag_name + '-dataRepoRevNumber', default_var=1))
-            if dataRepositoryConfig["dataFeedConfig"]["command"]:
-                table_csvs = []
-                schema_sqls = []
-                for tables in wf_config["export"]:
-                    for table, settings in tables.items():
-                        table_csvs.append("table-" + table + ".csv")
-                        schema_sqls.append("schema-" + table + ".sql")
-                if len(table_csvs):
-                    # assure schema files get uploaded into rev directory
-                    cmd = "/bin/upload-to-s3 " + dag_name + " " + ",".join(schema_sqls) + "," + ",".join(table_csvs) + " " + dataRepositoryConfig["dataFeedConfig"]["S3UploadBucket"] + "/" + dag_name + "/" + revNumber
-                    cmds.append([dataRepositoryConfig["dataFeedConfig"]["shell"], "-c", cmd])
-            return cmds
-
-        @task(on_failure_callback=post_logs)
         def get_prepared_statements(**context):
             cmds = []
             if DIGITAL_TWIN_PREPARED_STATEMENTS is not None:
@@ -937,8 +795,7 @@ try:
                 # resources = client.V1ResourceRequirements(
                 #     requests={"memory": "256Mi"}
                 # ),
-                image_pull_secrets="redactics-registry",
-                name="redactics-pg-schemadump",
+                name="agent-pg-schemadump",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -960,8 +817,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                image_pull_secrets="redactics-registry",
-                name="redactics-pg-tableresets",
+                name="agent-pg-tableresets",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -983,8 +839,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                image_pull_secrets="redactics-registry",
-                name="redactics-pg-schemarestore",
+                name="agent-pg-schemarestore",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1006,8 +861,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                image_pull_secrets="redactics-registry",
-                name="redactics-pg-datadump",
+                name="agent-pg-datadump",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1030,8 +884,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                image_pull_secrets="redactics-registry",
-                name="redactics-restore-data",
+                name="agent-restore-data",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1064,8 +917,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                image_pull_secrets="redactics-registry",
-                name="redactics-pg-deltadump-new",
+                name="agent-pg-deltadump-new",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1089,8 +941,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                image_pull_secrets="redactics-registry",
-                name="redactics-pg-deltadump-updated",
+                name="agent-pg-deltadump-updated",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1112,8 +963,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                image_pull_secrets="redactics-registry",
-                name="redactics-pg-deltarestore",
+                name="agent-pg-deltarestore",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1147,7 +997,7 @@ try:
                 # resources = {
                 #     "request_memory": "256Mi"
                 # },
-                name="redactics-dump-tables",
+                name="agent-dump-tables",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1195,8 +1045,7 @@ try:
                         # resources = {
                         #     "request_memory": "256Mi"
                         # },
-                        image_pull_secrets="redactics-registry",
-                        name="redactics-pg-deltadump-digitaltwin-new",
+                        name="agent-pg-deltadump-digitaltwin-new",
                         is_delete_operator_pod=is_delete_operator_pod,
                         in_cluster=True,
                         hostnetwork=False,
@@ -1218,8 +1067,7 @@ try:
                         # resources = {
                         #     "request_memory": "256Mi"
                         # },
-                        image_pull_secrets="redactics-registry",
-                        name="redactics-pg-deltadump-digitaltwin-updated",
+                        name="agent-pg-deltadump-digitaltwin-updated",
                         is_delete_operator_pod=is_delete_operator_pod,
                         in_cluster=True,
                         hostnetwork=False,
@@ -1241,8 +1089,7 @@ try:
                         # resources = {
                         #     "request_memory": "256Mi"
                         # },
-                        image_pull_secrets="redactics-registry",
-                        name="redactics-pg-deltarestore-digitaltwin",
+                        name="agent-pg-deltarestore-digitaltwin",
                         is_delete_operator_pod=is_delete_operator_pod,
                         in_cluster=True,
                         hostnetwork=False,
@@ -1280,7 +1127,7 @@ try:
                 secrets=dfSecrets,
                 get_logs=True,
                 affinity=affinity,
-                name="redactics-data-feed-s3upload",
+                name="agent-data-feed-s3upload",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1291,43 +1138,6 @@ try:
             s3Upload = DummyOperator(task_id="s3upload-noop", on_success_callback=post_taskend)
         totalTasks += 1
         s3Upload.set_upstream(table_dumps)
-
-        if dataRepositoryEnabled:
-            dfSecrets = []
-
-            for secret in dataRepositoryConfig["feedSecrets"]:
-                if secret["secretType"] == "volume":
-                    dfSecrets.append(Secret('volume', secret["secretPath"], secret["secretName"], secret["secretKey"]))
-                elif secret["secretType"] == "env":
-                    dfSecrets.append(Secret('env', secret["envName"], secret["secretName"], secret["secretKey"]))
-
-            postDataRepository = KubernetesPodOperator.partial(
-                task_id="data-feed-data-repository",
-                namespace=NAMESPACE,
-                image=dataRepositoryConfig["dataFeedConfig"]["image"] + ":" + dataRepositoryConfig["dataFeedConfig"]["tag"],
-                arguments=[dataRepositoryConfig["dataFeedConfig"]["args"]] if dataRepositoryConfig["dataFeedConfig"]["args"] else None,
-                image_pull_policy="Always",
-                secrets=dfSecrets,
-                get_logs=True,
-                affinity=affinity,
-                name="redactics-data-feed-data-repository",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend
-                ).expand(
-                    cmds=data_repo_cmd()
-                )
-            totalTasks += 1
-            postDataRepository.set_upstream(table_dumps)
-
-            dataRepository = post_datarepo()
-            dataRepository.set_upstream(postDataRepository)
-        else:
-            dataRepository = DummyOperator(task_id="datarepo-noop", on_success_callback=post_taskend)
-            dataRepository.set_upstream(table_dumps)
-        totalTasks += 1
 
         if customEnabled:
             dfSecrets = []
@@ -1347,7 +1157,7 @@ try:
                 secrets=dfSecrets,
                 get_logs=True,
                 affinity=affinity,
-                name="redactics-data-feed-custom",
+                name="agent-data-feed-custom",
                 is_delete_operator_pod=is_delete_operator_pod,
                 in_cluster=True,
                 hostnetwork=False,
@@ -1397,8 +1207,7 @@ try:
                     # resources = {
                     #     "request_memory": "256Mi"
                     # },
-                    image_pull_secrets="redactics-registry",
-                    name="redactics-pg-tableresets-dt",
+                    name="agent-pg-tableresets-dt",
                     is_delete_operator_pod=is_delete_operator_pod,
                     in_cluster=True,
                     hostnetwork=False,
@@ -1420,8 +1229,7 @@ try:
                     # resources = {
                     #     "request_memory": "256Mi"
                     # },
-                    image_pull_secrets="redactics-registry",
-                    name="redactics-pg-schemarestore-digitaltwin",
+                    name="agent-pg-schemarestore-digitaltwin",
                     is_delete_operator_pod=is_delete_operator_pod,
                     in_cluster=True,
                     hostnetwork=False,
@@ -1447,8 +1255,7 @@ try:
                     # resources = {
                     #     "request_memory": "256Mi"
                     # },
-                    image_pull_secrets="redactics-registry",
-                    name="redactics-restore-data-digitaltwin",
+                    name="agent-restore-data-digitaltwin",
                     is_delete_operator_pod=is_delete_operator_pod,
                     in_cluster=True,
                     hostnetwork=False,
@@ -1478,15 +1285,12 @@ try:
                 ).expand(
                     sql=get_prepared_statements()
                 )
-            apply_prepared_statements.set_upstream([s3Upload, dataRepository, custom, dt_data_restore, dt_delta_restore])
+            apply_prepared_statements.set_upstream([s3Upload, custom, dt_data_restore, dt_delta_restore])
             totalTasks += 1
         else:
             apply_prepared_statements = DummyOperator(task_id="apply-prepared-statements-noop", on_success_callback=post_taskend, trigger_rule='none_failed')
+            apply_prepared_statements.set_upstream([s3Upload, custom, dt_data_restore, dt_delta_restore])
             totalTasks += 1
-
-        upload_metrics = post_metrics()
-        totalTasks += 1
-        upload_metrics.set_upstream(apply_prepared_statements) 
 
         tally_dynamic_tasks()
         print("TOTAL TASKS " + str(totalTasks))

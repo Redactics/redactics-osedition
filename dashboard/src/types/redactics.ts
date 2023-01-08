@@ -183,7 +183,7 @@ export interface OutputMetadata {
 
 export interface WorkflowJob {
   uuid: string;
-  databaseId: string;
+  workflowId: string;
   workflowName: string;
   workflowType: string;
   status: string;
