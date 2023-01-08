@@ -10,14 +10,13 @@ from airflow import DAG
 from os import path
 
 ENV = os.environ['ENV']
-CLUSTER_UUID = os.environ['CLUSTER_UUID']
-API_KEY = os.environ['API_KEY']
+AGENT_UUID = os.environ['AGENT_UUID']
 AGENT_VERSION = os.environ['AGENT_VERSION']
+API_URL = os.environ['API_URL']
 
-API_HOST = "http://host.docker.internal:3000" if ENV == "development" else "https://api.redactics.com"
-headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
+headers = {'Content-type': 'application/json'}
 data = {'agentVersion': AGENT_VERSION}
-apiUrl = API_HOST + "/cluster/" + CLUSTER_UUID + "/heartbeat"
+apiUrl = API_URL + "/agent/" + AGENT_UUID + "/heartbeat"
 
 # create lockfile
 if not path.exists("/tmp/redactics-heartbeat"):
