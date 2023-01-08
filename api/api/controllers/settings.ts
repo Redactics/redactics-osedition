@@ -1,13 +1,12 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import logger from '../config/winston';
-import { RedacticsRequest } from '../types/redactics';
 
 import RedactRuleset from '../models/redactruleset';
 import RedactRulePreset from '../models/redactrulepreset';
 
 const { Op } = require('sequelize');
 
-export async function getSettings(req: RedacticsRequest, res: Response) {
+export async function getSettings(req: Request, res: Response) {
   try {
     // exclude rulesets with no settings
     let redactrulesets = await RedactRuleset.findAll({
@@ -26,14 +25,12 @@ export async function getSettings(req: RedacticsRequest, res: Response) {
     let defaults = await RedactRulePreset.findAll({
       where: {
         isDefault: true,
-        companyId: req.currentUser.companyId,
       },
     });
 
     let presets = await RedactRulePreset.findAll({
       where: {
         isDefault: false,
-        companyId: req.currentUser.companyId,
       },
     });
 
@@ -75,7 +72,7 @@ export async function getSettings(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function saveRuleDefaults(req: RedacticsRequest, res: Response) {
+export async function saveRuleDefaults(req: Request, res: Response) {
   try {
     const promises: any = [];
     req.body.forEach((d: any) => {
@@ -84,7 +81,6 @@ export async function saveRuleDefaults(req: RedacticsRequest, res: Response) {
       }, {
         where: {
           uuid: d.uuid,
-          companyId: req.currentUser.companyId,
         },
       }));
     });
@@ -99,7 +95,7 @@ export async function saveRuleDefaults(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function savePresets(req: RedacticsRequest, res: Response) {
+export async function savePresets(req: Request, res: Response) {
   try {
     const redactrulesets = await RedactRuleset.findAll({
       where: {
@@ -124,7 +120,6 @@ export async function savePresets(req: RedacticsRequest, res: Response) {
           promises.push(RedactRulePreset.destroy({
             where: {
               uuid: p.uuid,
-              companyId: req.currentUser.companyId,
             },
           }));
         } else if (p.uuid) {
@@ -137,7 +132,6 @@ export async function savePresets(req: RedacticsRequest, res: Response) {
           }, {
             where: {
               uuid: p.uuid,
-              companyId: req.currentUser.companyId,
             },
           }));
         } else if (!p.key.match(/^delete/)) {
@@ -147,7 +141,6 @@ export async function savePresets(req: RedacticsRequest, res: Response) {
             isDefault: false,
             presetName: p.presetName,
             redactData: p.redactData,
-            companyId: req.currentUser.companyId,
           }));
         }
       });

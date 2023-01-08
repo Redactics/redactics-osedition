@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "api.fullname" . }}
+  labels:
+    app: api
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 3
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      initContainers:
+      - name: init-wait-for-dependencies
+        image: redactics/wait-for-postgresql:latest
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["/docker-entrypoint.sh"]
+        args: ["wait_for", "postgresql:{{ .Release.Name }}-postgresql"]
+      containers:
+      - name: api
+        image: "{{ .Values.image.repository }}:{{ $.Chart.Version }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        readinessProbe:
+          initialDelaySeconds: {{ .Values.probes.readinessProbe.initialDelaySeconds }}
+          httpGet:
+            path: /health
+            port: 3000
+            scheme: HTTP
+        livenessProbe:
+          initialDelaySeconds: {{ .Values.probes.livenessProbe.initialDelaySeconds }}
+          httpGet:
+            path: /health
+            port: 3000
+            scheme: HTTP
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        env:
+        - name: NODE_ENV
+          value: {{ .Values.env }}
+        - name: PGHOST
+          value: {{ .Release.Name }}-postgresql
+        - name: PGPORT
+          value: "5432"
+        - name: PGUSER
+          value: postgres
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql
+              key: postgresql-password
+        - name: PGDATABASE
+          value: redactics
+        - name: CHARTMUSEUM_URL
+          value: {{ .Values.redactics.chartMuseumUrl }}
+        - name: WEB_URL
+          value: {{ .Values.redactics.webUrl }}
+        - name: CLI_URL
+          value: {{ .Values.redactics.cliUrl }}
+        - name: CLI_VERSION
+          value: {{ .Values.redactics.cliVersion }}
+        - name: LATEST_CHART_VERSION
+          value: {{ $.Chart.Version }}

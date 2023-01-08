@@ -263,11 +263,6 @@ enableBuiltInSecretEnvVars:
 #    * key (can be templated) is the name of the secret that will be created
 #    * value: an object with the standard 'data' or 'stringData' key (or both).
 #          The value associated with those keys must be a string (can be templated)
-extraSecrets:
-  '{{ .Release.Name }}-usersecrets':
-    type: 'Opaque'
-    data: |
-      API_KEY: {{ .Values.redactics.apiKey | toString | b64enc | quote }}
 # eg:
 # extraSecrets:
 #   '{{ .Release.Name }}-airflow-connections':
@@ -291,6 +286,7 @@ extraConfigMaps:
   '{{ .Release.Name }}-userparams':
     data: |
       ENV: {{ default "production" .Values.redactics.env | toString | quote }}
+      API_URL: {{ default "http://agent-api" .Values.redactics.apiURL | toString | quote }}
       NAMESPACE: {{ .Values.redactics.namespace | toString | quote }}
       AGENT_UUID: {{ .Values.agentId | toString | quote }}
       NODESELECTOR: {{ .Values.redactics.nodeSelector | toString | quote }}
@@ -319,8 +315,6 @@ extraEnv: ~
 extraEnvFrom: |
   - configMapRef:
       name: '{{ .Release.Name }}-userparams'
-  - secretRef:
-      name: '{{ .Release.Name }}-usersecrets'
 # eg:
 # extraEnvFrom: |
 #   - secretRef:
@@ -331,7 +325,7 @@ extraEnvFrom: |
 # Airflow database & redis config
 data:
   # If secret names are provided, use those secrets
-  metadataSecretName: redactics-airflow-postgresql
+  metadataSecretName: agent-airflow-postgresql
   resultBackendSecretName: ~
   brokerUrlSecretName: ~
 
@@ -365,7 +359,7 @@ fernetKeySecretName: ~
 
 # Flask secret key for Airflow Webserver: `[webserver] secret_key` in airflow.cfg
 webserverSecretKey: ~
-webserverSecretKeySecretName: redactics-webserver-secret-key
+webserverSecretKeySecretName: agent-webserver-secret-key
 
 # In order to use kerberos you need to create secret containing the keytab file
 # The secret name should follow naming convention of the application where resources are
@@ -645,7 +639,7 @@ scheduler:
   extraVolumes:
     - name: connections
       secret:
-        secretName: redactics-connections
+        secretName: agent-connections
         defaultMode: 0755
   extraVolumeMounts:
     - name: connections

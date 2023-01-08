@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import logger from '../config/winston';
 import {
-  RedacticsRequest, InputRecord,
+  InputRecord,
 } from '../types/redactics';
 
 import Input from '../models/input';
@@ -9,7 +9,7 @@ import Workflow from '../models/workflow';
 
 const { Op } = require('sequelize');
 
-export async function getInputs(req: RedacticsRequest, res: Response) {
+export async function getInputs(req: Request, res: Response) {
   try {
     let inputs = await Input.findAll({
       where: {
@@ -39,7 +39,7 @@ export async function getInputs(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function saveInputs(req: RedacticsRequest, res: Response) {
+export async function saveInputs(req: Request, res: Response) {
   try {
     const inputrulePromises:any = [];
     // save (upsert) inputs
@@ -104,7 +104,7 @@ export async function saveInputs(req: RedacticsRequest, res: Response) {
   }
 }
 
-export async function migrateData(req: RedacticsRequest, res: Response) {
+export async function migrateData(req: Request, res: Response) {
   try {
     const inputs = await Input.findAll();
     const workflowIds:number[] = [];

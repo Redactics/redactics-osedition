@@ -15,10 +15,13 @@ exports.setup = function(options, seedLink) {
 };
 
 exports.up = function(db) {
-  return db.addColumn('databases', 'uuid', {
-    type: "uuid",
-    notNull: true,
-    defaultValue: new String('uuid_generate_v4()')
+  return db.runSql('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+  .then(() => {
+    return db.addColumn('databases', 'uuid', {
+      type: "uuid",
+      notNull: true,
+      defaultValue: new String('uuid_generate_v4()')
+    })
   })
 };
 

@@ -184,7 +184,7 @@ apiVersion: v2
 appVersion: 2.2.3
 dependencies:
   - name: postgresql
-    version: 9.0.0
+    version: 9.1.0
     repository: "@redactics"
 description: Helm chart for the Redactics SMART Agent (https://www.redactics.com)
 home: https://airflow.apache.org/

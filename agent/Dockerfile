@@ -8,5 +8,6 @@ RUN mkdir /pgcerts && \
 
 USER airflow
 COPY dags/* /tmp/
+COPY fetch-workflows.sh /fetch-workflows.sh
 COPY k8s-entrypoint.sh /entrypoint.sh
 
