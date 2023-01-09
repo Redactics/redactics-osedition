@@ -29,6 +29,7 @@ services:
       LATEST_CHART_VERSION: 3.0.0
       CLI_URL: https://github.com/Redactics/cli/archive/refs/tags/2.4.0.zip
       CLI_VERSION: 2.4.0
+      WS_URL: ws://host.docker.internal:3010
     volumes:
       - .:/src
     links:

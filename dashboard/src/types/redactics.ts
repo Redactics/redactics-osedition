@@ -201,3 +201,14 @@ export interface PostUpdateParam {
   key: string;
   value: string;
 }
+
+export interface NotificationRecord {
+  uuid: string;
+  acked: boolean;
+  firstHeartbeat: boolean;
+  exception: string;
+  stackTrace: string;
+  workflowId?: string;
+  workflowName?: string;
+  createdAt: Date;
+}

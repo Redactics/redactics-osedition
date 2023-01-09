@@ -1,7 +1,7 @@
 import { check } from 'express-validator';
 
 import {
-  getWorkflows, getWorkflow, createWorkflow, postJobException, ackException,
+  getWorkflows, getWorkflow, createWorkflow, postJobException,
   ackAll, postJobTaskEnd, postJobEnd, updateWorkflow, deleteWorkflow,
   getWorkflowJobs, createWorkflowJob, markFullCopy,
 } from '../controllers/workflow';
@@ -39,10 +39,6 @@ router.delete('/:uuid', deleteWorkflow);
 router.put('/job/:uuid/postException', [
   check('exception').not().isEmpty(),
 ], postJobException);
-
-router.put('/:uuid/ackException', [
-  check('exceptionId').not().isEmpty(),
-], ackException);
 
 router.put('/job/:uuid/postTaskEnd', [
   check('task').not().isEmpty(),

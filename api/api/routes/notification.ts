@@ -1,15 +1,17 @@
 import { check } from 'express-validator';
 
 import {
-  getInputs, saveInputs, migrateData,
-} from '../controllers/input';
+  getNotifs, ackException,
+} from '../controllers/notification';
 
 const express = require('express');
 
 const router = express.Router();
 
-router.get('/', getInputs);
+router.get('/', getNotifs);
 
-router.put('/', saveInputs);
+router.put('/:uuid/ackException', [
+  
+], ackException);
 
 export default router;

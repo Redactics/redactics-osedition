@@ -5,7 +5,6 @@ import {
 } from '../types/redactics';
 
 import Input from '../models/input';
-import Workflow from '../models/workflow';
 
 const { Op } = require('sequelize');
 
@@ -101,46 +100,5 @@ export async function saveInputs(req: Request, res: Response) {
   } catch (e) {
     logger.error(e.stack);
     res.send(e);
-  }
-}
-
-export async function migrateData(req: Request, res: Response) {
-  try {
-    const inputs = await Input.findAll();
-    const workflowIds:number[] = [];
-    const inputPromises:any[] = [];
-    const workflowPromises:any[] = [];
-    inputs.forEach((input:any) => {
-      if (!workflowIds.includes(input.dataValues.workflowId)) {
-        workflowPromises.push(Workflow.findByPk(input.dataValues.workflowId));
-      }
-      workflowIds.push(input.dataValues.workflowId)
-    });
-
-    const workflows = await Promise.all(workflowPromises);
-    inputs.forEach((input:any) => {
-      // find workflow
-      let workflow = workflows.find((wf:any) => {
-        return (wf.dataValues.id === input.dataValues.workflowId)
-      });
-      if (workflow) {
-        if (workflow.dataValues.workflowType === "multiTenantWebERL") {
-          input.redacticsGenerated = true;
-          input.exportData = true;
-          inputPromises.push(input.save())
-        }
-        else if (workflow.dataValues.workflowType === "ERL") {
-          input.exportData = true;
-          inputPromises.push(input.save())
-        }
-      }
-    });
-
-    await Promise.all(inputPromises);
-    
-    res.sendStatus(200);
-  } catch (e) {
-    logger.error(e.stack);
-    return res.status(500).send(e);
   }
 }

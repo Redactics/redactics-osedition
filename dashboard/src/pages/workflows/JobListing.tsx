@@ -36,6 +36,7 @@ import {
 } from '../../types/redactics';
 import RedacticsContext from '../../contexts/RedacticsContext';
 
+// TODO: replace with context var
 const WS_URL = 'ws://localhost:3010';
 
 const Card = styled(MuiCard)(spacing);
@@ -80,16 +81,6 @@ class JobListing extends React.Component<IProps, IState> {
   componentDidMount() {
     this.refreshJobListing();
     this.wsConnect();
-
-    // const jobs = ref(fbDatabase, `workflowJobProgress/${this.context.companyId}/triggerRefresh`);
-    // onValue(jobs, (snapshot) => {
-    //   const data = snapshot.val();
-    //   if (!data) { return; }
-
-    //   if (data.refresh) {
-    //     this.refreshJobListing();
-    //   }
-    // });
   }
 
   wsConnect() {
@@ -109,9 +100,42 @@ class JobListing extends React.Component<IProps, IState> {
 
     ws.onmessage = (event:any) => {
       let data = JSON.parse(event.data);
-      if (data.event === "postJobTaskEnd") { this.refreshJobListing(); }
+      if (data.event === "postJobTaskEnd" || data.event === "postJobException") { this.refreshJobListing(); }
     }
+
+    // websocket onclose event listener
+    // ws.onclose = e => {
+    //   console.log(
+    //       `Socket is closed. Reconnect will be attempted in ${Math.min(
+    //           10000 / 1000,
+    //           (that.timeout + that.timeout) / 1000
+    //       )} second.`,
+    //       e.reason
+    //   );
+
+    //   that.timeout = that.timeout + that.timeout; //increment retry interval
+    //   connectInterval = setTimeout(this.check, Math.min(10000, that.timeout)); //call check function after timeout
+    // };
+
+    // // websocket onerror event listener
+    // ws.onerror = err => {
+    //   console.error(
+    //       "Socket encountered error: ",
+    //       err.message,
+    //       "Closing socket"
+    //   );
+
+    //   ws.close();
+    // };
   }
+
+  /**
+   * utilited by the @function connect to check if the connection is close, if so attempts to reconnect
+   */
+  // check = () => {
+  //   const { ws } = this.state;
+  //   if (!ws || ws.readyState == WebSocket.CLOSED) this.connect(); //check if websocket instance is closed, if so call `connect` function.
+  // };
 
   showException(event:any, job:WorkflowJob) {
     event.preventDefault();
@@ -135,12 +159,6 @@ class JobListing extends React.Component<IProps, IState> {
       });
 
       const data = await response.json();
-
-      // data.forEach((job:WorkflowJob) => {
-      //   if (job.status === "inProgress" || job.status === "queued") {
-      //     this.initFirebaseSubscription(job.uuid);
-      //   }
-      // })
 
       this.setState({
         jobs: data,
@@ -276,20 +294,6 @@ class JobListing extends React.Component<IProps, IState> {
     let outputSummary:any = null;
     let outputInfo:any = null;
     if (job.status === "completed" && job.createdAt !== job.lastTaskEnd) {
-      if (job.workflowType === "piiscanner") {
-        outputInfo = (
-          <span>
-            Access the <Link href="/usecases/piiscanner" target="_blank">PII Scanner</Link> page to view the results of this scan.
-          </span>
-        )
-      }
-      else if (job.workflowType === "usersearch") {
-        outputInfo = (
-          <span>
-            Access the generated SQL via the <code>download-export</code> Redactics CLI command, and the receipt of this SQL generation <Link href="/usecases/forgetuser" target="_blank">here</Link>.
-          </span>
-        )
-      }
       outputSummary = job.outputLinks ? (
         <Box>
           <Box>
