@@ -402,7 +402,7 @@ export async function helmCmd(req: Request, res: Response) {
     helmUpgrade += (helmArgs.agentUpgradeAvailable && process.env.NODE_ENV !== 'development') ? 'helm repo update && helm upgrade --install' : 'helm upgrade --install';
 
     const helmCmdArray = [
-      `${helmUpgrade} --cleanup-on-fail --create-namespace -n ${agent.namespace} --version ${process.env.LATEST_CHART_VERSION} redactics ${chartUrl}`,
+      `${helmUpgrade} --cleanup-on-fail --create-namespace -n ${agent.namespace} --version ${process.env.LATEST_CHART_VERSION} agent ${chartUrl}`,
       `-f ${agent.configPath}`,
     ];
 
@@ -631,7 +631,7 @@ export async function helmConfig(req: Request, res: Response) {
       id: 'redacticsDB',
       type: 'postgres',
       version: '12',
-      host: 'redactics-postgresql',
+      host: 'agent-postgresql',
       port: 5432,
       login: 'postgres',
       password: agent.dataValues.generatedAirflowDBPassword,
@@ -648,11 +648,12 @@ export async function helmConfig(req: Request, res: Response) {
     };
 
     helmArgs.postgresql = {
-      connection: `postgresql://postgres:${agent.dataValues.generatedAirflowDBPassword}@redactics-postgresql:5432/postgres`,
+      connection: `postgresql://postgres:${agent.dataValues.generatedAirflowDBPassword}@agent-postgresql:5432/postgres`,
     };
 
     if (process.env.NODE_ENV === 'development') {
       helmArgs.redactics.env = "development";
+      helmArgs.redactics.apiURL = "http://host.docker.internal:3000";
       
       // enable access to logs via web GUI
       helmArgs.workers = {

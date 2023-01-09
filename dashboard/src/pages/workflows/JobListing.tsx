@@ -36,6 +36,8 @@ import {
 } from '../../types/redactics';
 import RedacticsContext from '../../contexts/RedacticsContext';
 
+const WS_URL = 'ws://localhost:3010';
+
 const Card = styled(MuiCard)(spacing);
 
 const Divider = styled(MuiDivider)(spacing);
@@ -77,6 +79,7 @@ class JobListing extends React.Component<IProps, IState> {
 
   componentDidMount() {
     this.refreshJobListing();
+    this.wsConnect();
 
     // const jobs = ref(fbDatabase, `workflowJobProgress/${this.context.companyId}/triggerRefresh`);
     // onValue(jobs, (snapshot) => {
@@ -87,6 +90,27 @@ class JobListing extends React.Component<IProps, IState> {
     //     this.refreshJobListing();
     //   }
     // });
+  }
+
+  wsConnect() {
+    var ws = new WebSocket(WS_URL);
+    let that = this; // cache the this
+    var connectInterval:any;
+
+    // websocket onopen event listener
+    ws.onopen = () => {
+      console.log("connected websocket main component");
+
+      //this.setState({ ws: ws });
+
+      //that.wsTimeout = 250; // reset timer to 250 on open of websocket connection 
+      //clearTimeout(connectInterval); // clear Interval on on open of websocket connection
+    };
+
+    ws.onmessage = (event:any) => {
+      let data = JSON.parse(event.data);
+      if (data.event === "postJobTaskEnd") { this.refreshJobListing(); }
+    }
   }
 
   showException(event:any, job:WorkflowJob) {
@@ -112,11 +136,11 @@ class JobListing extends React.Component<IProps, IState> {
 
       const data = await response.json();
 
-      data.forEach((job:WorkflowJob) => {
-        if (job.status === "inProgress" || job.status === "queued") {
-          this.initFirebaseSubscription(job.uuid);
-        }
-      })
+      // data.forEach((job:WorkflowJob) => {
+      //   if (job.status === "inProgress" || job.status === "queued") {
+      //     this.initFirebaseSubscription(job.uuid);
+      //   }
+      // })
 
       this.setState({
         jobs: data,
@@ -444,7 +468,7 @@ class JobListing extends React.Component<IProps, IState> {
         {(this.state.dataFetched && (!this.state.jobs || !this.state.jobs.length)) ? (
           <Card mt={8}>
             <CardContent>
-              You have no workflow jobs yet. Jobs will appear here after the time the job has been scheduled for, or when run manually. These not include jobs created in the "Workflows" section, but PII Scanner and Forget User jobs as well.
+              You have no workflow jobs yet. Jobs will appear here after the time the job has been scheduled for, or when run manually.
             </CardContent>
           </Card>
         ) : null}

@@ -87,7 +87,7 @@ def post_taskend(context):
     apiUrl = API_URL + '/workflow/job/' + Variable.get("st-athletes-currentWorkflowJobId") + '/postTaskEnd'
     payload = {
         'task': context["task_instance"].task_id,
-        'totalTaskNum': 2,
+        'totalTaskNum': 3,
         'lastTask': 'install-sampletable'
     }
     payloadJSON = json.dumps(payload)
@@ -114,6 +114,17 @@ def init_wf(ds, **kwargs):
             raise AirflowException(response)
         Variable.set("st-athletes-currentWorkflowJobId", response["uuid"])
     except AirflowException as err:
+        raise AirflowException(err)
+
+def terminate_wf(ds, **kwargs):
+    headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+    apiUrl = API_URL + '/workflow/job/' + Variable.get("st-athletes-currentWorkflowJobId") + '/postJobEnd'
+    request = requests.put(apiUrl, headers=headers)
+    response = request.json()
+    try:
+        if request.status_code != 200:
+            raise AirflowException(response)
+    except AirflowException as err: 
         raise AirflowException(err)
 
 def install_sampletable(**ds):
@@ -163,5 +174,13 @@ install = PythonOperator(
     dag=dag,
 )
 
-install.set_upstream(init_workflow)
+terminate_workflow = PythonOperator(
+    task_id='terminate-workflow',
+    provide_context=True,
+    python_callable=terminate_wf,
+    on_failure_callback=post_logs,
+    dag=dag,
+    )
 
+install.set_upstream(init_workflow)
+terminate_workflow.set_upstream(install)

@@ -3,6 +3,7 @@ import fetch from 'node-fetch';
 import Workflow from '../models/workflow';
 import logger from '../config/winston';
 import sequelize from '../db/sequelize';
+import WebSocket from 'ws';
 import {
   WorkflowCreate, WorkflowUpdate, AirflowException, OutputMetadata,
   TaskStart, RedactRuleRecord, WorkflowInputRecord, WorkflowJobRecord, WorkflowJobListEntry,
@@ -22,6 +23,8 @@ import TableFullCopy from '../models/tablefullcopy';
 
 const { validationResult } = require('express-validator');
 const { Op } = require('sequelize');
+
+const WS_URL = "ws://host.docker.internal:3010"
 
 export async function getWorkflows(req: Request, res: Response) {
   try {
@@ -1485,6 +1488,74 @@ function buildOutputMetadata(job:any) {
   return metadata;
 }
 
+export async function postJobEnd(req: Request, res: Response) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ errors: errors.array() });
+    }
+
+    const job = await WorkflowJob.findOne({
+      where: {
+        uuid: req.params.uuid,
+      }
+    });
+    if (!job) {
+      return res.status(404).json({ errors: 'this workflow job does not exist' });
+    }
+
+    job.status = 'completed';
+    job.currentTaskNum = null;
+    const workflow = (job.dataValues.workflowId)
+        ? await Workflow.findByPk(job.dataValues.workflowId, {
+          include: ['redactrules', 'inputs', 'datafeeds'],
+        }) : null;
+    job.outputSummary = buildOutputSummary(job, workflow);
+    job.outputMetadata = buildOutputMetadata(job);
+    if (job.workflowType === 'multiTenantWebERL') {
+      // build output links
+      const uploadFeed = await DataFeed.findOne({
+        where: {
+          dataFeed: 's3upload',
+          workflowId: job.dataValues.workflowId,
+        },
+      });
+      const uploadFiles = uploadFeed.dataValues.dataFeedConfig.uploadFileChecked;
+      job.outputLinks = [];
+      uploadFiles.forEach((f:string) => {
+        job.outputLinks.push(`https://redactics-sample-exports.s3.amazonaws.com/${workflow.dataValues.uuid}/${f}`);
+      });
+    }
+
+    await job.save();
+
+    if (process.env.NODE_ENV === "test") {
+      // skip websocket connectivity
+      return res.send({
+        ack: true,
+      });
+    }
+    else {
+      const ws = new WebSocket(WS_URL);
+      ws.on('open', function open() {
+        ws.send(JSON.stringify({
+          event: "postJobTaskEnd",
+          uuid: job.dataValues.uuid,
+          progress: 100,
+        }))
+
+        return res.send({
+          ack: true,
+        });
+      });
+    }
+
+  } catch (e) {
+    logger.error(e.stack);
+    return res.status(500).send(e);
+  }
+}
+
 export async function postJobTaskEnd(req: Request, res: Response) {
   try {
     const errors = validationResult(req);
@@ -1512,37 +1583,30 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     job.totalTaskNum = req.body.totalTaskNum;
     job.lastTask = req.body.task;
     job.lastTaskEnd = Date.now();
-    if (job.totalTaskNum && job.currentTaskNum > job.totalTaskNum) {
-      // this probably shouldn't happen
-      job.currentTaskNum = job.totalTaskNum;
-    }
-    if (req.body.task === req.body.lastTask || job.status === 'completed') {
-      job.status = 'completed';
-      job.currentTaskNum = null;
-      const workflow = (job.dataValues.workflowId)
-        ? await Workflow.findByPk(job.dataValues.workflowId, {
-          include: ['redactrules', 'inputs', 'datafeeds'],
-        }) : null;
-      job.outputSummary = buildOutputSummary(job, workflow);
-      job.outputMetadata = buildOutputMetadata(job);
-      if (job.workflowType === 'multiTenantWebERL') {
-        // build output links
-        const uploadFeed = await DataFeed.findOne({
-          where: {
-            dataFeed: 's3upload',
-            workflowId: job.dataValues.workflowId,
-          },
-        });
-        const uploadFiles = uploadFeed.dataValues.dataFeedConfig.uploadFileChecked;
-        job.outputLinks = [];
-        uploadFiles.forEach((f:string) => {
-          job.outputLinks.push(`https://redactics-sample-exports.s3.amazonaws.com/${workflow.dataValues.uuid}/${f}`);
-        });
-      }
-    } else if (job.status !== 'error') {
-      job.status = 'inProgress';
-    }
+    job.status = 'inProgress';
+    
     await job.save();
+
+    if (process.env.NODE_ENV === "test") {
+      // skip websocket connectivity
+      return res.send({
+        ack: true,
+      });
+    }
+    else {
+      const ws = new WebSocket(WS_URL);
+      ws.on('open', function open() {
+        ws.send(JSON.stringify({
+          event: "postJobTaskEnd",
+          uuid: job.dataValues.uuid,
+          progress: Math.round((job.currentTaskNum / job.totalTaskNum) * 100),
+        }))
+
+        return res.send({
+          ack: true,
+        });
+      });
+    }
 
     // TODO: refactor
     // if (job.status === 'completed' && process.env.NODE_ENV !== 'test') {
@@ -1560,9 +1624,6 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     //   });
     // }
 
-    return res.send({
-      ack: true,
-    });
   } catch (e) {
     logger.error(e.stack);
     return res.status(500).send(e);

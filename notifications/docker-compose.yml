@@ -1,0 +1,11 @@
+version: '3.7'
+services:
+  notifications:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run dev
+    volumes:
+      - .:/src
+    ports:
+      - "3010:3010"
