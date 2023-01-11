@@ -33,8 +33,6 @@ import {
 
 import RedacticsContext from '../contexts/RedacticsContext';
 
-const WS_URL = 'ws://localhost:3010';
-
 const IconButton = styled(MuiIconButton)`
   svg {
     width: 22px;
@@ -187,12 +185,20 @@ class Notifications extends React.Component<IProps, IState> {
       this.setState({
         anchorEl: null,
       });
-      fetch(`${this.context.apiUrl}/database/ackAll`, {
+      await fetch(`${this.context.apiUrl}/notification/ackAll`, {
         method: 'put',
         headers: {
           'Content-Type': 'application/json',
         },
       });
+      const notifications = this.state.notifications.map((notif:NotificationRecord) => {
+        notif.acked = true;
+        return notif;
+      });
+      this.setState({
+        notifications,
+        unreadCount:0
+      })
     } catch (err) {
       // console.log('ERR', err);
     }
@@ -205,58 +211,45 @@ class Notifications extends React.Component<IProps, IState> {
   }
 
   wsConnect() {
-    var ws = new WebSocket(WS_URL);
+    var ws = new WebSocket(this.context.wsUrl);
     let that = this; // cache the this
     var connectInterval:any;
 
     // websocket onopen event listener
     ws.onopen = () => {
-      console.log("connected websocket main component");
+      console.log("Connection to Websocket/Redactics Notification Server established");
 
       this.setState({ ws: ws });
 
       that.wsTimeout = 250; // reset timer to 250 on open of websocket connection 
-      clearTimeout(connectInterval); // clear Interval on on open of websocket connection
+      clearTimeout(connectInterval); // clear Interval on open of websocket connection
     };
 
     ws.onmessage = (event:any) => {
       let data = JSON.parse(event.data);
-      if (data.event === "postJobException") { this.getNotifs(); }
+      if (data.event === "postJobException" || data.event === "firstHeartbeat") { this.getNotifs(); }
     }
 
-    // websocket onclose event listener
-    // ws.onclose = e => {
-    //   console.log(
-    //       `Socket is closed. Reconnect will be attempted in ${Math.min(
-    //           10000 / 1000,
-    //           (that.timeout + that.timeout) / 1000
-    //       )} second.`,
-    //       e.reason
-    //   );
+    ws.onclose = (event:any) => {
+      that.wsTimeout = that.wsTimeout + that.wsTimeout; //increment retry interval
+      connectInterval = setTimeout(this.check, Math.min(10000, that.wsTimeout)); //call check function after timeout
+    };
 
-    //   that.timeout = that.timeout + that.timeout; //increment retry interval
-    //   connectInterval = setTimeout(this.check, Math.min(10000, that.timeout)); //call check function after timeout
-    // };
+    ws.onerror = (err:any) => {
+      console.error(
+          "Socket encountered error: ",
+          err.message,
+          "Closing socket"
+      );
 
-    // // websocket onerror event listener
-    // ws.onerror = err => {
-    //   console.error(
-    //       "Socket encountered error: ",
-    //       err.message,
-    //       "Closing socket"
-    //   );
-
-    //   ws.close();
-    // };
+      ws.close();
+    };
   };
 
-  /**
-   * utilited by the @function connect to check if the connection is close, if so attempts to reconnect
-   */
-  // check = () => {
-  //   const { ws } = this.state;
-  //   if (!ws || ws.readyState == WebSocket.CLOSED) this.connect(); //check if websocket instance is closed, if so call `connect` function.
-  // };
+  check = () => {
+    const { ws } = this.state;
+    if (!ws || ws.readyState === WebSocket.CLOSED) this.wsConnect(); //check if websocket instance is closed, if so call `connect` function.
+  };
 
   displayNotifications() {
     const popoverContent = (this.state.notifications.length) ? (
@@ -278,55 +271,72 @@ class Notifications extends React.Component<IProps, IState> {
               const exceptionMsg = (n.exception && n.exception.length > 190) ? n.exception.substring(0,189) + "..." : n.exception;
               const exception = (n.acked) ? exceptionMsg : (<b>{exceptionMsg}</b>);
 
+              let cell1 = null;
+              let cell2 = null;
+              let cell3 = null;
               if (n.firstHeartbeat) {
-                return (
-                  <TableRow key={n.uuid}>
-                    <TableCell component="th" scope="row">
-                      The Redactics Agent <b>v.agentName</b> has successfully reported to Redactics
-                    </TableCell>
-                    <TableCell>
+                cell1 = (
+                  <TableCell component="th" scope="row">
+                    The Redactics Agent <b>{n.agentName}</b> has successfully reported to Redactics
+                  </TableCell>
+                )
+                cell2 = (
+                  <TableCell>
+                    N/A
+                  </TableCell>
+                )
+                cell3 = (
+                  <TableCell>
+                    <Moment fromNow>{new Date(n.createdAt)}</Moment>
+                  </TableCell>
+                )
 
-                    </TableCell>
-                    <TableCell>
-                      <Moment fromNow>{new Date(n.createdAt)}</Moment>
-                    </TableCell>
-                  </TableRow>
-                );
-              } else {
                 return (
-                  <ReadRow key={n.uuid}>
-                    <TableCell component="th" scope="row">
-                      <Link
-                        href="#"
-                        onClick={async (event:any) => {
-                          if (n.stackTrace) {
-                            this.showException(event, n);
-                          }
-                          try {
-                            await fetch(`${this.context.apiUrl}/notification/${n.uuid}/ackException`, {
-                              method: 'put',
-                              headers: {
-                                'Content-Type': 'application/json',
-                              },
-                            });
-                            this.setState({
-                              anchorEl: null,
-                            });
-                          } catch (err) {
-                            // console.log('ERR', err);
-                          }
-                        }}
-                      >
-                      {exception}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {n.workflowName || "N/A"}
-                    </TableCell>
-                    <TableCell>
-                      <Moment fromNow>{new Date(n.createdAt)}</Moment>
-                    </TableCell>
-                  </ReadRow>
+                  <ReadRow key={n.uuid}>{cell1}{cell2}{cell3}</ReadRow>
+                )
+              } else {
+                cell1 = (
+                  <TableCell component="th" scope="row">
+                    <Link
+                      href="#"
+                      onClick={async (event:any) => {
+                        if (n.stackTrace) {
+                          this.showException(event, n);
+                        }
+                        try {
+                          await fetch(`${this.context.apiUrl}/notification/${n.uuid}/ackException`, {
+                            method: 'put',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                          });
+                          this.setState({
+                            anchorEl: null,
+                          });
+                        } catch (err) {
+                          // console.log('ERR', err);
+                        }
+                      }}
+                    >
+                    {exception}
+                    </Link>
+                  </TableCell>
+                )
+                cell2 = (
+                  <TableCell>
+                    {n.workflowName || "N/A"}
+                  </TableCell>
+                )
+                cell3 = (
+                  <TableCell>
+                    <Moment fromNow>{new Date(n.createdAt)}</Moment>
+                  </TableCell>
+                )
+
+                return (n.acked) ? (
+                  <ReadRow key={n.uuid}>{cell1}{cell2}{cell3}</ReadRow>
+                ) : (
+                  <TableRow key={n.uuid}>{cell1}{cell2}{cell3}</TableRow>
                 );
               }
             })}

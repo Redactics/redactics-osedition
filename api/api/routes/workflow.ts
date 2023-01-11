@@ -2,7 +2,7 @@ import { check } from 'express-validator';
 
 import {
   getWorkflows, getWorkflow, createWorkflow, postJobException,
-  ackAll, postJobTaskEnd, postJobEnd, updateWorkflow, deleteWorkflow,
+  postJobTaskEnd, postJobEnd, updateWorkflow, deleteWorkflow,
   getWorkflowJobs, createWorkflowJob, markFullCopy,
 } from '../controllers/workflow';
 
@@ -13,8 +13,6 @@ const router = express.Router();
 router.get('/', getWorkflows);
 
 router.post('/', createWorkflow);
-
-router.put('/ackAll', ackAll);
 
 router.put('/markFullCopy', [
   check('inputId').not().isEmpty(),

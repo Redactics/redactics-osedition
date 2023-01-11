@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import fetch from 'node-fetch';
 import Workflow from '../models/workflow';
 import logger from '../config/winston';
 import sequelize from '../db/sequelize';
@@ -24,9 +23,6 @@ import Notification from '../models/notification';
 
 const { validationResult } = require('express-validator');
 const { Op } = require('sequelize');
-
-// websocket URL
-const WS_URL = process.env.WS_URL;
 
 export async function getWorkflows(req: Request, res: Response) {
   try {
@@ -1147,25 +1143,6 @@ export async function postJobException(req: Request, res: Response) {
       return res.status(404).json({ errors: 'this workflow job does not exist' });
     }
 
-    // TODO: refactor
-    // if (process.env.NODE_ENV !== 'test') {
-    //   // post to notification center
-
-    //   const db = firebaseAdmin.database();
-    //   const ref = db.ref('notifications').child(company.dataValues.uuid);
-
-    //   const fbException:any = exception;
-    //   fbException.ack = false;
-    //   fbException.timestamp = Date.now();
-    //   if (job.dataValues.workflowId) {
-    //     const workflow = await Workflow.findByPk(job.dataValues.workflowId);
-    //     fbException.workflowId = job.dataValues.workflowId;
-    //     fbException.workflowName = workflow.dataValues.name;
-    //   }
-
-    //   await ref.push().set(fbException);
-    // }
-
     job.exception = exception.exception;
     job.stackTrace = exception.stackTrace;
     job.status = 'error';
@@ -1180,12 +1157,12 @@ export async function postJobException(req: Request, res: Response) {
     }
     await Notification.create(notificationRecord);
 
-    if (process.env.NODE_ENV === "test") {
+    if (process.env.NODE_ENV === "test" || !process.env.WEBSOCKETS_URL) {
       // skip websocket connectivity
       return res.send(job);
     }
     else {
-      const ws = new WebSocket(WS_URL);
+      const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
       ws.on('open', function open() {
         ws.send(JSON.stringify({
           event: "postJobException",
@@ -1203,41 +1180,6 @@ export async function postJobException(req: Request, res: Response) {
 }
 
 /* eslint-disable consistent-return */
-
-export async function ackAll(req: Request, res: Response) {
-  try {
-    // refactor
-    // // get companyId
-    // const company = await Company.findByPk(req.currentUser.companyId);
-
-    // if (process.env.NODE_ENV !== 'test') {
-    //   const db = firebaseAdmin.database();
-    //   const ref = db.ref(`notifications/${company.dataValues.uuid}`);
-
-    //   ref.once('value', (snapshot:any) => {
-    //     snapshot.forEach((child:any) => {
-    //       if (!child.val().ack) {
-    //         child.ref.update({
-    //           ack: true,
-    //         });
-    //       }
-    //     });
-
-    //     return res.send({
-    //       ack: true,
-    //     });
-    //   });
-    // } else {
-    //   // TODO: mock Firebase for tests
-    //   return res.send({
-    //     ack: true,
-    //   });
-    // }
-  } catch (e) {
-    logger.error(e.stack);
-    return res.status(500).send(e);
-  }
-}
 
 function buildOutputSummary(job:any, workflow:any) {
   let summary:string = '';
@@ -1357,14 +1299,14 @@ export async function postJobEnd(req: Request, res: Response) {
     job.outputMetadata = buildOutputMetadata(job);
     await job.save();
 
-    if (process.env.NODE_ENV === "test") {
+    if (process.env.NODE_ENV === "test" || !process.env.WEBSOCKETS_URL) {
       // skip websocket connectivity
       return res.send({
         ack: true,
       });
     }
     else {
-      const ws = new WebSocket(WS_URL);
+      const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
       ws.on('open', function open() {
         ws.send(JSON.stringify({
           event: "postJobTaskEnd",
@@ -1415,14 +1357,14 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     
     await job.save();
 
-    if (process.env.NODE_ENV === "test") {
+    if (process.env.NODE_ENV === "test" || !process.env.WEBSOCKETS_URL) {
       // skip websocket connectivity
       return res.send({
         ack: true,
       });
     }
     else {
-      const ws = new WebSocket(WS_URL);
+      const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
       ws.on('open', function open() {
         ws.send(JSON.stringify({
           event: "postJobTaskEnd",
@@ -1435,23 +1377,6 @@ export async function postJobTaskEnd(req: Request, res: Response) {
         });
       });
     }
-
-    // TODO: refactor
-    // if (job.status === 'completed' && process.env.NODE_ENV !== 'test') {
-    //   // trigger refresh to show completion time
-    //   removeProgressData(apiKeyOwner.dataValues.Company.dataValues.uuid, req.params.uuid);
-    //   triggerWorkflowJobUIRefresh(apiKeyOwner.dataValues.Company.dataValues.uuid, true);
-    // } else if (process.env.NODE_ENV !== 'test') {
-    //   const db = firebaseAdmin.database();
-    //   const ref = db.ref(`workflowJobProgress/${apiKeyOwner.dataValues.Company.dataValues.uuid}`).child(req.params.uuid);
-
-    //   await ref.update({
-    //     timestamp: Date.now(),
-    //     uuid: job.dataValues.uuid,
-    //     progress: Math.round((job.currentTaskNum / job.totalTaskNum) * 100),
-    //   });
-    // }
-
   } catch (e) {
     logger.error(e.stack);
     return res.status(500).send(e);

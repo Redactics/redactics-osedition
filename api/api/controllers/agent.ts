@@ -2,8 +2,10 @@ import { Request, Response } from 'express';
 import YAML from 'yaml';
 import { formatDistance } from 'date-fns';
 import logger from '../config/winston';
+import WebSocket from 'ws';
 import {
-  AgentRecord, HelmCmdRecord, HelmCmdHistory, AgentConnection, AgentInputRecord,
+  AgentRecord, HelmCmdRecord, HelmCmdHistory, AgentConnection,
+  AgentInputRecord, NotificationRecord,
 } from '../types/redactics';
 
 import Agent from '../models/agent';
@@ -12,18 +14,12 @@ import AgentInput from '../models/agentinput';
 import Input from '../models/input';
 import HelmCmd from '../models/helmcmd';
 import DataFeed from '../models/datafeed';
+import Notification from '../models/notification';
 
 const { validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
 const cryptoRandomString = require('crypto-random-string');
-
-function getApiKey(req: Request) {
-  if (req.headers['x-api-key']) {
-    return req.headers['x-api-key'];
-  }
-  return '';
-}
 
 export async function getAgent(req: Request, res: Response) {
   try {
@@ -260,27 +256,6 @@ export async function heartbeat(req: Request, res: Response) {
       plain: true,
     });
 
-    // TODO: replace with notifications table
-    // if (!agentCheck.dataValues.agentInstallationDate && process.env.NODE_ENV !== 'test') {
-    //   // post initial heartbeat to Firebase
-
-    //   await ref.push().set({
-    //     firstHeartbeat: true,
-    //     agentId: agentCheck.dataValues.uuid,
-    //     agentName: agentCheck.dataValues.name,
-    //     timestamp: Date.now(),
-    //   });
-    // } else if (process.env.NODE_ENV !== 'test') {
-    //   // post last heartbeat to Firebase
-
-    //   await ref.push().set({
-    //     heartbeat: true,
-    //     agentId: agentCheck.dataValues.uuid,
-    //     agentName: agentCheck.dataValues.name,
-    //     timestamp: Date.now(),
-    //   });
-    // }
-
     // mark helmCmd as received (heartbeat)
     if (req.body.helmCmd) {
       await HelmCmd.update({
@@ -298,7 +273,33 @@ export async function heartbeat(req: Request, res: Response) {
     delete response.id;
     delete response.fernetKey;
 
-    return res.send(response);
+    if (!agentCheck.dataValues.agentInstallationDate) {
+      const notificationRecord:NotificationRecord = {
+        acked: false,
+        firstHeartbeat: true,
+        agentId: agentCheck.dataValues.id,
+      }
+      await Notification.create(notificationRecord);
+
+      if (process.env.WEBSOCKETS_URL) {
+        const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
+        ws.on('open', function open() {
+          ws.send(JSON.stringify({
+            event: "firstHeartbeat",
+            agentId: agentCheck.dataValues.uuid,
+          }));
+
+          return res.send(response);
+        });
+      }
+      else {
+        return res.send(response);
+      }
+    }
+    else {
+      return res.send(response);
+    }
+    
   } catch (e) {
     logger.error(e.stack);
     return res.send(e);
@@ -395,7 +396,7 @@ export async function helmCmd(req: Request, res: Response) {
       };
     }
 
-    const chartUrl = process.env.NODE_ENV === 'development' ? './helmcharts/agent' : 'redactics/agent';
+    const chartUrl = process.env.NODE_ENV === 'development' ? './helmcharts/agent-osedition' : 'redactics/agent-osedition';
     helmArgs.agentUpgradeAvailable = !!((agent.dataValues.lastAgentVersion
       && (String(process.env.LATEST_CHART_VERSION) || '') !== agent.dataValues.lastAgentVersion));
     let helmUpgrade = (agent.dataValues.agentInstallationDate) ? '' : 'helm repo add redactics https://chartmuseum.redactics.com && '

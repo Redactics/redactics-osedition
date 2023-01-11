@@ -36,9 +36,6 @@ import {
 } from '../../types/redactics';
 import RedacticsContext from '../../contexts/RedacticsContext';
 
-// TODO: replace with context var
-const WS_URL = 'ws://localhost:3010';
-
 const Card = styled(MuiCard)(spacing);
 
 const Divider = styled(MuiDivider)(spacing);
@@ -58,10 +55,13 @@ interface IState {
   stackTrace: string;
   showException: boolean;
   dataFetched: boolean;
+  ws: any;
 }
 
 class JobListing extends React.Component<IProps, IState> {
   static contextType = RedacticsContext;
+
+  wsTimeout = 250;
 
   constructor(props: IProps) {
     super(props);
@@ -72,6 +72,7 @@ class JobListing extends React.Component<IProps, IState> {
       fbSubs: [],
       stackTrace: "",
       showException: false,
+      ws: null,
     };
 
     this.showException = this.showException.bind(this);
@@ -84,18 +85,18 @@ class JobListing extends React.Component<IProps, IState> {
   }
 
   wsConnect() {
-    var ws = new WebSocket(WS_URL);
+    var ws = new WebSocket(this.context.wsUrl);
     let that = this; // cache the this
     var connectInterval:any;
 
     // websocket onopen event listener
     ws.onopen = () => {
-      console.log("connected websocket main component");
+      console.log("Connection to Websocket/Redactics Notification Server established");
 
-      //this.setState({ ws: ws });
+      this.setState({ ws: ws });
 
-      //that.wsTimeout = 250; // reset timer to 250 on open of websocket connection 
-      //clearTimeout(connectInterval); // clear Interval on on open of websocket connection
+      that.wsTimeout = 250; // reset timer to 250 on open of websocket connection 
+      clearTimeout(connectInterval); // clear Interval on open of websocket connection
     };
 
     ws.onmessage = (event:any) => {
@@ -103,39 +104,26 @@ class JobListing extends React.Component<IProps, IState> {
       if (data.event === "postJobTaskEnd" || data.event === "postJobException") { this.refreshJobListing(); }
     }
 
-    // websocket onclose event listener
-    // ws.onclose = e => {
-    //   console.log(
-    //       `Socket is closed. Reconnect will be attempted in ${Math.min(
-    //           10000 / 1000,
-    //           (that.timeout + that.timeout) / 1000
-    //       )} second.`,
-    //       e.reason
-    //   );
+    ws.onclose = (event:any) => {
+      that.wsTimeout = that.wsTimeout + that.wsTimeout; //increment retry interval
+      connectInterval = setTimeout(this.check, Math.min(10000, that.wsTimeout)); //call check function after timeout
+    };
 
-    //   that.timeout = that.timeout + that.timeout; //increment retry interval
-    //   connectInterval = setTimeout(this.check, Math.min(10000, that.timeout)); //call check function after timeout
-    // };
+    ws.onerror = (err:any) => {
+      console.error(
+          "Socket encountered error: ",
+          err.message,
+          "Closing socket"
+      );
 
-    // // websocket onerror event listener
-    // ws.onerror = err => {
-    //   console.error(
-    //       "Socket encountered error: ",
-    //       err.message,
-    //       "Closing socket"
-    //   );
-
-    //   ws.close();
-    // };
+      ws.close();
+    };
   }
 
-  /**
-   * utilited by the @function connect to check if the connection is close, if so attempts to reconnect
-   */
-  // check = () => {
-  //   const { ws } = this.state;
-  //   if (!ws || ws.readyState == WebSocket.CLOSED) this.connect(); //check if websocket instance is closed, if so call `connect` function.
-  // };
+  check = () => {
+    const { ws } = this.state;
+    if (!ws || ws.readyState === WebSocket.CLOSED) this.wsConnect(); //check if websocket instance is closed, if so call `connect` function.
+  };
 
   showException(event:any, job:WorkflowJob) {
     event.preventDefault();

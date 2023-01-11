@@ -29,6 +29,14 @@ const NotificationModel = Sequelize.define('Notification', {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
+  agentId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  firstHeartbeat: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+  },
 }, {
   tableName: 'notifications',
 });

@@ -1,9 +1,10 @@
 import React from 'react';
 
-import { AuthInfo, ContextObj } from '../types/redactics';
+import { ContextObj } from '../types/redactics';
 import RedacticsContext from '../contexts/RedacticsContext';
 
-const apiUrl = process.env.REACT_APP_API_URL || '';
+const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const wsUrl = process.env.REACT_APP_WEBSOCKETS_URL || 'ws://localhost:3010';
 
 interface IProps {
   component: any;
@@ -13,10 +14,7 @@ interface IProps {
 
 interface IState {
   apiUrl: string;
-  dockerRegistryUrl?: string;
-  chartMuseumUrl?: string;
-  ackHelmReminder?: boolean;
-  ackErrorNotification?: boolean;
+  wsUrl: string;
   cliUrl?: string;
   cliVersion?: string;
 }
@@ -27,12 +25,14 @@ class RedacticsRoute extends React.Component<IProps, IState> {
 
     this.state = {
       apiUrl: '',
+      wsUrl: '',
     };
   }
 
   componentDidMount() {
     this.setState({
       apiUrl,
+      wsUrl,
     });
   }
 

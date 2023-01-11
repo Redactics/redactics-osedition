@@ -202,7 +202,9 @@ export interface NotificationRecord {
   id?: number;
   uuid?: string;
   acked: boolean;
-  exception: string;
-  stackTrace: string;
+  exception?: string;
+  stackTrace?: string;
   workflowId?: number;
+  agentId?: number;
+  firstHeartbeat?: boolean;
 }

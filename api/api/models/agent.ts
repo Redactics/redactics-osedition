@@ -3,6 +3,7 @@ import { DataTypes } from 'sequelize';
 import Sequelize from '../db/sequelize';
 
 import AgentInputModel from './agentinput';
+import NotificationModel from './notification';
 
 const AgentModel = Sequelize.define('Agent', {
   id: {
@@ -71,6 +72,10 @@ const AgentModel = Sequelize.define('Agent', {
 AgentModel.hasMany(AgentInputModel, {
   foreignKey: 'agentId',
   as: 'inputs',
+});
+
+NotificationModel.belongsTo(AgentModel, {
+  foreignKey: 'agentId',
 });
 
 export default AgentModel;

@@ -13,7 +13,7 @@ export interface AuthInfo {
 
 export interface ContextObj {
   apiUrl: string;
-  //isAuthenticated: boolean;
+  wsUrl: string;
 }
 
 export interface SettingsRedactRulesets {
@@ -210,5 +210,7 @@ export interface NotificationRecord {
   stackTrace: string;
   workflowId?: string;
   workflowName?: string;
+  agentId?: string;
+  agentName?: string;
   createdAt: Date;
 }

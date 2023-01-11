@@ -1,7 +1,7 @@
 import { check } from 'express-validator';
 
 import {
-  getInputs, saveInputs, migrateData,
+  getInputs, saveInputs,
 } from '../controllers/input';
 
 const express = require('express');

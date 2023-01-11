@@ -1,7 +1,7 @@
 import { check } from 'express-validator';
 
 import {
-  getNotifs, ackException,
+  getNotifs, ackException, ackAll,
 } from '../controllers/notification';
 
 const express = require('express');
@@ -13,5 +13,7 @@ router.get('/', getNotifs);
 router.put('/:uuid/ackException', [
   
 ], ackException);
+
+router.put('/ackAll', ackAll);
 
 export default router;
