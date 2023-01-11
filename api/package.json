@@ -39,14 +39,12 @@
     "ts-node-dev": "^1.0.0-pre.44",
     "typescript": "^3.9.3",
     "winston": "^3.3.3",
-    "ws": "^8.12.0",
     "yaml": "^1.10.0"
   },
   "devDependencies": {
     "@babel/core": "^7.10.4",
     "@babel/preset-env": "^7.10.4",
     "@babel/preset-typescript": "^7.10.4",
-    "@types/ws": "^8.5.4",
     "@typescript-eslint/eslint-plugin": "^5.6.0",
     "@typescript-eslint/parser": "^5.6.0",
     "babel-jest": "^26.1.0",

@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import Workflow from '../models/workflow';
 import logger from '../config/winston';
 import sequelize from '../db/sequelize';
-import WebSocket from 'ws';
 import {
   WorkflowCreate, WorkflowUpdate, AirflowException, OutputMetadata, NotificationRecord,
   TaskStart, RedactRuleRecord, WorkflowInputRecord, WorkflowJobRecord, WorkflowJobListEntry,
@@ -1157,22 +1156,7 @@ export async function postJobException(req: Request, res: Response) {
     }
     await Notification.create(notificationRecord);
 
-    if (process.env.NODE_ENV === "test" || !process.env.WEBSOCKETS_URL) {
-      // skip websocket connectivity
-      return res.send(job);
-    }
-    else {
-      const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
-      ws.on('open', function open() {
-        ws.send(JSON.stringify({
-          event: "postJobException",
-          uuid: job.dataValues.uuid,
-          exception: exception.exception,
-        }))
-
-        return res.send(job);
-      });
-    }
+    return res.send(job);
   } catch (e) {
     logger.error(e.stack);
     return res.status(500).send(e);
@@ -1299,26 +1283,9 @@ export async function postJobEnd(req: Request, res: Response) {
     job.outputMetadata = buildOutputMetadata(job);
     await job.save();
 
-    if (process.env.NODE_ENV === "test" || !process.env.WEBSOCKETS_URL) {
-      // skip websocket connectivity
-      return res.send({
-        ack: true,
-      });
-    }
-    else {
-      const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
-      ws.on('open', function open() {
-        ws.send(JSON.stringify({
-          event: "postJobTaskEnd",
-          uuid: job.dataValues.uuid,
-          progress: 100,
-        }))
-
-        return res.send({
-          ack: true,
-        });
-      });
-    }
+    return res.send({
+      ack: true,
+    });
 
   } catch (e) {
     logger.error(e.stack);
@@ -1357,26 +1324,9 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     
     await job.save();
 
-    if (process.env.NODE_ENV === "test" || !process.env.WEBSOCKETS_URL) {
-      // skip websocket connectivity
-      return res.send({
-        ack: true,
-      });
-    }
-    else {
-      const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
-      ws.on('open', function open() {
-        ws.send(JSON.stringify({
-          event: "postJobTaskEnd",
-          uuid: job.dataValues.uuid,
-          progress: Math.round((job.currentTaskNum / job.totalTaskNum) * 100),
-        }))
-
-        return res.send({
-          ack: true,
-        });
-      });
-    }
+    return res.send({
+      ack: true,
+    });
   } catch (e) {
     logger.error(e.stack);
     return res.status(500).send(e);

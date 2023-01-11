@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import YAML from 'yaml';
 import { formatDistance } from 'date-fns';
 import logger from '../config/winston';
-import WebSocket from 'ws';
 import {
   AgentRecord, HelmCmdRecord, HelmCmdHistory, AgentConnection,
   AgentInputRecord, NotificationRecord,
@@ -280,26 +279,9 @@ export async function heartbeat(req: Request, res: Response) {
         agentId: agentCheck.dataValues.id,
       }
       await Notification.create(notificationRecord);
-
-      if (process.env.WEBSOCKETS_URL) {
-        const ws:any = new WebSocket(process.env.WEBSOCKETS_URL);
-        ws.on('open', function open() {
-          ws.send(JSON.stringify({
-            event: "firstHeartbeat",
-            agentId: agentCheck.dataValues.uuid,
-          }));
-
-          return res.send(response);
-        });
-      }
-      else {
-        return res.send(response);
-      }
-    }
-    else {
-      return res.send(response);
     }
     
+    return res.send(response);
   } catch (e) {
     logger.error(e.stack);
     return res.send(e);

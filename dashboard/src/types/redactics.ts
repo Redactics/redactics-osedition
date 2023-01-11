@@ -13,7 +13,6 @@ export interface AuthInfo {
 
 export interface ContextObj {
   apiUrl: string;
-  wsUrl: string;
 }
 
 export interface SettingsRedactRulesets {
