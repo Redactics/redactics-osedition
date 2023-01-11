@@ -13,7 +13,6 @@ export interface AuthInfo {
 
 export interface ContextObj {
   apiUrl: string;
-  //isAuthenticated: boolean;
 }
 
 export interface SettingsRedactRulesets {
@@ -200,4 +199,17 @@ export interface WorkflowJob {
 export interface PostUpdateParam {
   key: string;
   value: string;
+}
+
+export interface NotificationRecord {
+  uuid: string;
+  acked: boolean;
+  firstHeartbeat: boolean;
+  exception: string;
+  stackTrace: string;
+  workflowId?: string;
+  workflowName?: string;
+  agentId?: string;
+  agentName?: string;
+  createdAt: Date;
 }

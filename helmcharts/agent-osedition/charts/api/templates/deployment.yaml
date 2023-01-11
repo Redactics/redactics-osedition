@@ -44,8 +44,6 @@ spec:
             path: /health
             port: 3000
             scheme: HTTP
-        resources:
-          {{- toYaml .Values.resources | nindent 10 }}
         env:
         - name: NODE_ENV
           value: {{ .Values.env }}
@@ -72,3 +70,5 @@ spec:
           value: {{ .Values.redactics.cliVersion }}
         - name: LATEST_CHART_VERSION
           value: {{ $.Chart.Version }}
+        - name: WEBSOCKETS_URL
+          value: ws://{{ .Release.Name }}-notifications

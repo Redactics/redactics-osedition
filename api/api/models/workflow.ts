@@ -2,6 +2,7 @@ import { DataTypes } from 'sequelize';
 import RedactRuleModel from './redactrule';
 import WorkflowInputModel from './workflowinput';
 import DatafeedModel from './datafeed';
+import NotificationModel from './notification';
 
 import Sequelize from '../db/sequelize';
 
@@ -103,6 +104,9 @@ WorkflowModel.hasMany(WorkflowInputModel, {
 WorkflowModel.hasMany(DatafeedModel, {
   foreignKey: 'workflowId',
   as: 'datafeeds',
+});
+NotificationModel.belongsTo(WorkflowModel, {
+  foreignKey: 'workflowId',
 });
 
 export default WorkflowModel;

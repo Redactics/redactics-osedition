@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
-import fetch from 'node-fetch';
 import Workflow from '../models/workflow';
 import logger from '../config/winston';
 import sequelize from '../db/sequelize';
 import {
-  WorkflowCreate, WorkflowUpdate, AirflowException, OutputMetadata,
+  WorkflowCreate, WorkflowUpdate, AirflowException, OutputMetadata, NotificationRecord,
   TaskStart, RedactRuleRecord, WorkflowInputRecord, WorkflowJobRecord, WorkflowJobListEntry,
 } from '../types/redactics';
 
@@ -19,6 +18,7 @@ import AgentInput from '../models/agentinput';
 import WorkflowInput from '../models/workflowinput';
 import WorkflowJob from '../models/workflowjob';
 import TableFullCopy from '../models/tablefullcopy';
+import Notification from '../models/notification';
 
 const { validationResult } = require('express-validator');
 const { Op } = require('sequelize');
@@ -444,7 +444,7 @@ export async function createWorkflow(req: Request, res: Response) {
       workflowRecord.agentId = agent.dataValues.id;
     }
 
-    if (!req.body.workflowType.match(/^(ERL|multiTenantWebERL|mockDatabaseMigration)$/)) {
+    if (!req.body.workflowType.match(/^(ERL|mockDatabaseMigration)$/)) {
       return res.status(422).json({
         errors: [{
           msg: 'Invalid workflow type',
@@ -979,135 +979,6 @@ async function buildRedactRuleConfig(workflow:any, req: Request) {
   return redactRules;
 }
 
-async function saveERLEvaluation(req: Request, res: Response) {
-  const t = await sequelize.transaction();
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(422).json({ errors: errors.array() });
-    }
-
-    // get workflowId
-    const workflow = await Workflow.findOne({
-      where: {
-        uuid: req.params.uuid,
-      },
-    });
-    if (!workflow) {
-      return res.status(404).json({ errors: 'workflow not found' });
-    }
-
-    // save redact rules
-    const redactRuleUuids = await saveRedactRules(workflow, req);
-    // regenerate preset datafeed
-    const dataFeed = await regenERLEvaluationDataFeed(workflow);
-
-    const workflowUpdate:WorkflowUpdate = {
-      name: req.body.name,
-      exportTableDataConfig: req.body.exportTableDataConfig,
-    };
-
-    // console.log("UPDATE", workflowUpdate);
-
-    await Workflow.update(workflowUpdate, {
-      where: {
-        uuid: req.params.uuid,
-      },
-    });
-
-    // build input Airflow config
-    const inputData = await Input.findAll({
-      where: {
-        workflowId: workflow.dataValues.id,
-        disabled: {
-          [Op.not]: true,
-        },
-      },
-      order: [
-        ['createdAt', 'ASC'],
-      ],
-    });
-    const inputs:any[] = [];
-    inputData.forEach((i:any) => {
-      inputs.push({
-        id: i.dataValues.uuid,
-        tables: i.dataValues.tables,
-      });
-    });
-    // build redact rule config
-    const redactRules = await buildRedactRuleConfig(workflow, req);
-
-    const createWfJob:WorkflowJobRecord = {
-      workflowId: workflow.dataValues.id,
-      workflowType: 'multiTenantWebERL',
-      status: 'queued',
-      currentTaskNum: 0,
-    };
-
-    const wfJob = await WorkflowJob.create(createWfJob);
-
-    const wfConf = {
-      inputs,
-      export: req.body.exportTableDataConfig,
-      redactRules,
-      s3upload: {
-        dataFeedConfig: dataFeed.dataFeedConfig,
-        feedSecrets: dataFeed.feedSecrets,
-      },
-      workflowJobId: wfJob.dataValues.uuid,
-      workflowId: workflow.dataValues.uuid,
-    };
-
-    let data:any;
-    if (process.env.NODE_ENV !== 'test') {
-      const authorization = `Basic ${Buffer.from(`${process.env.AIRFLOW_BASIC_AUTH_USER}:${process.env.AIRFLOW_BASIC_AUTH_PASS}`).toString('base64')}`;
-      const response = await fetch(`${process.env.AIRFLOW_API_URL}/api/v1/dags/erl_taskflow_evaluation/dagRuns`, {
-        method: 'post',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: authorization,
-        },
-        body: JSON.stringify({
-          dag_run_id: wfJob.dataValues.uuid,
-          conf: wfConf,
-        }),
-      });
-
-      data = await response.json();
-      // console.log('RESPONSE', data, JSON.stringify(data));
-
-      // trigger a UI refresh
-      //triggerWorkflowJobUIRefresh(company.dataValues.uuid, true);
-    } else {
-      // mock response
-      data = {
-        conf: wfConf,
-        dag_id: 'erl_taskflow_evaluation',
-        dag_run_id: '3a58e92c-05a3-4ee5-9f07-dd4ae3db7ecb',
-        end_date: null,
-        execution_date: '2022-06-25T06:45:15.401842+00:00',
-        external_trigger: true,
-        logical_date: '2022-06-25T06:45:15.401842+00:00',
-        start_date: null,
-        state: 'queued',
-      };
-    }
-
-    return res.send({
-      airflowResponse: data,
-      redactRuleUuids,
-    });
-  } catch (e) {
-    // console.log(e);
-    logger.error(e.stack);
-
-    await t.rollback();
-    return res.status(500).send(e);
-  } finally {
-    t.commit();
-  }
-}
-
 export async function updateWorkflow(req: Request, res: Response) {
   switch (req.body.workflowType) {
     case 'ERL':
@@ -1271,33 +1142,19 @@ export async function postJobException(req: Request, res: Response) {
       return res.status(404).json({ errors: 'this workflow job does not exist' });
     }
 
-    // TODO: refactor
-    // if (process.env.NODE_ENV !== 'test') {
-    //   // post to notification center
-
-    //   const db = firebaseAdmin.database();
-    //   const ref = db.ref('notifications').child(company.dataValues.uuid);
-
-    //   const fbException:any = exception;
-    //   fbException.ack = false;
-    //   fbException.timestamp = Date.now();
-    //   if (job.dataValues.workflowId) {
-    //     const workflow = await Workflow.findByPk(job.dataValues.workflowId);
-    //     fbException.workflowId = job.dataValues.workflowId;
-    //     fbException.workflowName = workflow.dataValues.name;
-    //   }
-
-    //   await ref.push().set(fbException);
-    // }
-
     job.exception = exception.exception;
     job.stackTrace = exception.stackTrace;
     job.status = 'error';
     job.currentTaskNum = null;
     await job.save();
 
-    // removeProgressData(company.dataValues.uuid, req.params.uuid);
-    // triggerWorkflowJobUIRefresh(company.dataValues.uuid, true);
+    const notificationRecord:NotificationRecord = {
+      acked: false,
+      exception: exception.exception,
+      stackTrace: exception.stackTrace,
+      workflowId: job.dataValues.workflowId,      
+    }
+    await Notification.create(notificationRecord);
 
     return res.send(job);
   } catch (e) {
@@ -1306,65 +1163,7 @@ export async function postJobException(req: Request, res: Response) {
   }
 }
 
-export async function ackException(req: Request, res: Response) {
-  try {
-    // refactor
-    // const company = await Company.findByPk(req.currentUser.companyId);
-
-    // if (process.env.NODE_ENV !== 'test') {
-    //   const db = firebaseAdmin.database();
-    //   const ref = db.ref(`notifications/${company.dataValues.uuid}`).child(req.body.exceptionId);
-
-    //   await ref.update({
-    //     ack: true,
-    //   });
-    // }
-
-    return res.send({
-      ack: true,
-    });
-  } catch (e) {
-    logger.error(e.stack);
-    return res.status(500).send(e);
-  }
-}
-
 /* eslint-disable consistent-return */
-
-export async function ackAll(req: Request, res: Response) {
-  try {
-    // refactor
-    // // get companyId
-    // const company = await Company.findByPk(req.currentUser.companyId);
-
-    // if (process.env.NODE_ENV !== 'test') {
-    //   const db = firebaseAdmin.database();
-    //   const ref = db.ref(`notifications/${company.dataValues.uuid}`);
-
-    //   ref.once('value', (snapshot:any) => {
-    //     snapshot.forEach((child:any) => {
-    //       if (!child.val().ack) {
-    //         child.ref.update({
-    //           ack: true,
-    //         });
-    //       }
-    //     });
-
-    //     return res.send({
-    //       ack: true,
-    //     });
-    //   });
-    // } else {
-    //   // TODO: mock Firebase for tests
-    //   return res.send({
-    //     ack: true,
-    //   });
-    // }
-  } catch (e) {
-    logger.error(e.stack);
-    return res.status(500).send(e);
-  }
-}
 
 function buildOutputSummary(job:any, workflow:any) {
   let summary:string = '';
@@ -1376,31 +1175,6 @@ function buildOutputSummary(job:any, workflow:any) {
       !(df.dataValues.disabled)
     )) : [];
   if (job.dataValues.workflowType === 'ERL') {
-    if (job.dataValues.metrics) {
-      let totalRows = 0;
-      let totalRedactions = 0;
-      let totalTables = 0;
-      job.dataValues.metrics.forEach((m:any) => {
-        switch (m.dataValues.metricName) {
-          case 'tableRows':
-            totalRows += m.dataValues.metricValue;
-            break;
-
-          case 'redactedFields':
-            totalRedactions += m.dataValues.metricValue;
-            break;
-
-          case 'exportedTable':
-            totalTables += m.dataValues.metricValue;
-            break;
-
-          default:
-            break;
-        }
-      });
-
-      summary += `${totalRows} total rows created or updated, ${totalRedactions} column(s) containing PII/confidential info, ${totalTables} table(s) exported.`;
-    }
     if (dataFeeds.length) {
       summary += ' Your data was ';
       const dfSummary:string[] = [];
@@ -1432,8 +1206,6 @@ function buildOutputSummary(job:any, workflow:any) {
       }
       summary += `${dfSummary.join(', ')}.`;
     }
-  } else if (job.dataValues.workflowType === 'multiTenantWebERL') {
-    summary = 'Your test data was uploaded to a public Amazon S3 bucket.';
   } else if (job.dataValues.workflowType === 'mockDatabaseMigration') {
     summary = `Your database was cloned and given the name ${workflow.dataValues.migrationDatabaseClone} in preparation for a dry-run of your database migrations.`;
   }
@@ -1485,6 +1257,42 @@ function buildOutputMetadata(job:any) {
   return metadata;
 }
 
+export async function postJobEnd(req: Request, res: Response) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ errors: errors.array() });
+    }
+
+    const job = await WorkflowJob.findOne({
+      where: {
+        uuid: req.params.uuid,
+      }
+    });
+    if (!job) {
+      return res.status(404).json({ errors: 'this workflow job does not exist' });
+    }
+
+    job.status = 'completed';
+    job.currentTaskNum = null;
+    const workflow = (job.dataValues.workflowId)
+        ? await Workflow.findByPk(job.dataValues.workflowId, {
+          include: ['redactrules', 'inputs', 'datafeeds'],
+        }) : null;
+    job.outputSummary = buildOutputSummary(job, workflow);
+    job.outputMetadata = buildOutputMetadata(job);
+    await job.save();
+
+    return res.send({
+      ack: true,
+    });
+
+  } catch (e) {
+    logger.error(e.stack);
+    return res.status(500).send(e);
+  }
+}
+
 export async function postJobTaskEnd(req: Request, res: Response) {
   try {
     const errors = validationResult(req);
@@ -1512,53 +1320,9 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     job.totalTaskNum = req.body.totalTaskNum;
     job.lastTask = req.body.task;
     job.lastTaskEnd = Date.now();
-    if (job.totalTaskNum && job.currentTaskNum > job.totalTaskNum) {
-      // this probably shouldn't happen
-      job.currentTaskNum = job.totalTaskNum;
-    }
-    if (req.body.task === req.body.lastTask || job.status === 'completed') {
-      job.status = 'completed';
-      job.currentTaskNum = null;
-      const workflow = (job.dataValues.workflowId)
-        ? await Workflow.findByPk(job.dataValues.workflowId, {
-          include: ['redactrules', 'inputs', 'datafeeds'],
-        }) : null;
-      job.outputSummary = buildOutputSummary(job, workflow);
-      job.outputMetadata = buildOutputMetadata(job);
-      if (job.workflowType === 'multiTenantWebERL') {
-        // build output links
-        const uploadFeed = await DataFeed.findOne({
-          where: {
-            dataFeed: 's3upload',
-            workflowId: job.dataValues.workflowId,
-          },
-        });
-        const uploadFiles = uploadFeed.dataValues.dataFeedConfig.uploadFileChecked;
-        job.outputLinks = [];
-        uploadFiles.forEach((f:string) => {
-          job.outputLinks.push(`https://redactics-sample-exports.s3.amazonaws.com/${workflow.dataValues.uuid}/${f}`);
-        });
-      }
-    } else if (job.status !== 'error') {
-      job.status = 'inProgress';
-    }
+    job.status = 'inProgress';
+    
     await job.save();
-
-    // TODO: refactor
-    // if (job.status === 'completed' && process.env.NODE_ENV !== 'test') {
-    //   // trigger refresh to show completion time
-    //   removeProgressData(apiKeyOwner.dataValues.Company.dataValues.uuid, req.params.uuid);
-    //   triggerWorkflowJobUIRefresh(apiKeyOwner.dataValues.Company.dataValues.uuid, true);
-    // } else if (process.env.NODE_ENV !== 'test') {
-    //   const db = firebaseAdmin.database();
-    //   const ref = db.ref(`workflowJobProgress/${apiKeyOwner.dataValues.Company.dataValues.uuid}`).child(req.params.uuid);
-
-    //   await ref.update({
-    //     timestamp: Date.now(),
-    //     uuid: job.dataValues.uuid,
-    //     progress: Math.round((job.currentTaskNum / job.totalTaskNum) * 100),
-    //   });
-    // }
 
     return res.send({
       ack: true,

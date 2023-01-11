@@ -337,7 +337,6 @@ try:
             payload = {
                 'task': context["task_instance"].task_id,
                 'totalTaskNum': Variable.get(dag_name + "-erl-totalTasks"),
-                'lastTask': 'apply-prepared-statements'
             }
             payloadJSON = json.dumps(payload)
             request = requests.put(apiUrl, data=payloadJSON, headers=headers)
@@ -353,7 +352,7 @@ try:
             headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
             apiUrl = API_URL + '/workflow/jobs'
             payload = {
-                'databaseId': dag_name,
+                'workflowId': dag_name,
                 'workflowType': 'ERL'
             }
             payloadJSON = json.dumps(payload)
@@ -368,6 +367,18 @@ try:
                 Variable.set(dag_name + "-erl-copyStatus", json.dumps(copy_status))
                 Variable.set(dag_name + "-erl-totalTasks", totalTasks)
             except AirflowException as err:
+                raise AirflowException(err)
+
+        @task(on_failure_callback=post_logs)
+        def terminate_wf(**context):
+            headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+            apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postJobEnd'
+            request = requests.put(apiUrl, headers=headers)
+            response = request.json()
+            try:
+                if request.status_code != 200:
+                    raise AirflowException(response)
+            except AirflowException as err: 
                 raise AirflowException(err)
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
@@ -1291,6 +1302,9 @@ try:
             apply_prepared_statements = DummyOperator(task_id="apply-prepared-statements-noop", on_success_callback=post_taskend, trigger_rule='none_failed')
             apply_prepared_statements.set_upstream([s3Upload, custom, dt_data_restore, dt_delta_restore])
             totalTasks += 1
+
+        terminate_workflow = terminate_wf()
+        terminate_workflow.set_upstream(apply_prepared_statements)
 
         tally_dynamic_tasks()
         print("TOTAL TASKS " + str(totalTasks))

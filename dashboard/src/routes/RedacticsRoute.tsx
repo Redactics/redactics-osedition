@@ -1,9 +1,9 @@
 import React from 'react';
 
-import { AuthInfo, ContextObj } from '../types/redactics';
+import { ContextObj } from '../types/redactics';
 import RedacticsContext from '../contexts/RedacticsContext';
 
-const apiUrl = process.env.REACT_APP_API_URL || '';
+const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
 interface IProps {
   component: any;
@@ -13,10 +13,6 @@ interface IProps {
 
 interface IState {
   apiUrl: string;
-  dockerRegistryUrl?: string;
-  chartMuseumUrl?: string;
-  ackHelmReminder?: boolean;
-  ackErrorNotification?: boolean;
   cliUrl?: string;
   cliVersion?: string;
 }

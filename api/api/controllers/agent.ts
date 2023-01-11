@@ -3,7 +3,8 @@ import YAML from 'yaml';
 import { formatDistance } from 'date-fns';
 import logger from '../config/winston';
 import {
-  AgentRecord, HelmCmdRecord, HelmCmdHistory, AgentConnection, AgentInputRecord,
+  AgentRecord, HelmCmdRecord, HelmCmdHistory, AgentConnection,
+  AgentInputRecord, NotificationRecord,
 } from '../types/redactics';
 
 import Agent from '../models/agent';
@@ -12,18 +13,12 @@ import AgentInput from '../models/agentinput';
 import Input from '../models/input';
 import HelmCmd from '../models/helmcmd';
 import DataFeed from '../models/datafeed';
+import Notification from '../models/notification';
 
 const { validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
 const cryptoRandomString = require('crypto-random-string');
-
-function getApiKey(req: Request) {
-  if (req.headers['x-api-key']) {
-    return req.headers['x-api-key'];
-  }
-  return '';
-}
 
 export async function getAgent(req: Request, res: Response) {
   try {
@@ -260,27 +255,6 @@ export async function heartbeat(req: Request, res: Response) {
       plain: true,
     });
 
-    // TODO: replace with notifications table
-    // if (!agentCheck.dataValues.agentInstallationDate && process.env.NODE_ENV !== 'test') {
-    //   // post initial heartbeat to Firebase
-
-    //   await ref.push().set({
-    //     firstHeartbeat: true,
-    //     agentId: agentCheck.dataValues.uuid,
-    //     agentName: agentCheck.dataValues.name,
-    //     timestamp: Date.now(),
-    //   });
-    // } else if (process.env.NODE_ENV !== 'test') {
-    //   // post last heartbeat to Firebase
-
-    //   await ref.push().set({
-    //     heartbeat: true,
-    //     agentId: agentCheck.dataValues.uuid,
-    //     agentName: agentCheck.dataValues.name,
-    //     timestamp: Date.now(),
-    //   });
-    // }
-
     // mark helmCmd as received (heartbeat)
     if (req.body.helmCmd) {
       await HelmCmd.update({
@@ -298,6 +272,15 @@ export async function heartbeat(req: Request, res: Response) {
     delete response.id;
     delete response.fernetKey;
 
+    if (!agentCheck.dataValues.agentInstallationDate) {
+      const notificationRecord:NotificationRecord = {
+        acked: false,
+        firstHeartbeat: true,
+        agentId: agentCheck.dataValues.id,
+      }
+      await Notification.create(notificationRecord);
+    }
+    
     return res.send(response);
   } catch (e) {
     logger.error(e.stack);
@@ -395,14 +378,14 @@ export async function helmCmd(req: Request, res: Response) {
       };
     }
 
-    const chartUrl = process.env.NODE_ENV === 'development' ? './helmcharts/agent' : 'redactics/agent';
+    const chartUrl = process.env.NODE_ENV === 'development' ? './helmcharts/agent-osedition' : 'redactics/agent-osedition';
     helmArgs.agentUpgradeAvailable = !!((agent.dataValues.lastAgentVersion
       && (String(process.env.LATEST_CHART_VERSION) || '') !== agent.dataValues.lastAgentVersion));
     let helmUpgrade = (agent.dataValues.agentInstallationDate) ? '' : 'helm repo add redactics https://chartmuseum.redactics.com && '
     helmUpgrade += (helmArgs.agentUpgradeAvailable && process.env.NODE_ENV !== 'development') ? 'helm repo update && helm upgrade --install' : 'helm upgrade --install';
 
     const helmCmdArray = [
-      `${helmUpgrade} --cleanup-on-fail --create-namespace -n ${agent.namespace} --version ${process.env.LATEST_CHART_VERSION} redactics ${chartUrl}`,
+      `${helmUpgrade} --cleanup-on-fail --create-namespace -n ${agent.namespace} --version ${process.env.LATEST_CHART_VERSION} agent ${chartUrl}`,
       `-f ${agent.configPath}`,
     ];
 
@@ -631,7 +614,7 @@ export async function helmConfig(req: Request, res: Response) {
       id: 'redacticsDB',
       type: 'postgres',
       version: '12',
-      host: 'redactics-postgresql',
+      host: 'agent-postgresql',
       port: 5432,
       login: 'postgres',
       password: agent.dataValues.generatedAirflowDBPassword,
@@ -648,11 +631,12 @@ export async function helmConfig(req: Request, res: Response) {
     };
 
     helmArgs.postgresql = {
-      connection: `postgresql://postgres:${agent.dataValues.generatedAirflowDBPassword}@redactics-postgresql:5432/postgres`,
+      connection: `postgresql://postgres:${agent.dataValues.generatedAirflowDBPassword}@agent-postgresql:5432/postgres`,
     };
 
     if (process.env.NODE_ENV === 'development') {
       helmArgs.redactics.env = "development";
+      helmArgs.redactics.apiURL = "http://host.docker.internal:3000";
       
       // enable access to logs via web GUI
       helmArgs.workers = {

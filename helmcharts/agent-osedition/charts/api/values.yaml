@@ -8,9 +8,9 @@ image:
 
 probes:
   readinessProbe:
-    initialDelaySeconds: 15
-  livenessProbe:
     initialDelaySeconds: 30
+  livenessProbe:
+    initialDelaySeconds: 60
 
 ingress:
   enabled: false

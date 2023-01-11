@@ -5,6 +5,7 @@ import workflowRouter from './routes/workflow';
 import agentRouter from './routes/agent';
 import healthRouter from './routes/health';
 import settingsRouter from './routes/settings';
+import notifsRouter from './routes/notification';
 
 const cors = require('cors');
 // const bodyParser = require('body-parser');
@@ -30,5 +31,6 @@ app.use('/input', inputRouter);
 app.use('/workflow', workflowRouter);
 app.use('/agent', agentRouter);
 app.use('/settings', settingsRouter);
+app.use('/notification', notifsRouter);
 
 export default app;

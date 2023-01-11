@@ -55,6 +55,7 @@ interface IState {
   stackTrace: string;
   showException: boolean;
   dataFetched: boolean;
+  pollingTrigger: boolean;
 }
 
 class JobListing extends React.Component<IProps, IState> {
@@ -69,24 +70,17 @@ class JobListing extends React.Component<IProps, IState> {
       fbSubs: [],
       stackTrace: "",
       showException: false,
+      pollingTrigger: false,
     };
 
     this.showException = this.showException.bind(this);
     this.hideDialog = this.hideDialog.bind(this);
+    this.refreshJobListing = this.refreshJobListing.bind(this);
   }
 
   componentDidMount() {
     this.refreshJobListing();
-
-    // const jobs = ref(fbDatabase, `workflowJobProgress/${this.context.companyId}/triggerRefresh`);
-    // onValue(jobs, (snapshot) => {
-    //   const data = snapshot.val();
-    //   if (!data) { return; }
-
-    //   if (data.refresh) {
-    //     this.refreshJobListing();
-    //   }
-    // });
+    this.startPolling();
   }
 
   showException(event:any, job:WorkflowJob) {
@@ -104,66 +98,31 @@ class JobListing extends React.Component<IProps, IState> {
     })
   }
 
+  startPolling() {
+    setInterval(() => {
+      if (!this.state.pollingTrigger) {
+        this.refreshJobListing();
+      }
+    }, 5000);
+  }
+
   async refreshJobListing() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/workflow/jobs`, {
-          credentials: 'include',
+      this.setState({
+        pollingTrigger: true
       });
+      const response = await fetch(`${this.context.apiUrl}/workflow/jobs`);
 
       const data = await response.json();
-
-      data.forEach((job:WorkflowJob) => {
-        if (job.status === "inProgress" || job.status === "queued") {
-          this.initFirebaseSubscription(job.uuid);
-        }
-      })
 
       this.setState({
         jobs: data,
         dataFetched: true,
+        pollingTrigger: false,
       });
     } catch (err) {
     // console.log('CATCH ERR', error);
     }
-  }
-
-  initFirebaseSubscription(jobId:string) {
-    // if (this.state.fbSubs.includes(jobId)) {
-    //   // don't subscribe more than once
-    //   return; 
-    // }
-    // const jobs = query(ref(fbDatabase, `workflowJobProgress/${this.context.companyId}/${jobId}`));
-    // onValue(jobs, (snapshot) => {
-    //   const data = snapshot.val();
-    //   if (!data) { return; }
-
-    //   // update state
-    //   const wfJobs = this.state.jobs.map((j:WorkflowJob) => {
-    //     const job = j;
-        
-    //     job.progress = (["inProgress", "queued"].includes(job.status) && job.uuid === data.uuid) ? data.progress : null;
-        
-    //     // update frontend values before next refresh
-    //     if (job.progress === 100) {
-    //       // transition from inProgress
-    //       job.status = "completed";
-    //     }
-    //     else if (job.progress) {
-    //       // transition from queued
-    //       job.status = "inProgress";
-    //     }
-
-    //     return job;
-    //   });
-      
-    //   const fbSubs = this.state.fbSubs;
-    //   if (!fbSubs.includes(jobId)) { fbSubs.push(jobId); }
-
-    //   this.setState({
-    //     jobs: wfJobs,
-    //     fbSubs: fbSubs,
-    //   })
-    // });
   }
 
   progressBar(job:WorkflowJob) {
@@ -252,20 +211,6 @@ class JobListing extends React.Component<IProps, IState> {
     let outputSummary:any = null;
     let outputInfo:any = null;
     if (job.status === "completed" && job.createdAt !== job.lastTaskEnd) {
-      if (job.workflowType === "piiscanner") {
-        outputInfo = (
-          <span>
-            Access the <Link href="/usecases/piiscanner" target="_blank">PII Scanner</Link> page to view the results of this scan.
-          </span>
-        )
-      }
-      else if (job.workflowType === "usersearch") {
-        outputInfo = (
-          <span>
-            Access the generated SQL via the <code>download-export</code> Redactics CLI command, and the receipt of this SQL generation <Link href="/usecases/forgetuser" target="_blank">here</Link>.
-          </span>
-        )
-      }
       outputSummary = job.outputLinks ? (
         <Box>
           <Box>
@@ -444,7 +389,7 @@ class JobListing extends React.Component<IProps, IState> {
         {(this.state.dataFetched && (!this.state.jobs || !this.state.jobs.length)) ? (
           <Card mt={8}>
             <CardContent>
-              You have no workflow jobs yet. Jobs will appear here after the time the job has been scheduled for, or when run manually. These not include jobs created in the "Workflows" section, but PII Scanner and Forget User jobs as well.
+              You have no workflow jobs yet. Jobs will appear here after the time the job has been scheduled for, or when run manually.
             </CardContent>
           </Card>
         ) : null}

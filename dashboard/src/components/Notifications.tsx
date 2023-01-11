@@ -27,6 +27,10 @@ import {
   Bell,
 } from 'react-feather';
 
+import {
+  NotificationRecord,
+} from '../types/redactics';
+
 import RedacticsContext from '../contexts/RedacticsContext';
 
 const IconButton = styled(MuiIconButton)`
@@ -55,12 +59,13 @@ interface IProps {
 
 interface IState {
   anchorEl?: any;
-  //firebaseData: AgentFirebaseRecord[];
+  notifications: NotificationRecord[];
   stackTrace: string;
   unreadCount: number;
   errorNotificationCheckbox: boolean;
   showException: boolean;
   showErrorNotification: boolean;
+  pollingTrigger: boolean;
 }
 
 class Notifications extends React.Component<IProps, IState> {
@@ -71,26 +76,62 @@ class Notifications extends React.Component<IProps, IState> {
 
     this.handleClick = this.handleClick.bind(this);
     this.handleClose = this.handleClose.bind(this);
-    //this.showException = this.showException.bind(this);
+    this.showException = this.showException.bind(this);
     this.hideDialog = this.hideDialog.bind(this);
     this.ackAll = this.ackAll.bind(this);
     this.toggleErrorNotification = this.toggleErrorNotification.bind(this);
     this.displayNotifications = this.displayNotifications.bind(this);
-    this.processFirebaseData = this.processFirebaseData.bind(this);
+    this.getNotifs = this.getNotifs.bind(this);
 
     this.state = {
       anchorEl: null,
-      //firebaseData: [],
+      notifications: [],
       stackTrace: '',
       unreadCount: 0,
       errorNotificationCheckbox: false,
       showException: false,
       showErrorNotification: false,
+      pollingTrigger: false,
     };
   }
 
   componentDidMount() {
-    this.processFirebaseData();
+    this.getNotifs();
+    this.startPolling();
+  }
+
+  startPolling() {
+    setInterval(() => {
+      if (!this.state.pollingTrigger) {
+        this.getNotifs();
+      }
+    }, 10000);
+  }
+
+  async getNotifs() {
+    try {
+      this.setState({
+        pollingTrigger: true
+      });
+      const response = await fetch(`${this.context.apiUrl}/notification`, {
+        method: 'get',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      const notifications = await response.json();
+      const findUnreads = notifications.notifications.filter((notif:NotificationRecord) => {
+        return (!notif.acked && notif.exception)
+      })
+  
+      this.setState({
+        notifications: notifications.notifications,
+        unreadCount: findUnreads.length,
+        pollingTrigger: false,
+      });
+    } catch (err) {
+      // console.log('CATCH ERR', error);
+    }
   }
 
   handleClick(event:any) {
@@ -105,19 +146,26 @@ class Notifications extends React.Component<IProps, IState> {
     });
   }
 
-  // showException(event:any, data:AgentFirebaseRecord) {
-  //   event.preventDefault();
+  showException(event:any, data:NotificationRecord) {
+    event.preventDefault();
 
-  //   let { unreadCount } = this.state;
-  //   if (unreadCount > 0 && !data.ack && typeof data.ack !== 'undefined') {
-  //     unreadCount -= 1;
-  //   }
-  //   this.setState({
-  //     showException: true,
-  //     stackTrace: data.stackTrace || '',
-  //     unreadCount,
-  //   });
-  // }
+    let { unreadCount } = this.state;
+    if (unreadCount > 0 && !data.acked) {
+      unreadCount -= 1;
+    }
+    const notifications = this.state.notifications.map((notif:NotificationRecord) => {
+      if (notif.uuid === data.uuid) {
+        notif.acked = true;
+      }
+      return notif;
+    })
+    this.setState({
+      showException: true,
+      stackTrace: data.stackTrace || '',
+      notifications,
+      unreadCount,
+    });
+  }
 
   async hideDialog() {
     if (this.state.errorNotificationCheckbox) {
@@ -128,7 +176,6 @@ class Notifications extends React.Component<IProps, IState> {
           headers: {
             'Content-Type': 'application/json',
           },
-          credentials: 'include',
         });
         this.setState({
           showException: false,
@@ -152,13 +199,20 @@ class Notifications extends React.Component<IProps, IState> {
       this.setState({
         anchorEl: null,
       });
-      fetch(`${this.context.apiUrl}/database/ackAll`, {
+      await fetch(`${this.context.apiUrl}/notification/ackAll`, {
         method: 'put',
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
       });
+      const notifications = this.state.notifications.map((notif:NotificationRecord) => {
+        notif.acked = true;
+        return notif;
+      });
+      this.setState({
+        notifications,
+        unreadCount:0
+      })
     } catch (err) {
       // console.log('ERR', err);
     }
@@ -171,139 +225,106 @@ class Notifications extends React.Component<IProps, IState> {
   }
 
   displayNotifications() {
-    // const popoverContent = (this.state.firebaseData.length) ? (
-    //   <Box>
-    //     <Button color="primary" onClick={this.ackAll}>
-    //       Mark All As Read
-    //     </Button>
-    //     <Table>
-    //       <TableHead>
-    //         <TableRow>
-    //           <TableCell>Message</TableCell>
-    //           <TableCell>Database</TableCell>
-    //           <TableCell>Date</TableCell>
-    //         </TableRow>
-    //       </TableHead>
-    //       <TableBody>
-    //         {this.state.firebaseData.map((v:AgentFirebaseRecord) => {
-    //           // TODO: DRY, some sort of conditional wrapper
-    //           const exceptionMsg = (v.exception && v.exception.length > 190) ? v.exception.substring(0,189) + "..." : v.exception;
-    //           const exception = (v.ack) ? exceptionMsg : (<b>{exceptionMsg}</b>);
+    const popoverContent = (this.state.notifications.length) ? (
+      <Box>
+        <Button color="primary" onClick={this.ackAll}>
+          Mark All As Read
+        </Button>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Message</TableCell>
+              <TableCell>Workflow</TableCell>
+              <TableCell>Date</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {this.state.notifications.map((n:NotificationRecord) => {
+              // TODO: DRY, some sort of conditional wrapper
+              const exceptionMsg = (n.exception && n.exception.length > 190) ? n.exception.substring(0,189) + "..." : n.exception;
+              const exception = (n.acked) ? exceptionMsg : (<b>{exceptionMsg}</b>);
 
-    //           if (v.firstHeartbeat) {
-    //             return (
-    //               <TableRow key={v.key}>
-    //                 <TableCell component="th" scope="row">
-    //                   The Redactics Agent <b>{v.agentName}</b> has successfully reported to Redactics
-    //                 </TableCell>
-    //                 <TableCell>
+              let cell1 = null;
+              let cell2 = null;
+              let cell3 = null;
+              if (n.firstHeartbeat) {
+                cell1 = (
+                  <TableCell component="th" scope="row">
+                    The Redactics Agent <b>{n.agentName}</b> has successfully reported to Redactics
+                  </TableCell>
+                )
+                cell2 = (
+                  <TableCell>
+                    N/A
+                  </TableCell>
+                )
+                cell3 = (
+                  <TableCell>
+                    <Moment fromNow>{new Date(n.createdAt)}</Moment>
+                  </TableCell>
+                )
 
-    //                 </TableCell>
-    //                 <TableCell>
-    //                   <Moment fromNow>{new Date(v.timestamp)}</Moment>
-    //                 </TableCell>
-    //               </TableRow>
-    //             );
-    //           } else {
-    //             return (
-    //               <ReadRow key={v.key}>
-    //                 <TableCell component="th" scope="row">
-    //                   <Link
-    //                     href="#"
-    //                     onClick={async (event:any) => {
-    //                       if (v.stackTrace) {
-    //                         //this.showException(event, v);
-    //                       }
-    //                       try {
-    //                         await fetch(`${this.context.apiUrl}/database/${v.databaseId}/ackException`, {
-    //                           method: 'put',
-    //                           headers: {
-    //                             'Content-Type': 'application/json',
-    //                           },
-    //                           credentials: 'include',
-    //                           body: JSON.stringify({
-    //                             exceptionId: v.key,
-    //                           }),
-    //                         });
-    //                         this.setState({
-    //                           anchorEl: null,
-    //                         });
-    //                       } catch (err) {
-    //                         // console.log('ERR', err);
-    //                       }
-    //                     }}
-    //                   >
-    //                   {exception}
-    //                   </Link>
-    //                 </TableCell>
-    //                 <TableCell>
-    //                   {v.databaseName}
-    //                 </TableCell>
-    //                 <TableCell>
-    //                   <Moment fromNow>{new Date(v.timestamp)}</Moment>
-    //                 </TableCell>
-    //               </ReadRow>
-    //             );
-    //           }
-    //         })}
-    //       </TableBody>
-    //     </Table>
-    //   </Box>
-    // ) : (
-    //   <Box m={4}>
-    //     You have no notifications
-    //   </Box>);
+                return (
+                  <ReadRow key={n.uuid}>{cell1}{cell2}{cell3}</ReadRow>
+                )
+              } else {
+                cell1 = (
+                  <TableCell component="th" scope="row">
+                    <Link
+                      href="#"
+                      onClick={async (event:any) => {
+                        if (n.stackTrace) {
+                          this.showException(event, n);
+                        }
+                        try {
+                          await fetch(`${this.context.apiUrl}/notification/${n.uuid}/ackException`, {
+                            method: 'put',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                          });
+                          this.setState({
+                            anchorEl: null,
+                          });
+                        } catch (err) {
+                          // console.log('ERR', err);
+                        }
+                      }}
+                    >
+                    {exception}
+                    </Link>
+                  </TableCell>
+                )
+                cell2 = (
+                  <TableCell>
+                    {n.workflowName || "N/A"}
+                  </TableCell>
+                )
+                cell3 = (
+                  <TableCell>
+                    <Moment fromNow>{new Date(n.createdAt)}</Moment>
+                  </TableCell>
+                )
 
-    // return popoverContent;
-    return null;
+                return (n.acked) ? (
+                  <ReadRow key={n.uuid}>{cell1}{cell2}{cell3}</ReadRow>
+                ) : (
+                  <TableRow key={n.uuid}>{cell1}{cell2}{cell3}</TableRow>
+                );
+              }
+            })}
+          </TableBody>
+        </Table>
+      </Box>
+    ) : (
+      <Box m={4}>
+        You have no notifications
+      </Box>);
+
+    return popoverContent;
   }
 
   /* eslint-disable no-restricted-syntax */
-
-  processFirebaseData() {
-    // let unreadCount = 0;
-    // let exceptionsFound = 0;
-    // let displayExceptions = 10; // display this many exceptions
-    // const notifications = query(ref(fbDatabase, `notifications/${this.context.companyId}`), orderByChild('timestamp'));
-    // onValue(notifications, (snapshot) => {
-    //   const data = snapshot.val();
-    //   if (!data) { return; }
-    //   const formattedData = [];
-    //   unreadCount = 0;
-    //   exceptionsFound = 0;
-
-    //   // show displayExceptions most recent exceptions
-    //   let showErrorNotification = false;
-    //   for (const [key, v] of Object.entries(data).reverse()) {
-    //     // cast Firebase data to AgentFirebaseRecord type
-    //     const val: AgentFirebaseRecord = v as AgentFirebaseRecord;
-    //     if (!val.ack && typeof val.ack !== 'undefined' && val.exception) {
-    //       unreadCount += 1;
-    //     }
-
-    //     //console.log("VAL", val)
-    //     if (!val.heartbeat && exceptionsFound < displayExceptions) {
-    //       // attach key to data
-    //       val.key = key;
-    //       exceptionsFound++;
-    //       formattedData.push(val);
-    //     }
-
-    //     if (!val.ack && val.exception && !this.context.ackErrorNotification) {
-    //       // trigger dialog about notification bell
-    //       showErrorNotification = true;
-    //     }
-    //   }
-
-    //   //console.log("UNREAD", unreadCount, formattedData.reverse())
-    //   this.setState({
-    //     showErrorNotification,
-    //     errorNotificationCheckbox: false,
-    //     firebaseData: formattedData,
-    //     unreadCount,
-    //   });
-    // });
-  }
 
   render() {
     const open = Boolean(this.state.anchorEl);
@@ -348,41 +369,6 @@ class Notifications extends React.Component<IProps, IState> {
                     <br />
                   </React.Fragment>)
               }
-            </DialogContentText>
-
-            <DialogActions>
-              <Button color="primary" onClick={this.hideDialog}>
-                Close
-              </Button>
-            </DialogActions>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog
-          open={this.state.showErrorNotification}
-          maxWidth="lg"
-          aria-labelledby="dialog-title"
-          aria-describedby="dialog-description"
-        >
-          <DialogTitle id="dialog-title">An Error Has Been Reported to Redactics</DialogTitle>
-          <DialogContent>
-            <DialogContentText id="dialog-description">
-              Errors, including full stack traces, can be accessed via the
-              notification bell in the upper right hand corner.
-
-              <Box mt={4}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={this.state.errorNotificationCheckbox}
-                      onChange={this.toggleErrorNotification}
-                      name="helmReminder"
-                      color="primary"
-                    />
-                  }
-                  label="I got it, don't show this again"
-                />
-              </Box>
             </DialogContentText>
 
             <DialogActions>
