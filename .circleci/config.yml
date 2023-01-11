@@ -1,0 +1,130 @@
+version: 2.1
+
+orbs:
+  helm: circleci/helm@1.2.0
+  docker: circleci/docker@1.5.0
+  gcp-gcr: circleci/gcp-gcr@0.13.0
+  gcp-gke: circleci/gcp-gke@1.2.0
+  # third-party experimental ORB
+  docker-registry-image-cache: cci-x/docker-registry-image-cache@0.2.12
+
+jobs:
+  build_api:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      # replace CIRCLE_BRANCH env var for Docker
+      - run:
+          name: Replace CIRCLE_BRANCH for Docker build
+          command: |
+            echo "export CIRCLE_BRANCH=`echo $CIRCLE_BRANCH | sed -E 's/\//-/g' | sed -E 's/#//g'`" >> $BASH_ENV
+      - docker-registry-image-cache/with-save-restore-images:
+          repository: redactics
+          images: "api:${CIRCLE_BRANCH}"
+          parallelism: 2
+          steps:
+            - docker-registry-image-cache/build:
+                command: "docker build -t redactics/api:${CIRCLE_SHA1} -t redactics/api:${CIRCLE_BRANCH} -f Dockerfile api/."
+  build_dashboard:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      # replace CIRCLE_BRANCH env var for Docker
+      - run:
+          name: Replace CIRCLE_BRANCH for Docker build
+          command: |
+            echo "export CIRCLE_BRANCH=`echo $CIRCLE_BRANCH | sed -E 's/\//-/g' | sed -E 's/#//g'`" >> $BASH_ENV
+      - docker-registry-image-cache/with-save-restore-images:
+          repository: redactics
+          images: "api:${CIRCLE_BRANCH}"
+          parallelism: 2
+          steps:
+            - docker-registry-image-cache/build:
+                command: "docker build -t redactics/dashbaord:${CIRCLE_SHA1} -t redactics/dashboard:${CIRCLE_BRANCH} -f Dockerfile dashboard/."
+  test:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      - gcp-gcr/gcr-auth
+      - run:
+          name: Run tests
+          command: |
+            docker-compose -f docker-compose-ci.yml run api
+
+  eslint:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      - gcp-gcr/gcr-auth
+      - run:
+          name: Run eslint
+          command: |
+            docker-compose -f docker-compose-ci.yml run api npm run eslint
+
+workflows:
+  osedition:
+    jobs:
+      - build_api:
+          name: 'Build API'
+      - build_dashboard:
+          name: 'Build Dashboard'
+      # - test:
+      #     name: 'Test API'
+      #     requires:
+      #       - 'Build API'
+      # - eslint:
+      #     name: 'Run ESLint'
+      #     requires:
+      #       - 'Build API'
