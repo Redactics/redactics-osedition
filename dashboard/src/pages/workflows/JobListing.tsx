@@ -55,13 +55,11 @@ interface IState {
   stackTrace: string;
   showException: boolean;
   dataFetched: boolean;
-  ws: any;
+  pollingTrigger: boolean;
 }
 
 class JobListing extends React.Component<IProps, IState> {
   static contextType = RedacticsContext;
-
-  wsTimeout = 250;
 
   constructor(props: IProps) {
     super(props);
@@ -72,58 +70,18 @@ class JobListing extends React.Component<IProps, IState> {
       fbSubs: [],
       stackTrace: "",
       showException: false,
-      ws: null,
+      pollingTrigger: false,
     };
 
     this.showException = this.showException.bind(this);
     this.hideDialog = this.hideDialog.bind(this);
+    this.refreshJobListing = this.refreshJobListing.bind(this);
   }
 
   componentDidMount() {
     this.refreshJobListing();
-    this.wsConnect();
+    this.startPolling();
   }
-
-  wsConnect() {
-    var ws = new WebSocket(this.context.wsUrl);
-    let that = this; // cache the this
-    var connectInterval:any;
-
-    // websocket onopen event listener
-    ws.onopen = () => {
-      console.log("Connection to Websocket/Redactics Notification Server established");
-
-      this.setState({ ws: ws });
-
-      that.wsTimeout = 250; // reset timer to 250 on open of websocket connection 
-      clearTimeout(connectInterval); // clear Interval on open of websocket connection
-    };
-
-    ws.onmessage = (event:any) => {
-      let data = JSON.parse(event.data);
-      if (data.event === "postJobTaskEnd" || data.event === "postJobException") { this.refreshJobListing(); }
-    }
-
-    ws.onclose = (event:any) => {
-      that.wsTimeout = that.wsTimeout + that.wsTimeout; //increment retry interval
-      connectInterval = setTimeout(this.check, Math.min(10000, that.wsTimeout)); //call check function after timeout
-    };
-
-    ws.onerror = (err:any) => {
-      console.error(
-          "Socket encountered error: ",
-          err.message,
-          "Closing socket"
-      );
-
-      ws.close();
-    };
-  }
-
-  check = () => {
-    const { ws } = this.state;
-    if (!ws || ws.readyState === WebSocket.CLOSED) this.wsConnect(); //check if websocket instance is closed, if so call `connect` function.
-  };
 
   showException(event:any, job:WorkflowJob) {
     event.preventDefault();
@@ -140,60 +98,31 @@ class JobListing extends React.Component<IProps, IState> {
     })
   }
 
+  startPolling() {
+    setInterval(() => {
+      if (!this.state.pollingTrigger) {
+        this.refreshJobListing();
+      }
+    }, 5000);
+  }
+
   async refreshJobListing() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/workflow/jobs`, {
-          credentials: 'include',
+      this.setState({
+        pollingTrigger: true
       });
+      const response = await fetch(`${this.context.apiUrl}/workflow/jobs`);
 
       const data = await response.json();
 
       this.setState({
         jobs: data,
         dataFetched: true,
+        pollingTrigger: false,
       });
     } catch (err) {
     // console.log('CATCH ERR', error);
     }
-  }
-
-  initFirebaseSubscription(jobId:string) {
-    // if (this.state.fbSubs.includes(jobId)) {
-    //   // don't subscribe more than once
-    //   return; 
-    // }
-    // const jobs = query(ref(fbDatabase, `workflowJobProgress/${this.context.companyId}/${jobId}`));
-    // onValue(jobs, (snapshot) => {
-    //   const data = snapshot.val();
-    //   if (!data) { return; }
-
-    //   // update state
-    //   const wfJobs = this.state.jobs.map((j:WorkflowJob) => {
-    //     const job = j;
-        
-    //     job.progress = (["inProgress", "queued"].includes(job.status) && job.uuid === data.uuid) ? data.progress : null;
-        
-    //     // update frontend values before next refresh
-    //     if (job.progress === 100) {
-    //       // transition from inProgress
-    //       job.status = "completed";
-    //     }
-    //     else if (job.progress) {
-    //       // transition from queued
-    //       job.status = "inProgress";
-    //     }
-
-    //     return job;
-    //   });
-      
-    //   const fbSubs = this.state.fbSubs;
-    //   if (!fbSubs.includes(jobId)) { fbSubs.push(jobId); }
-
-    //   this.setState({
-    //     jobs: wfJobs,
-    //     fbSubs: fbSubs,
-    //   })
-    // });
   }
 
   progressBar(job:WorkflowJob) {

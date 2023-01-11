@@ -65,13 +65,11 @@ interface IState {
   errorNotificationCheckbox: boolean;
   showException: boolean;
   showErrorNotification: boolean;
-  ws: any;
+  pollingTrigger: boolean;
 }
 
 class Notifications extends React.Component<IProps, IState> {
   static contextType = RedacticsContext;
-
-  wsTimeout = 250;
 
   constructor(props: IProps) {
     super(props);
@@ -83,7 +81,7 @@ class Notifications extends React.Component<IProps, IState> {
     this.ackAll = this.ackAll.bind(this);
     this.toggleErrorNotification = this.toggleErrorNotification.bind(this);
     this.displayNotifications = this.displayNotifications.bind(this);
-    this.processFirebaseData = this.processFirebaseData.bind(this);
+    this.getNotifs = this.getNotifs.bind(this);
 
     this.state = {
       anchorEl: null,
@@ -93,31 +91,47 @@ class Notifications extends React.Component<IProps, IState> {
       errorNotificationCheckbox: false,
       showException: false,
       showErrorNotification: false,
-      ws: null,
+      pollingTrigger: false,
     };
   }
 
   componentDidMount() {
-    this.wsConnect();
     this.getNotifs();
+    this.startPolling();
+  }
+
+  startPolling() {
+    setInterval(() => {
+      if (!this.state.pollingTrigger) {
+        this.getNotifs();
+      }
+    }, 10000);
   }
 
   async getNotifs() {
-    const response = await fetch(`${this.context.apiUrl}/notification`, {
-      method: 'get',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    const notifications = await response.json();
-    const findUnreads = notifications.notifications.filter((notif:NotificationRecord) => {
-      return (!notif.acked && notif.exception)
-    })
-
-    this.setState({
-      notifications: notifications.notifications,
-      unreadCount: findUnreads.length
-    });
+    try {
+      this.setState({
+        pollingTrigger: true
+      });
+      const response = await fetch(`${this.context.apiUrl}/notification`, {
+        method: 'get',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      const notifications = await response.json();
+      const findUnreads = notifications.notifications.filter((notif:NotificationRecord) => {
+        return (!notif.acked && notif.exception)
+      })
+  
+      this.setState({
+        notifications: notifications.notifications,
+        unreadCount: findUnreads.length,
+        pollingTrigger: false,
+      });
+    } catch (err) {
+      // console.log('CATCH ERR', error);
+    }
   }
 
   handleClick(event:any) {
@@ -209,47 +223,6 @@ class Notifications extends React.Component<IProps, IState> {
       errorNotificationCheckbox: event.target.checked,
     });
   }
-
-  wsConnect() {
-    var ws = new WebSocket(this.context.wsUrl);
-    let that = this; // cache the this
-    var connectInterval:any;
-
-    // websocket onopen event listener
-    ws.onopen = () => {
-      console.log("Connection to Websocket/Redactics Notification Server established");
-
-      this.setState({ ws: ws });
-
-      that.wsTimeout = 250; // reset timer to 250 on open of websocket connection 
-      clearTimeout(connectInterval); // clear Interval on open of websocket connection
-    };
-
-    ws.onmessage = (event:any) => {
-      let data = JSON.parse(event.data);
-      if (data.event === "postJobException" || data.event === "firstHeartbeat") { this.getNotifs(); }
-    }
-
-    ws.onclose = (event:any) => {
-      that.wsTimeout = that.wsTimeout + that.wsTimeout; //increment retry interval
-      connectInterval = setTimeout(this.check, Math.min(10000, that.wsTimeout)); //call check function after timeout
-    };
-
-    ws.onerror = (err:any) => {
-      console.error(
-          "Socket encountered error: ",
-          err.message,
-          "Closing socket"
-      );
-
-      ws.close();
-    };
-  };
-
-  check = () => {
-    const { ws } = this.state;
-    if (!ws || ws.readyState === WebSocket.CLOSED) this.wsConnect(); //check if websocket instance is closed, if so call `connect` function.
-  };
 
   displayNotifications() {
     const popoverContent = (this.state.notifications.length) ? (
@@ -352,51 +325,6 @@ class Notifications extends React.Component<IProps, IState> {
   }
 
   /* eslint-disable no-restricted-syntax */
-
-  processFirebaseData() {
-    // let unreadCount = 0;
-    // let exceptionsFound = 0;
-    // let displayExceptions = 10; // display this many exceptions
-    // const notifications = query(ref(fbDatabase, `notifications/${this.context.companyId}`), orderByChild('timestamp'));
-    // onValue(notifications, (snapshot) => {
-    //   const data = snapshot.val();
-    //   if (!data) { return; }
-    //   const formattedData = [];
-    //   unreadCount = 0;
-    //   exceptionsFound = 0;
-
-    //   // show displayExceptions most recent exceptions
-    //   let showErrorNotification = false;
-    //   for (const [key, v] of Object.entries(data).reverse()) {
-    //     // cast Firebase data to AgentFirebaseRecord type
-    //     const val: AgentFirebaseRecord = v as AgentFirebaseRecord;
-    //     if (!val.ack && typeof val.ack !== 'undefined' && val.exception) {
-    //       unreadCount += 1;
-    //     }
-
-    //     //console.log("VAL", val)
-    //     if (!val.heartbeat && exceptionsFound < displayExceptions) {
-    //       // attach key to data
-    //       val.key = key;
-    //       exceptionsFound++;
-    //       formattedData.push(val);
-    //     }
-
-    //     if (!val.ack && val.exception && !this.context.ackErrorNotification) {
-    //       // trigger dialog about notification bell
-    //       showErrorNotification = true;
-    //     }
-    //   }
-
-    //   //console.log("UNREAD", unreadCount, formattedData.reverse())
-    //   this.setState({
-    //     showErrorNotification,
-    //     errorNotificationCheckbox: false,
-    //     firebaseData: formattedData,
-    //     unreadCount,
-    //   });
-    // });
-  }
 
   render() {
     const open = Boolean(this.state.anchorEl);
