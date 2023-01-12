@@ -60,6 +60,10 @@ jobs:
           name: Replace CIRCLE_BRANCH for Docker build
           command: |
             echo "export CIRCLE_BRANCH=`echo $CIRCLE_BRANCH | sed -E 's/\//-/g' | sed -E 's/#//g'`" >> $BASH_ENV
+      - run:
+          name: Expose Environment Variables
+          command: |
+            echo "$BUILD_ENV_VARS" | base64 -d > .env.production
       - docker-registry-image-cache/with-save-restore-images:
           repository: redactics
           images: "api:${CIRCLE_BRANCH}"
