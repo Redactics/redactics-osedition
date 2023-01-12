@@ -53,7 +53,7 @@ import {
   Code as CodeIcon,
 } from 'react-feather';
 
-import { CustomSecret, DataFeed, AgentRecord, WorkflowRecord, PostUpdateParam } from '../../types/redactics';
+import { WorkflowInputRecord, CustomSecret, DataFeed, AgentRecord, WorkflowRecord, PostUpdateParam } from '../../types/redactics';
 
 import { Alert as MuiAlert } from '@material-ui/lab';
 
@@ -105,6 +105,7 @@ const Button = styled(MuiButton)(spacing);
 /* eslint-disable @typescript-eslint/no-empty-interface */
 
 interface IProps {
+  inputs: WorkflowInputRecord[];
   handleDeleteSecret: any;
   markAddToS3UploadList: any;
   addAllToS3UploadList: any;
@@ -157,10 +158,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
   dataFeedName(df:string) {
     let dataFeed:string = "";
     switch (df) {
-      case 'dataRepository':
-        dataFeed = "Push Data to your Internal Data Repository";
-      break;
-
       case 'digitalTwin':
         dataFeed = "Create a PII-free Digital Twin/Clone";
       break;
@@ -187,10 +184,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
       uploadBucket = "s3://" + df.dataFeedConfig.S3UploadBucket;
     }
     switch (df.dataFeed) {
-      case 'dataRepository':
-      dataFeedSummary = "Add datasets to your data repository (hosted at " + uploadBucket + ")";
-      break;
-
       case 'digitalTwin':
       dataFeedSummary = "Data will be cloned to your " + this.databaseEngine(df.dataFeedConfig.databaseEngine) + " database and will be ";
       dataFeedSummary += (df.dataFeedConfig.enableDeltaUpdates) ? "updated with new data" : "reset to match the original data";
@@ -329,14 +322,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
 
                 <Box display={(this.props.dataFeed.dataFeed === '') ? 'block' : 'none'}>
                   <List component="nav" aria-label="data feed selection">
-                    <ListItem disabled={!(this.props.workflow.workflowType === "ERL")} button onClick={() => this.props.handleDataFeed('dataRepository')}>
-                      <ListItemText
-                        primary="Push Data to your Internal Data Repository"
-                        primaryTypographyProps={{ style: bold }}
-                        secondary="Uploads your PII-free datasets to an Amazon S3 bucket, and reports the dataset to your Data Repository page. The Data Repositories page includes instructions to automate the download and installation of these data sets. This approach makes developer testing against production data easy, and is an effective alternative to creating and maintaining developer seed data." 
-                      />
-                    </ListItem>
-
                     <ListItem disabled={!(this.props.workflow.workflowType === "ERL")} button onClick={() => this.props.handleDataFeed('digitalTwin')}>
                       <ListItemText
                         primary="Create a PII-free Digital Twin/Clone"
@@ -363,47 +348,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                   </List>
                 </Box>
 
-                <Box mt={8} display={(this.props.dataFeed.dataFeed === 'dataRepository') ? 'block' : 'none'}>
-                  <Typography variant="h4" gutterBottom>
-                    Data Repository Options
-                  </Typography>
-
-                  <Box mt={8}>
-                    <FormControl fullWidth variant="outlined">
-                      <MedTextField
-                        name="S3UploadBucket"
-                        error={this.props.errors.invalidBucketName}
-                        onChange={(event) => this.props.handleDataFeedOptions(event)}
-                        value={this.props.dataFeed.dataFeedConfig.S3UploadBucket}
-                        label="S3 Bucket"
-                        InputProps={{
-                          startAdornment: <InputAdornment position="start"><b>S3://</b></InputAdornment>,
-                        }}
-                      />
-                    </FormControl>
-                  </Box>
-
-                  <Box mt={8}>
-                    <Paper variant="outlined">
-                      <ExpansionPanel>
-                        <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
-                          <Typography>Plugin Requirements</Typography>
-                        </ExpansionPanelSummary>
-                        <ExpansionPanelDetails>
-                          <p>
-                            This plugin requires an AWS access key ID and secret access key pair to authenticate to the provided bucket. Create an AWS credentials file in the style of the <code>~/.aws/credentials</code> example provided <Link href="https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html" target="_blank">here</Link> and run the following command to create a secret in your Kubernetes cluster namespace as the contents of this file:
-                          </p>
-                          <p>
-                            <code>
-                              kubectl create secret generic aws -n {this.props.agentNamespace || 'unknown_namespace'} --from-file=/path/to/aws/credentials
-                            </code>
-                          </p>
-                        </ExpansionPanelDetails>
-                      </ExpansionPanel>
-                    </Paper>
-                  </Box>
-                </Box>
-
                 <Box mt={8} display={(this.props.dataFeed.dataFeed === 'digitalTwin') ? 'block' : 'none'}>
                   <Typography variant="h4" gutterBottom>
                     Digital Twin Options
@@ -417,64 +361,17 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                         Input Source
                       </InputLabel>
                       <Select
-                        error={this.props.errors.databaseEngine}
-                        value={this.props.dataFeed.dataFeedConfig.databaseEngine}
-                        name="databaseEngine"
+                        value={this.props.dataFeed.dataFeedConfig.inputSource}
+                        name="inputSource"
                         onChange={(event) => this.props.handleDataFeedOptions(event)}
                       >
-                        <MenuItem key="postgresql" value="postgresql">PostgreSQL</MenuItem>
+                        {this.props.inputs.map((input:WorkflowInputRecord) => (
+                          <MenuItem key={input.uuid} value={input.inputName}>{input.inputName}</MenuItem>
+                        ))}
                       </Select>
                     </FormControl>
                   </Box>
                  
-                  <Box mt={4}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={this.props.dataFeed.dataFeedConfig.enableSSL}
-                          onChange={(event) => this.props.handleDataFeedOptions(event)}
-                          name="enableSSL"
-                          color="primary"
-                        />
-                      }
-                      label="Database Connectivity Should Be TLS/SSL Encrypted"
-                    />
-                  </Box>
-
-                  <Box mt={4} display={(this.props.dataFeed.uuid.match(/^new/) && this.props.dataFeed.dataFeedConfig.enableSSL) ? 'block' : 'none'}>
-                    Once this data feed has been saved (and assigned an ID), edit this input to find TLS/SSL encryption setup instructions
-                  </Box>
-
-                  <Box mt={4} display={(!this.props.dataFeed.uuid.match(/^new/) && this.props.dataFeed.dataFeedConfig.enableSSL) ? 'block' : 'none'}>
-                    <Paper variant="outlined">
-                      <ExpansionPanel>
-                        <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
-                          <Typography>TLS/SSL Encryption Setup Instructions</Typography>
-                        </ExpansionPanelSummary>
-                        <ExpansionPanelDetails>
-                          Enabling TLS/SSL encryption requires having an engineer perform the following four steps. These steps (even upon completion) will remain available here for reference:
-
-                          <ol>
-                            <li>Figure out what <code>sslmode</code> option is required by your database host/provider. Possibilities include <code>allow, prefer, require, verify-ca, verify-full</code> (<Link href="https://www.postgresql.org/docs/12/libpq-ssl.html" target="_blank">more info</Link>). Also figure out whether your database requires presenting only the root CA certificate, or the root CA as well as client cert and key files. Download these required files - we&apos;ll need them for step 3.</li>
-                            <li>Update your Helm configuration file (i.e. <code>{this.getAgent().configPath}</code>) and add the following in the block (respecting proper indentation level) that includes <code>id: {this.props.dataFeed.uuid}</code>. Take out the <code>sslcert</code> and <code>sslkey</code> params if your server doesn&apos;t require these, and you can adjust the <code>sslmode</code> value as necessary:<br/><br/>
-                              <code>
-                                enableSSL: true<br/>
-                                extra: &apos;&#123;&quot;sslmode&quot;:&quot;verify-ca&quot;, &quot;sslrootcert&quot;:&quot;/pgcerts/{this.props.dataFeed.uuid}/sslrootcert&quot;, &quot;sslcert&quot;: &quot;/pgcerts/{this.props.dataFeed.uuid}/sslcert&quot;, &quot;sslkey&quot;: &quot;/pgcerts/{this.props.dataFeed.uuid}/sslkey&quot;&#125;&apos;
-                              </code><br/><br/>
-                              If, for whatever reason, you&apos;d like to disable this TLS/SSL connectivity you can simply comment out these two lines by entering a hash (i.e. <code>#</code>) character before each line.
-                            </li>
-                            <li>Create a Kubernetes secret containing the certificates required by your database. Adjust the file paths, and take out the <code>sslcert</code> and <code>sslkey</code> params if your server doesn&apos;t require these:<br/><br/>
-                              <code>
-                                kubectl create secret -n {this.getAgent().namespace} generic pgcert-{this.props.dataFeed.uuid} --from-file=sslrootcert=/path/to/server-ca.pem --from-file=sslcert=/path/to/client-cert.pem  --from-file=sslkey=/path/to/client-key.pem
-                              </code>
-                            </li>
-                            <li>Visit the Agent page and reapply the provided configuration to your cluster, which will update all agent database connections to use the updated configuration you&apos;ve provided in your Helm configuration file.</li>
-                          </ol>
-                        </ExpansionPanelDetails>
-                      </ExpansionPanel>
-                    </Paper>
-                  </Box>
-
                   <Box mt={4}>
                     <FormControlLabel
                       control={
@@ -494,7 +391,8 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
 
                   <Box mt={4} display={(this.props.dataFeed.dataFeedConfig.enableDeltaUpdates) ? 'block' : 'none'}>
                     <FormControl fullWidth>
-                      <TextField 
+                      <TextField
+                        error={this.props.errors.invalidDeltaUpdateField}
                         name="deltaUpdateField"
                         value={this.props.dataFeed.dataFeedConfig.deltaUpdateField}
                         onChange={(event) => this.props.handleDataFeedOptions(event)}

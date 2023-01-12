@@ -333,7 +333,7 @@ export async function getWorkflow(req: Request, res: Response) {
     workflow.dataValues.datafeeds.filter((i:any) => (!(i.disabled))).forEach((feed:any) => {
       const df:any = feed;
       // drop UI fields unused by the Agent
-      if (df.dataValues.dataFeed === 's3upload' || df.dataValues.dataFeed === 'dataRepository') {
+      if (df.dataValues.dataFeed === 's3upload') {
         delete df.dataValues.dataFeedConfig.addAllS3Uploads;
         delete df.dataValues.dataFeedConfig.uploadFileChecked;
         delete df.dataValues.dataFeedConfig.s3Bucket;
@@ -487,22 +487,6 @@ export async function createWorkflow(req: Request, res: Response) {
     logger.error(e.stack);
     return res.status(500).send(e);
   }
-}
-
-async function triggerWorkflowJobUIRefresh(uuid:string, refresh:boolean) {
-  // TODO: refactor
-  // const db = firebaseAdmin.database();
-  // const ref = db.ref(`workflowJobProgress/${uuid}`).child('triggerRefresh');
-  // ref.update({
-  //   refresh,
-  // });
-}
-
-async function removeProgressData(uuid:string, workflowJobId:string) {
-  // TODO: refactor
-  // const db = firebaseAdmin.database();
-  // const ref = db.ref(`workflowJobProgress/${uuid}`).child(workflowJobId);
-  // await ref.remove();
 }
 
 async function saveRedactRules(workflow:any, req: Request) {
@@ -719,13 +703,13 @@ async function saveERL(req: Request, res: Response) {
       Object.values(req.body.dataFeeds).forEach((feed:any) => {
         const df:any = feed;
         df.workflowId = workflow.dataValues.id;
-        if (df.dataFeed === 's3upload' || df.dataFeed === 'dataRepository') {
+        if (df.dataFeed === 's3upload') {
           if (!df.dataFeedConfig.S3UploadBucket.match(/^s3:\/\//)) {
             // ensure bucket URL is prefaced with s3 protocol
             df.dataFeedConfig.S3UploadBucket = `s3://${df.dataFeedConfig.S3UploadBucket}`;
           }
           const uploadFiles = df.dataFeedConfig.uploadFileChecked.join(',');
-          df.dataFeedConfig.image = (process.env.NODE_ENV === 'development') ? 'localhost:5010/postexport-s3upload' : 'redactics/postexport-s3upload';
+          df.dataFeedConfig.image = 'redactics/postexport-s3upload';
           df.dataFeedConfig.tag = '1.0.1';
           df.dataFeedConfig.shell = '/bin/bash';
           df.dataFeedConfig.command = `/bin/upload-to-s3 ${workflow.dataValues.uuid} ${uploadFiles} ${df.dataFeedConfig.S3UploadBucket}`;
