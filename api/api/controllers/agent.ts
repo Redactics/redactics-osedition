@@ -315,6 +315,27 @@ export async function helmCmd(req: Request, res: Response) {
       include: ['inputs', 'datafeeds'],
     });
 
+    const agentInputs = await AgentInput.findAll({
+      where: {
+        agentId: agent.dataValues.id,
+      }
+    });
+    let inputIds:number[] = [];
+    agentInputs.forEach((input:any) => {
+      inputIds.push(input.dataValues.inputId);
+    })
+
+    const allInputs = await Input.findAll({
+      where: {
+        id: {
+          [Op.in]: inputIds,
+        },
+        disabled: {
+          [Op.not]: true,
+        },
+      }
+    });
+
     // enable PG for Airflow data and reserve 1GB
     const helmArgs:any = {
       agentId: agent.uuid,
@@ -340,20 +361,24 @@ export async function helmCmd(req: Request, res: Response) {
       const d = workflow;
 
       // build inputs
-      d.dataValues.inputs.filter((i:any) => (!(i.disabled))).forEach((i:any) => {
+      d.dataValues.inputs.filter((i:any) => (i.enabled)).forEach((i:any) => {
         inputs.push({
-          id: i.uuid,
-          tables: i.tables,
+          id: i.dataValues.uuid,
+          tables: i.dataValues.tables,
         });
 
+        let findInput = allInputs.find((input:any) => {
+          return (input.dataValues.id === i.dataValues.inputId)
+        })
+
         // calculate http-nas space
-        if (i.diskSize > largestDisk) {
+        if (findInput.dataValues.diskSize > largestDisk) {
           // add additional buffer for uncompressed, plain text files
-          largestDisk = i.diskSize;
+          largestDisk = findInput.dataValues.diskSize;
           largestDiskPadded = Math.ceil(largestDisk * 3);
         }
 
-        helmArgs.postgresql.persistence.size += i.diskSize;
+        helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
       });
     });
 
@@ -585,29 +610,6 @@ export async function helmConfig(req: Request, res: Response) {
         connections.push(connection);
       }
     });
-
-    // const dataFeeds = await DataFeed.findAll({
-    //   where: {
-    //     workflowId: {
-    //       [Op.in]: workflowIds,
-    //     },
-    //     dataFeed: 'digitalTwin',
-    //     disabled: {
-    //       [Op.not]: true,
-    //     },
-    //   },
-    // });
-    // dataFeeds.forEach((df:any) => {
-    //   connections.push({
-    //     id: df.dataValues.uuid,
-    //     type: 'postgres',
-    //     host: 'changeme',
-    //     port: 5432,
-    //     login: 'changeme',
-    //     password: 'changeme',
-    //     schema: 'changeme',
-    //   });
-    // });
 
     // Add Airflow connection string for sample DB
     connections.push({

@@ -55,7 +55,8 @@ import DatabaseMigrationSetup from './DatabaseMigrationSetup';
 
 import {
   RedactRule, CustomSecret, WorkflowRecord, WorkflowUpdate, PostUpdateParam,
-  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, AgentInputRecord, WorkflowInputRecord,
+  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, InputRecord, AgentInputRecord, 
+  WorkflowInputRecord,
 } from '../../types/redactics';
 
 const Card = styled(MuiCard)(spacing);
@@ -92,6 +93,7 @@ interface IProps {
   handleWFChanges: any;
   workflow: WorkflowRecord;
   agentInputs: AgentInputRecord[];
+  allInputs: InputRecord[];
   agents: AgentRecord[];
   presets?: RedactRulePreset[];
   redactrulesets: RedactRuleSet[];
@@ -528,7 +530,6 @@ class Workflow extends React.Component<IProps, IState> {
           headers: {
             'Content-Type': 'application/json',
           },
-          credentials: 'include',
           body: JSON.stringify(payload),
         });
 
@@ -616,7 +617,6 @@ class Workflow extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
       });
 
       this.setState({
@@ -1059,6 +1059,12 @@ class Workflow extends React.Component<IProps, IState> {
 
   handleInputChanges(event:any, input:WorkflowInputRecord) {
     const state:any = this.state;
+    const findInput = state.inputs.find((i:WorkflowInputRecord) => {
+      return (i.uuid === input.uuid)
+    });
+    if (!findInput) {
+      state.inputs.push(input);
+    }
     state.inputs = state.inputs.map((i:any) => {
       if (i.uuid === input.uuid) {
         i[event.target.name] = (event.target.name === "enabled") ? event.target.checked : event.target.value;
@@ -1290,8 +1296,8 @@ class Workflow extends React.Component<IProps, IState> {
       break;
 
       case 'digitalTwin':
-        if (!state.dataFeed.dataFeedConfig.databaseEngine) {
-          state.errors.databaseEngine = true;
+        if (state.dataFeed.dataFeedConfig.enableDeltaUpdates && !state.dataFeed.dataFeedConfig.deltaUpdateField) {
+          state.errors.invalidDeltaUpdateField = true;
           errorsFound = true;
         }
         if (state.dataFeed.dataFeedConfig.enablePostUpdatePreparedStatements && state.dataFeed.dataFeedConfig.postUpdateKeyValues.length) {
@@ -1434,21 +1440,11 @@ class Workflow extends React.Component<IProps, IState> {
     })
 
     // remove S3 prefix
-    if (dataFeed[0].dataFeed === "s3upload" || dataFeed[0].dataFeed === "dataRepository") {
+    if (dataFeed[0].dataFeed === "s3upload") {
       dataFeed[0].dataFeedConfig.S3UploadBucket = dataFeed[0].dataFeedConfig.S3UploadBucket.replace(/^s3:\/\//,'');
     }
     if (!dataFeed[0].dataFeedConfig.postUpdateKeyValues) {
       dataFeed[0].dataFeedConfig.postUpdateKeyValues = [];
-    }
-
-    switch (dataFeed[0].dataFeed) {
-      case 'dataRepository':
-      // reset table listing
-      dataFeed[0].dataFeedConfig.uploadFileChecked = [];
-      this.getS3UploadFileNames().forEach((f) => {
-        dataFeed[0].dataFeedConfig.uploadFileChecked.push(f);
-      });
-      break;
     }
 
     // dereference
@@ -1493,17 +1489,9 @@ class Workflow extends React.Component<IProps, IState> {
 
     // init config
     switch (dataFeed) {
-      case 'dataRepository':
-      // add all tables
-      state.dataFeed.dataFeedConfig.uploadFileChecked = [];
-      this.getS3UploadFileNames().forEach((f) => {
-        state.dataFeed.dataFeedConfig.uploadFileChecked.push(f);
-      });
-      break;
-
       case 'digitalTwin':
       state.dataFeed.dataFeedConfig = {
-        databaseEngine: "",
+        inputSource: "",
         enableSSL: false,
         enableDeltaUpdates: false,
         enablePostUpdatePreparedStatements: false,
@@ -1765,6 +1753,8 @@ class Workflow extends React.Component<IProps, IState> {
                   />
 
                   <WorkflowPostExport
+                    inputs={this.state.inputs}
+                    allInputs={this.props.allInputs}
                     dataFeeds={this.state.dataFeeds}
                     dataFeed={this.state.dataFeed}
                     addParameterValue={this.addParameterValue}
@@ -1865,27 +1855,6 @@ class Workflow extends React.Component<IProps, IState> {
               <DialogContent>
                 <DialogContentText id="dialog-description">
                   Workflow <b>{this.props.workflow.name}</b> is not associated with a Redactics Agent. Please correct this by selecting an agent in your workflow configuration.
-                </DialogContentText>
-
-                <DialogActions>
-                  <Button color="primary" onClick={this.hideErrorDialog}>
-                    Okay
-                  </Button>
-                </DialogActions>
-              </DialogContent>
-            </Dialog>
-
-            <Dialog
-              open={this.state.columnExclusionProhibited}
-              aria-labelledby="dialog-title"
-              aria-describedby="dialog-description"
-            >
-              <DialogTitle id="dialog-title">Error</DialogTitle>
-              <DialogContent>
-                <DialogContentText id="dialog-description">
-                  <p>This workflow includes a <b>Push Data to your Internal Data Repository</b> data feed configuration. This data feed creates a (PII free) clone (or digital twin) of its original database whereby this clone's schema is intended to be identical to the original. Your Table Data Options specifies that one or more tables should have certain columns excluded. By allowing this configuration, this clone will contain incomplete data.</p>
-
-                  <p>To correct this problem, either remove this data feed, or update your table data options so that each table exports all columns.</p>
                 </DialogContentText>
 
                 <DialogActions>

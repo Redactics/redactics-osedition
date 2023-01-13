@@ -157,17 +157,13 @@ class Agent extends React.Component<IProps, IState> {
 
   async componentDidMount() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/agent/${this.props.agent.uuid}/helmCmd`, {
-        credentials: 'include',
-      });
+      const response = await fetch(`${this.context.apiUrl}/agent/${this.props.agent.uuid}/helmCmd`);
       const data = await response.json();
 
       const { helmCmd } = data;
       const { helmCmdHistory } = data;
 
-      const helmConfigResponse = await fetch(`${this.context.apiUrl}/agent/${this.props.agent.uuid}/helmConfig`, {
-        credentials: 'include',
-      });
+      const helmConfigResponse = await fetch(`${this.context.apiUrl}/agent/${this.props.agent.uuid}/helmConfig`);
 
       const helmData = await helmConfigResponse.json();
       const { helmConfig, sslSecrets } = helmData;
@@ -344,7 +340,6 @@ class Agent extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify({
           name: this.state.agentName,
           namespace: this.state.namespace,
@@ -355,9 +350,7 @@ class Agent extends React.Component<IProps, IState> {
       });
 
       // refresh helm config
-      const refreshHelmCmd = await fetch(`${this.context.apiUrl}/agent/${agentId}/helmCmd`, {
-        credentials: 'include',
-      });
+      const refreshHelmCmd = await fetch(`${this.context.apiUrl}/agent/${agentId}/helmCmd`);
       const helmData = await refreshHelmCmd.json();
       const { helmCmd, helmCmdHistory } = helmData;
 
