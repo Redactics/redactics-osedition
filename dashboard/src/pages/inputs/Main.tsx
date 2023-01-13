@@ -160,9 +160,7 @@ class Inputs extends React.Component<IProps, IState> {
 
   async refreshInputs() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/input`, {
-        credentials: 'include',
-      });
+      const response = await fetch(`${this.context.apiUrl}/input`);
 
       const data = await response.json();
 
@@ -476,7 +474,6 @@ class Inputs extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify(payload),
       });
 

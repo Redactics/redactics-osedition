@@ -586,29 +586,6 @@ export async function helmConfig(req: Request, res: Response) {
       }
     });
 
-    // const dataFeeds = await DataFeed.findAll({
-    //   where: {
-    //     workflowId: {
-    //       [Op.in]: workflowIds,
-    //     },
-    //     dataFeed: 'digitalTwin',
-    //     disabled: {
-    //       [Op.not]: true,
-    //     },
-    //   },
-    // });
-    // dataFeeds.forEach((df:any) => {
-    //   connections.push({
-    //     id: df.dataValues.uuid,
-    //     type: 'postgres',
-    //     host: 'changeme',
-    //     port: 5432,
-    //     login: 'changeme',
-    //     password: 'changeme',
-    //     schema: 'changeme',
-    //   });
-    // });
-
     // Add Airflow connection string for sample DB
     connections.push({
       id: 'redacticsDB',

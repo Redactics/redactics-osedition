@@ -190,6 +190,7 @@ export async function getWorkflows(req: Request, res: Response) {
       redactrulesets,
       agents,
       agentInputs,
+      allInputs,
     });
   } catch (e) {
     logger.error(e.stack);
@@ -214,7 +215,8 @@ export async function getWorkflow(req: Request, res: Response) {
 
     const workflowInputs = await WorkflowInput.findAll({
       where: {
-        workflowId: workflow.dataValues.id
+        workflowId: workflow.dataValues.id,
+        enabled: true,
       },
       include: [Input]
     });
@@ -247,11 +249,14 @@ export async function getWorkflow(req: Request, res: Response) {
         }
       })
 
-      inputs.push({
-        id: i.dataValues.Input.dataValues.uuid,
-        tables: i.dataValues.tables,
-        fullcopies: fullCopies,
-      });
+      if (i.dataValues.tables && i.dataValues.tables.length) {
+        // skip inputs with no tables to export
+        inputs.push({
+          id: i.dataValues.Input.dataValues.uuid,
+          tables: i.dataValues.tables,
+          fullcopies: fullCopies,
+        });
+      }
     });
 
     // build redact rules
@@ -338,8 +343,6 @@ export async function getWorkflow(req: Request, res: Response) {
         delete df.dataValues.dataFeedConfig.uploadFileChecked;
         delete df.dataValues.dataFeedConfig.s3Bucket;
       } else if (df.dataValues.dataFeed === 'digitalTwin') {
-        df.dataValues.dataFeedConfig.connectionId = df.dataValues.uuid;
-
         if (df.dataValues.dataFeedConfig.enablePostUpdatePreparedStatements) {
           const postUpdateKeyValues:any = {};
           df.dataValues.dataFeedConfig.postUpdateKeyValues.forEach((kv:any) => {
@@ -380,40 +383,6 @@ export async function getWorkflow(req: Request, res: Response) {
     logger.error(e.stack);
     return res.status(500).send(e);
   }
-}
-
-async function regenERLEvaluationDataFeed(workflow:any) {
-  // reset/save s3 upload datafeed
-  await DataFeed.destroy({
-    where: {
-      workflowId: workflow.dataValues.id,
-    },
-  });
-  const uploadFiles = 'table-athletes.csv,table-marketing_campaign.csv';
-  const uploadBucket = `s3://redactics-sample-exports/${workflow.dataValues.uuid}`;
-  const dataFeedConfig = {
-    image: (process.env.NODE_ENV === 'development') ? 'localhost:5010/postexport-s3upload' : 'redactics/postexport-s3upload',
-    tag: '1.0.1',
-    shell: '/bin/bash',
-    command: `/bin/upload-to-s3 ${workflow.dataValues.uuid} ${uploadFiles} ${uploadBucket}`,
-    args: '',
-    uploadFileChecked: ['table-marketing_campaign.csv', 'table-athletes.csv'],
-    S3UploadBucket: 's3://redactics-sample-exports.s3.amazonaws.com',
-  };
-  const dataFeedSecrets = [{
-    secretKey: 'credentials', secretName: 'aws', secretPath: '/root/.aws', secretType: 'volume',
-  }];
-  const df = await DataFeed.create({
-    dataFeedConfig,
-    feedSecrets: dataFeedSecrets,
-    dataFeed: 's3upload',
-    workflowId: workflow.dataValues.id,
-  });
-
-  delete df.dataValues.id;
-  delete df.dataValues.workflowId;
-
-  return df.dataValues;
 }
 
 export async function createWorkflow(req: Request, res: Response) {
@@ -557,7 +526,6 @@ async function saveInputs(workflow:any, req: Request) {
     },
   });
 
-  const savedInputs:string[] = [];
   await WorkflowInput.destroy({
     where: {
       workflowId: workflow.id
@@ -575,20 +543,6 @@ async function saveInputs(workflow:any, req: Request) {
       enabled: i.enabled,
     };
     inputrulePromises.push(WorkflowInput.create(inputRecord));
-    savedInputs.push(input.dataValues.uuid);
-  });
-  // disable inputs no longer defined
-  inputs.forEach((input:any) => {
-    if (!savedInputs.includes(input.dataValues.uuid)) {
-      // disable input
-      inputrulePromises.push(Input.update({
-        disabled: true,
-      }, {
-        where: {
-          uuid: input.dataValues.uuid,
-        },
-      }));
-    }
   });
   await Promise.all(inputrulePromises);
 }
@@ -1304,7 +1258,9 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     job.totalTaskNum = req.body.totalTaskNum;
     job.lastTask = req.body.task;
     job.lastTaskEnd = Date.now();
-    job.status = 'inProgress';
+    if (job.status !== "error") {
+      job.status = 'inProgress';
+    }
     
     await job.save();
 

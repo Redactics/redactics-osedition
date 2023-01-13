@@ -171,11 +171,11 @@ def get_redactics_tmp():
     return connection
 
 def get_digital_twin():
-    host = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).host
-    login = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).login
-    password = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).password
-    schema = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).schema
-    extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).extra else ""
+    host = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host
+    login = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login
+    password = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password
+    schema = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema
+    extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
 
     connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
                             .format(login=login, password=password,
@@ -591,9 +591,9 @@ try:
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in delta_copies:
-                        results = connection.execute("SELECT \"" + wf_config["deltaUpdateField"] + "\" FROM " + table + " WHERE \"" + wf_config["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + wf_config["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
-                        last_updated = str(results[wf_config["deltaUpdateField"]]) if results and results[wf_config["deltaUpdateField"]] else ""
-                        cmds.append(["/scripts/delta-data-dump.sh", dag_name, table, wf_config["deltaUpdateField"], last_updated, "updated"])
+                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM " + table + " WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
+                        last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
+                        cmds.append(["/scripts/delta-data-dump.sh", dag_name, table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
             return cmds
         delta_copy_tasks += 1
 
@@ -684,9 +684,9 @@ try:
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in delta_copies:
-                        results = connection.execute("SELECT \"" + wf_config["deltaUpdateField"] + "\" FROM " + table + " WHERE \"" + wf_config["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + wf_config["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
-                        last_updated = str(results[wf_config["deltaUpdateField"]]) if results and results[wf_config["deltaUpdateField"]] else ""
-                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, table, wf_config["deltaUpdateField"], last_updated, "updated"])
+                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM " + table + " WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
+                        last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
+                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
             return cmds
         delta_copy_tasks += 1
         
@@ -1026,18 +1026,18 @@ try:
                     dfSecrets = []
 
                     k8s_pg_twin_envvars = {
-                        "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).host,
-                        "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).login,
-                        "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).password,
-                        "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).schema
+                        "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host,
+                        "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
+                        "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
+                        "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema
                     }
-                    twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).extra else ""
+                    twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
                     if twin_extra:
                         if "sslmode" in twin_extra:
                             k8s_pg_twin_envvars["PGSSLMODE"] = twin_extra["sslmode"]
                         if "sslrootcert" in twin_extra:
                             k8s_pg_twin_envvars["PGSSLROOTCERT"] = twin_extra["sslrootcert"]
-                            dfSecrets.append(Secret('volume', "/pgcerts-secrets/" + digitalTwinConfig["dataFeedConfig"]["connectionId"], "pgcert-" + digitalTwinConfig["dataFeedConfig"]["connectionId"]))
+                            dfSecrets.append(Secret('volume', "/pgcerts-secrets/" + digitalTwinConfig["dataFeedConfig"]["inputSource"], "pgcert-" + digitalTwinConfig["dataFeedConfig"]["inputSource"]))
                         if "sslcert" in twin_extra:
                             # optional
                             k8s_pg_twin_envvars["PGSSLCERT"] = twin_extra["sslcert"]
@@ -1110,12 +1110,11 @@ try:
                             cmds=delta_anon_restore_cmds(input["id"])
                         )
                     dt_delta_restore.set_upstream([dt_delta_dump_newrow, dt_delta_dump_updatedrow])
+                    input_idx += 1
             else:
                 dt_delta_restore = DummyOperator(task_id="dt-delta-restore-noop", on_success_callback=post_taskend)
                 dt_delta_restore.set_upstream(delta_restore)
                 totalTasks += 1
-
-            input_idx += 1
 
         ### full copy data feeds
 
@@ -1188,18 +1187,18 @@ try:
                 dfSecrets = []
 
                 k8s_pg_twin_envvars = {
-                    "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).host,
-                    "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).login,
-                    "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).password,
-                    "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).schema
+                    "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host,
+                    "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
+                    "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
+                    "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema
                 }
-                twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).extra else ""
+                twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
                 if twin_extra:
                     if "sslmode" in twin_extra:
                         k8s_pg_twin_envvars["PGSSLMODE"] = twin_extra["sslmode"]
                     if "sslrootcert" in twin_extra:
                         k8s_pg_twin_envvars["PGSSLROOTCERT"] = twin_extra["sslrootcert"]
-                        dfSecrets.append(Secret('volume', "/pgcerts-secrets/" + digitalTwinConfig["dataFeedConfig"]["connectionId"], "pgcert-" + digitalTwinConfig["dataFeedConfig"]["connectionId"]))
+                        dfSecrets.append(Secret('volume', "/pgcerts-secrets/" + digitalTwinConfig["dataFeedConfig"]["inputSource"], "pgcert-" + digitalTwinConfig["dataFeedConfig"]["inputSource"]))
                     if "sslcert" in twin_extra:
                         # optional
                         k8s_pg_twin_envvars["PGSSLCERT"] = twin_extra["sslcert"]
@@ -1225,7 +1224,7 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend,
                     ).expand(
-                        cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).schema))
+                        cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
                     )
                 dt_table_resets.set_upstream(table_dumps)
 
@@ -1247,7 +1246,7 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend
                     ).expand(
-                        cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).schema))
+                        cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
                     )
                 dt_schema_restore.set_upstream(dt_table_resets)
 
@@ -1287,8 +1286,8 @@ try:
         if digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enablePostUpdatePreparedStatements"]:
             apply_prepared_statements = PostgresOperator.partial(
                 task_id='apply-prepared-statements',
-                postgres_conn_id=digitalTwinConfig["dataFeedConfig"]["connectionId"],
-                database=BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["connectionId"]).schema,
+                postgres_conn_id=digitalTwinConfig["dataFeedConfig"]["inputSource"],
+                database=BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
                 parameters=digitalTwinConfig["dataFeedConfig"]["postUpdateKeyValues"],
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,

@@ -55,7 +55,8 @@ import DatabaseMigrationSetup from './DatabaseMigrationSetup';
 
 import {
   RedactRule, CustomSecret, WorkflowRecord, WorkflowUpdate, PostUpdateParam,
-  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, AgentInputRecord, WorkflowInputRecord,
+  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, InputRecord, AgentInputRecord, 
+  WorkflowInputRecord,
 } from '../../types/redactics';
 
 const Card = styled(MuiCard)(spacing);
@@ -92,6 +93,7 @@ interface IProps {
   handleWFChanges: any;
   workflow: WorkflowRecord;
   agentInputs: AgentInputRecord[];
+  allInputs: InputRecord[];
   agents: AgentRecord[];
   presets?: RedactRulePreset[];
   redactrulesets: RedactRuleSet[];
@@ -528,7 +530,6 @@ class Workflow extends React.Component<IProps, IState> {
           headers: {
             'Content-Type': 'application/json',
           },
-          credentials: 'include',
           body: JSON.stringify(payload),
         });
 
@@ -616,7 +617,6 @@ class Workflow extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
       });
 
       this.setState({
@@ -1059,6 +1059,12 @@ class Workflow extends React.Component<IProps, IState> {
 
   handleInputChanges(event:any, input:WorkflowInputRecord) {
     const state:any = this.state;
+    const findInput = state.inputs.find((i:WorkflowInputRecord) => {
+      return (i.uuid === input.uuid)
+    });
+    if (!findInput) {
+      state.inputs.push(input);
+    }
     state.inputs = state.inputs.map((i:any) => {
       if (i.uuid === input.uuid) {
         i[event.target.name] = (event.target.name === "enabled") ? event.target.checked : event.target.value;
@@ -1748,6 +1754,7 @@ class Workflow extends React.Component<IProps, IState> {
 
                   <WorkflowPostExport
                     inputs={this.state.inputs}
+                    allInputs={this.props.allInputs}
                     dataFeeds={this.state.dataFeeds}
                     dataFeed={this.state.dataFeed}
                     addParameterValue={this.addParameterValue}

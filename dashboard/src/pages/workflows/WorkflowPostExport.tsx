@@ -53,7 +53,7 @@ import {
   Code as CodeIcon,
 } from 'react-feather';
 
-import { WorkflowInputRecord, CustomSecret, DataFeed, AgentRecord, WorkflowRecord, PostUpdateParam } from '../../types/redactics';
+import { WorkflowInputRecord, InputRecord, CustomSecret, DataFeed, AgentRecord, WorkflowRecord, PostUpdateParam } from '../../types/redactics';
 
 import { Alert as MuiAlert } from '@material-ui/lab';
 
@@ -106,6 +106,7 @@ const Button = styled(MuiButton)(spacing);
 
 interface IProps {
   inputs: WorkflowInputRecord[];
+  allInputs: InputRecord[];
   handleDeleteSecret: any;
   markAddToS3UploadList: any;
   addAllToS3UploadList: any;
@@ -365,8 +366,8 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                         name="inputSource"
                         onChange={(event) => this.props.handleDataFeedOptions(event)}
                       >
-                        {this.props.inputs.map((input:WorkflowInputRecord) => (
-                          <MenuItem key={input.uuid} value={input.inputName}>{input.inputName}</MenuItem>
+                        {this.props.allInputs.map((input:InputRecord) => (
+                          <MenuItem key={input.uuid} value={input.uuid}>{input.inputName}</MenuItem>
                         ))}
                       </Select>
                     </FormControl>
