@@ -148,11 +148,15 @@ export async function updateAgent(req: Request, res: Response) {
     inputs.forEach((input:any) => {
       inputUuids.push(input.dataValues.uuid);
     });
+    let invalidInput = false;
     req.body.inputs.forEach((inputUuid:string) => {
       if (!inputUuids.includes(inputUuid)) {
-        return res.status(403).json({ errors: 'invalid input' });
+        invalidInput = true;
       }
     })
+    if (invalidInput) {
+      return res.status(403).json({ errors: 'invalid input' });
+    }
 
     agent.name = req.body.name;
     agent.namespace = req.body.namespace;
@@ -170,12 +174,12 @@ export async function updateAgent(req: Request, res: Response) {
       }
     });
     req.body.inputs.forEach((inputUuid:string) => {
-      const input = inputs.find((input:any) => {
+      const findInput = inputs.find((input:any) => {
         return (input.dataValues.uuid === inputUuid)
       });
       const agentInputRecord:AgentInputRecord = {
         agentId: agent.dataValues.id,
-        inputId: input.dataValues.id
+        inputId: findInput.dataValues.id
       }
       agentInputPromises.push(AgentInput.create(agentInputRecord));
     })
