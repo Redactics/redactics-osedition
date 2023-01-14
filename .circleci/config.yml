@@ -64,6 +64,10 @@ jobs:
           name: Expose Environment Variables
           command: |
             echo "$BUILD_ENV_VARS" | base64 -d > .env.production
+      - run:
+          name: Debug
+          command: |
+            ls -al
       - docker-registry-image-cache/with-save-restore-images:
           repository: redactics
           images: "api:${CIRCLE_BRANCH}"
