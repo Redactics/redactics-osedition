@@ -39,6 +39,10 @@ jobs:
           steps:
             - docker-registry-image-cache/build:
                 command: "docker build -t redactics/api:${CIRCLE_SHA1} -t redactics/api:${CIRCLE_BRANCH} -f api/Dockerfile api"
+      - run:
+          name: Push image
+          command: |
+            docker push redactics/api:${CIRCLE_SHA1}
   build_dashboard:
     docker:
       - image: cimg/base:2020.01
