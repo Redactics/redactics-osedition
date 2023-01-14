@@ -64,10 +64,6 @@ jobs:
           name: Expose Environment Variables
           command: |
             echo "$BUILD_ENV_VARS" | base64 -d > dashboard/.env.production
-      - run:
-          name: Debug
-          command: |
-            ls -al dashboard/
       - docker-registry-image-cache/with-save-restore-images:
           repository: redactics
           images: "api:${CIRCLE_BRANCH}"
@@ -92,7 +88,6 @@ jobs:
           key: source-v1-{{ .Branch }}-{{ .Revision }}
           paths:
             - ".git"
-      - gcp-gcr/gcr-auth
       - run:
           name: Run tests
           command: |
@@ -115,7 +110,6 @@ jobs:
           key: source-v1-{{ .Branch }}-{{ .Revision }}
           paths:
             - ".git"
-      - gcp-gcr/gcr-auth
       - run:
           name: Run eslint
           command: |
@@ -128,11 +122,11 @@ workflows:
           name: 'Build API'
       - build_dashboard:
           name: 'Build Dashboard'
-      # - test:
-      #     name: 'Test API'
-      #     requires:
-      #       - 'Build API'
-      # - eslint:
-      #     name: 'Run ESLint'
-      #     requires:
-      #       - 'Build API'
+      - test:
+          name: 'Test API'
+          requires:
+            - 'Build API'
+      - eslint:
+          name: 'Run ESLint'
+          requires:
+            - 'Build API'

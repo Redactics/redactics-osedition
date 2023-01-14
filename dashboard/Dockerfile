@@ -8,8 +8,7 @@ COPY . /app
 
 # TODO: figure out why running builds inside the Docker container returns errors
 # about this.context
-RUN env
-RUN npm run build
+#RUN npm run build
 
 FROM redactics/nginx:1
 
