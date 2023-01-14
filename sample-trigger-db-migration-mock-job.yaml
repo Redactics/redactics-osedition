@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trigger-db-migration-mock-dag
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: trigger-db-migration-mock-dag
+          image: redactics/airflow-dagrun-poller:1.1.0
+          imagePullPolicy: Always
+          args:
+          - bash
+          - -c
+          - |
+              DAG_RUN_ID=$(curl -s -X POST -d "{\"workflowType\": \"mockDatabaseMigration\", \"workflowId\": \"${WORKFLOW_ID}\"}" -H "Content-Type: application/json" -H "Accept: text/plain" ${REDACTICS_API_URL}/workflow/jobs | jq -r '.uuid')
+              curl -v -s -X POST -H "Authorization: Basic ${BASIC_AUTH}" -H "Content-Type: application/json" -d "{\"dag_run_id\": \"${DAG_RUN_ID}\", \"conf\": {\"workflowJobId\": \"${DAG_RUN_ID}\"}}" ${API_URL}/api/v1/dags/${DAG_ID}/dagRuns
+              TAIL_TASK_ID=clone-db DAG_RUN_ID=${DAG_RUN_ID} /poller.sh
+              if [ $? -ne 0 ]; then
+                exit 1
+              fi
+          env:
+          - name: REDACTICS_API_URL
+            value: http://host.docker.internal:3000
+          - name: API_URL
+            value: http://agent-webserver.redactics.svc.cluster.local:8080
+            #value: http://host.docker.internal:8080
+          - name: DAG_ID
+            value: a3374234-17c0-41f1-829e-0fb4512e38dd-migrationmocking
+          - name: WORKFLOW_ID
+            value: a3374234-17c0-41f1-829e-0fb4512e38dd
+          - name: BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: agent
+                key: basic-auth
