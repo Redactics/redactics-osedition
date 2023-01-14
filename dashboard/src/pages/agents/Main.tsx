@@ -156,9 +156,7 @@ class Agents extends React.Component<IProps, IState> {
 
   async fetchAgents() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/agent`, {
-        credentials: 'include',
-      });
+      const response = await fetch(`${this.context.apiUrl}/agent`);
       const data = await response.json();
 
       // TODO: data structure should be data.agents
@@ -174,9 +172,7 @@ class Agents extends React.Component<IProps, IState> {
 
   async fetchInputs() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/input`, {
-        credentials: 'include',
-      });
+      const response = await fetch(`${this.context.apiUrl}/input`);
       const data = await response.json();
 
       // select all possible inputs for initial state
@@ -216,7 +212,6 @@ class Agents extends React.Component<IProps, IState> {
   async deleteAgent(agentId:string) {
     try {
       await fetch(`${this.context.apiUrl}/agent/${agentId}`, {
-        credentials: 'include',
         method: 'delete',
       });
       this.fetchAgents();
@@ -407,7 +402,6 @@ class Agents extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify({
           name: this.state.agentName,
           namespace: this.state.namespace,

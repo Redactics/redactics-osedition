@@ -99,65 +99,57 @@ spec:
           - bash
           - -c
           - |
-              DAG_RUN_ID=$(curl -s -X POST -d "{\\"workflowType\\": \\"mockDatabaseMigration\\", \\"workflowId\\": \\"\${WORKFLOW_ID}\\"}" -H "Content-Type: application/json" -H "Accept: application/json" -H "x-api-key: \${REDACTICS_API_KEY}" \${REDACTICS_API_URL}/workflow/jobs | jq -r '.uuid')
+              DAG_RUN_ID=$(curl -s -X POST -d "{\\"workflowType\\": \\"mockDatabaseMigration\\", \\"workflowId\\": \\"\${WORKFLOW_ID}\\"}" -H "Content-Type: application/json" -H "Accept: application/json" \${REDACTICS_API_URL}/workflow/jobs | jq -r '.uuid')
               curl -s -X POST -H "Authorization: Basic \${BASIC_AUTH}" -H "Content-Type: application/json" -H "Accept: application/json" -d "{\\"dag_run_id\\": \\"\${DAG_RUN_ID}\\", \\"conf\\": {\\"workflowJobId\\": \\"\${DAG_RUN_ID}\\"}}" \${API_URL}/api/v1/dags/\${DAG_ID}/dagRuns
-              DAG_RUN_ID=\${DAG_RUN_ID} /poller.sh
+              TAIL_TASK_ID=clone-db DAG_RUN_ID=\${DAG_RUN_ID} /poller.sh
               if [ $? -ne 0 ]; then
                 exit 1
               fi
           env:
           - name: REDACTICS_API_URL
-            value: https://api.redactics.com
+            value: http://agent-api.svc.cluster.local
           - name: API_URL
-            value: http://redactics-webserver.${this.props.agentNamespace}.svc.cluster.local:8080
+            value: http://agent-webserver.${this.props.agentNamespace}.svc.cluster.local:8080
           - name: DAG_ID
             value: ${this.props.workflow.uuid}-migrationmocking
-          - name: TAIL_TASK_ID
-            value: clone-db
           - name: WORKFLOW_ID
             value: ${this.props.workflow.uuid}
-          - name: REDACTICS_API_KEY
-            valueFrom:
-              secretKeyRef:
-                name: redactics
-                key: api-key
           - name: BASIC_AUTH
             valueFrom:
               secretKeyRef:
-                name: redactics
+                name: agent
                 key: basic-auth
     `
     const script = `
 #!/bin/bash
 
 # change values as necessary, this script will work when running inside a Kubernetes container, and when the
-# variables REDACTICS_API_KEY and BASIC_AUTH are set outside of this script from values stored as Kubernetes secrets.
+# BASIC_AUTH variable is set outside of this script from values stored as Kubernetes secrets.
 # The open source libraries "curl" and "jq" must be available within this environment, in addition to the poller.sh script.
 
-export REDACTICS_API_URL=https://api.redactics.com
-export API_URL=http://redactics-webserver.${this.props.agentNamespace}.svc.cluster.local:8080
+export REDACTICS_API_URL=http://agent-api.svc.cluster.local
+export API_URL=http://agent-webserver.${this.props.agentNamespace}.svc.cluster.local:8080
 export DAG_ID=${this.props.workflow.uuid}-migrationmocking
-export TAIL_TASK_ID=clone-db
 export WORKFLOW_ID=${this.props.workflow.uuid}
 export POLLER_PATH=/poller.sh
 
-DAG_RUN_ID=$(curl -s -X POST -d "{\\"workflowType\\": \\"mockDatabaseMigration\\", \\"workflowId\\": \\"\${WORKFLOW_ID}\\"}" -H "Content-Type: application/json" -H "Accept: application/json" -H "x-api-key: \${REDACTICS_API_KEY}" \${REDACTICS_API_URL}/workflow/jobs | jq -r '.uuid')
+DAG_RUN_ID=$(curl -s -X POST -d "{\\"workflowType\\": \\"mockDatabaseMigration\\", \\"workflowId\\": \\"\${WORKFLOW_ID}\\"}" -H "Content-Type: application/json" -H "Accept: application/json" \${REDACTICS_API_URL}/workflow/jobs | jq -r '.uuid')
 curl -s -X POST -H "Authorization: Basic \${BASIC_AUTH}" -H "Content-Type: application/json" -H "Accept: application/json" -d "{\\"dag_run_id\\": \\"\${DAG_RUN_ID}\\", \\"conf\\": { \\"workflowJobId\\": \\"\${DAG_RUN_ID}\\"}}" \${API_URL}/api/v1/dags/\${DAG_ID}/dagRuns
-DAG_RUN_ID=\${DAG_RUN_ID} \${POLLER_PATH}
+TAIL_TASK_ID=clone-db DAG_RUN_ID=\${DAG_RUN_ID} \${POLLER_PATH}
     `
     
     return (
       <React.Fragment>
         <Box>
-          Performing a dry run of your migrations requires your adding a step to your CI/CD pipeline (or manual process) to trigger a workflow installed in the Redactics Agent. This workflow clones your database to prepare for your database migration dry-run against this clone. Once this step is complete you can then run your migration using an environment variable to override your database that would normally be used with your cloned database.
+          Performing a dry run of your migrations requires your adding a step to your CI/CD pipeline (or manual deployment process) to trigger a workflow included in the Redactics Agent. This workflow clones your database to prepare for your database migration dry-run against this clone. Once this step is complete you can then run your migration using an environment variable to override your database that would normally be used with your cloned database.
         </Box>
 
         <Box mt={4}>
-          One way to put together a complete working flow is to add some sort of flag in your CI/CD workflow that triggers this alteration to your normal workflow when a database migration dry-run option is selected, followed by the database migration against the clone. This can be done by triggering a script that runs on your server hosting your app, or if your database migration is triggered via a Helmchart hook, adding an additional hook that runs before your normal migration hook.
+          One way to put together a complete working flow is to add some sort of flag in your CI/CD workflow that triggers this alteration to your normal workflow when this database migration dry-run option is selected, followed by the database migration against the clone. This can be done by triggering a script that runs on your server hosting your app, or if your database migration is triggered via a Kubernetes Helmchart hook, adding an additional hook that runs before your normal migration hook.
         </Box>
 
         <Box mt={4}>
-          Using the values you provide here, we will generate the code needed to perform this middle step which you can customize this as needed. We will also generate a secret containing your Redactics API key (used to show progress in <Link href="/workflows/jobs">Workflows -&gt; Jobs</Link> as well as report issues to the notification bell icon in the upper right of this page), and an authentication token for the REST API embedded into the Redactics Agent. These secrets will be installed into your Kubernetes namespace (as you've provided below) the next time you upgrade your Redactics Agent software.
+          Using the values you provide here, we will generate the code needed to perform this additional step (prior to your normal database migration) which you can customize as needed. We will also generate an authentication token for the REST API embedded into the Redactics Agent. This secret will be installed into your Kubernetes namespace (as you've provided below) the next time you upgrade your Redactics Agent software.
         </Box>
 
         <Box mt={8}>

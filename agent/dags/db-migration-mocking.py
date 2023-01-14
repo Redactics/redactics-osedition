@@ -19,15 +19,8 @@ dag_file = os.path.basename(__file__).split('.')[0]
 dag_name = dag_file.replace('-migrationmocking','')
 NAMESPACE = os.environ['NAMESPACE']
 ENV = os.environ['ENV']
-
-if ENV == "development":
-    API_HOST = "http://host.docker.internal:3000"
-    REGISTRY_URL = "localhost:5010"
-else:
-    API_HOST = "https://api.redactics.com"
-    REGISTRY_URL = "registry.redactics.com"
-
-API_KEY = os.environ['API_KEY']
+API_URL = os.environ['API_URL']
+REGISTRY_URL = "redactics"
 AGENT_VERSION = os.environ['AGENT_VERSION']
 
 NODESELECTOR = os.environ['NODESELECTOR']
@@ -53,8 +46,8 @@ else:
 is_delete_operator_pod = False if ENV == "development" else True
 secrets = []
 
-headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-apiUrl = API_HOST + '/database/' + dag_name
+headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+apiUrl = API_URL + '/workflow/' + dag_name
 request = requests.get(apiUrl, headers=headers)
 wf_config = request.json()
 input_id = wf_config["inputs"][0]["id"]
@@ -115,8 +108,8 @@ def db_migration_mocking():
             exception = str(exception)
             stackTrace = str(logs.read())
 
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            apiUrl = API_HOST + '/database/job/' + context["params"]["workflowJobId"] + '/postException'
+            headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+            apiUrl = API_URL + '/workflow/job/' + context["params"]["workflowJobId"] + '/postException'
             payload = {
                 'exception': exception,
                 'stackTrace': stackTrace
@@ -130,8 +123,8 @@ def db_migration_mocking():
             except AirflowException as err:
                 raise AirflowException(err)
         except:
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            apiUrl = API_HOST + '/database/job/' + context["params"]["workflowJobId"] + '/postException'
+            headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+            apiUrl = API_URL + '/workflow/job/' + context["params"]["workflowJobId"] + '/postException'
             payload = {
                 'exception': 'an error occurred, cannot retrieve log output',
                 'stackTrace': ''
@@ -146,12 +139,11 @@ def db_migration_mocking():
                 raise AirflowException(err)
 
     def post_taskend(context):
-        headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-        apiUrl = API_HOST + '/database/job/' + context["params"]["workflowJobId"] + '/postTaskEnd'
+        headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+        apiUrl = API_URL + '/workflow/job/' + context["params"]["workflowJobId"] + '/postTaskEnd'
         payload = {
             'task': context["task_instance"].task_id,
-            'totalTaskNum': 2,
-            'lastTask': 'clone-db'
+            'totalTaskNum': 3
         }
         payloadJSON = json.dumps(payload)
         request = requests.put(apiUrl, data=payloadJSON, headers=headers)
@@ -160,6 +152,18 @@ def db_migration_mocking():
             if request.status_code != 200:
                 raise AirflowException(response)
         except AirflowException as err:
+            raise AirflowException(err)
+
+    @task(on_failure_callback=post_logs)
+    def terminate_wf(**context):
+        headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+        apiUrl = API_URL + '/workflow/job/' + context["params"]["workflowJobId"] + '/postJobEnd'
+        request = requests.put(apiUrl, headers=headers)
+        response = request.json()
+        try:
+            if request.status_code != 200:
+                raise AirflowException(response)
+        except AirflowException as err: 
             raise AirflowException(err)
 
     # drop database with force requires PG 13
@@ -211,5 +215,8 @@ def db_migration_mocking():
         on_success_callback=post_taskend,
         )
     clone_db.set_upstream(create_db)
+
+    terminate_workflow = terminate_wf()
+    terminate_workflow.set_upstream(clone_db)
 
 db_migration = db_migration_mocking()

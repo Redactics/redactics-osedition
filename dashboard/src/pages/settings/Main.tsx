@@ -159,9 +159,7 @@ class Settings extends React.Component<IProps, IState> {
 
   async refreshSettings() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/settings`, {
-        credentials: 'include',
-      });
+      const response = await fetch(`${this.context.apiUrl}/settings`);
 
       const data = await response.json();
 
@@ -348,7 +346,6 @@ class Settings extends React.Component<IProps, IState> {
           headers: {
             'Content-Type': 'application/json',
           },
-          credentials: 'include',
           body: JSON.stringify(this.state.presets),
         });
 
@@ -457,7 +454,6 @@ class Settings extends React.Component<IProps, IState> {
       try {
         await fetch(`${this.context.apiUrl}/settings/saveRuleDefaults`, {
           method: 'put',
-          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -495,7 +491,6 @@ class Settings extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
       });
 
       this.setState({

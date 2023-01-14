@@ -42,7 +42,7 @@ import {
 
 import { spacing } from '@material-ui/system';
 import {
-  WorkflowRecord, AgentInputRecord, AgentRecord, RedactRuleSet, RedactRulePreset,
+  WorkflowRecord, AgentInputRecord, InputRecord, AgentRecord, RedactRuleSet, RedactRulePreset,
 } from '../../types/redactics';
 import RedacticsContext from '../../contexts/RedacticsContext';
 
@@ -87,6 +87,7 @@ interface IState {
   newWorkflowDialog: boolean;
   workflows: WorkflowRecord[];
   agentInputs: AgentInputRecord[];
+  allInputs: InputRecord[];
   presets: RedactRulePreset[];
   redactrulesets: RedactRuleSet[];
   agents: AgentRecord[];
@@ -110,6 +111,7 @@ class Workflows extends React.Component<IProps, IState> {
       newWorkflowDialog: false,
       workflows: [],
       agentInputs: [],
+      allInputs: [],
       presets: [],
       redactrulesets: [],
       agents: [],
@@ -134,9 +136,7 @@ class Workflows extends React.Component<IProps, IState> {
 
   async refreshWorkflows() {
     try {
-      const response = await fetch(`${this.context.apiUrl}/workflow`, {
-        credentials: 'include',
-      });
+      const response = await fetch(`${this.context.apiUrl}/workflow`);
 
       const data = await response.json();
 
@@ -151,6 +151,7 @@ class Workflows extends React.Component<IProps, IState> {
       this.setState({
         workflows: data.workflows,
         agentInputs: data.agentInputs,
+        allInputs: data.allInputs,
         presets: data.presets,
         redactrulesets: data.redactrulesets,
         agents: data.agents,
@@ -205,7 +206,6 @@ class Workflows extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify({
           name: this.state.newWorkflowName,
           agentId: this.state.newWorkflowAgent,
@@ -233,7 +233,6 @@ class Workflows extends React.Component<IProps, IState> {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
       });
 
       this.refreshWorkflows();
@@ -499,6 +498,7 @@ class Workflows extends React.Component<IProps, IState> {
           redactrulesets={this.state.redactrulesets}
           agents={this.state.agents}
           agentInputs={this.state.agentInputs}
+          allInputs={this.state.allInputs}
           key={workflow.uuid}
           handleWFChanges={this.handleWFChanges}
           deleteWorkflow={this.deleteWorkflow}

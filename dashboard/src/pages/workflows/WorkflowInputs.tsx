@@ -212,6 +212,13 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                   });
                   let inputEnabled:boolean = (workflowInput) ? workflowInput.enabled : false;
                   let tables:string = (workflowInput && workflowInput.tables && workflowInput.tables.length) ? workflowInput.tables.join(', ') : "none selected";
+                  if (!workflowInput) {
+                    workflowInput = {
+                      enabled: false,
+                      uuid: input.uuid,
+                      tables: [],
+                    }
+                  }
                   return (
                     <TableRow key={input.uuid}>
                       <TableCell>

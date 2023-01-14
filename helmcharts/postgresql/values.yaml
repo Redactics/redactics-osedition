@@ -300,7 +300,7 @@ persistence:
   ## If defined, PVC must be created manually before volume will be bound
   ## The value is evaluated as a template, so, for example, the name can depend on .Release or .Chart
   ##
-  existingClaim: redactics-pg12datavol
+  existingClaim: agent-pg12datavol
 
   ## The path the volume will be mounted at, useful when using different
   ## PostgreSQL images.

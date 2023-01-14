@@ -190,6 +190,7 @@ export async function getWorkflows(req: Request, res: Response) {
       redactrulesets,
       agents,
       agentInputs,
+      allInputs,
     });
   } catch (e) {
     logger.error(e.stack);
@@ -214,7 +215,8 @@ export async function getWorkflow(req: Request, res: Response) {
 
     const workflowInputs = await WorkflowInput.findAll({
       where: {
-        workflowId: workflow.dataValues.id
+        workflowId: workflow.dataValues.id,
+        enabled: true,
       },
       include: [Input]
     });
@@ -247,11 +249,21 @@ export async function getWorkflow(req: Request, res: Response) {
         }
       })
 
-      inputs.push({
-        id: i.dataValues.Input.dataValues.uuid,
-        tables: i.dataValues.tables,
-        fullcopies: fullCopies,
-      });
+      if (workflow.dataValues.workflowType === "ERL" && i.dataValues.tables && i.dataValues.tables.length) {
+        // skip inputs with no tables to export
+        inputs.push({
+          id: i.dataValues.Input.dataValues.uuid,
+          tables: i.dataValues.tables,
+          fullcopies: fullCopies,
+        });
+      }
+      else {
+        inputs.push({
+          id: i.dataValues.Input.dataValues.uuid,
+          tables: i.dataValues.tables,
+          fullcopies: fullCopies,
+        });
+      }
     });
 
     // build redact rules
@@ -333,13 +345,11 @@ export async function getWorkflow(req: Request, res: Response) {
     workflow.dataValues.datafeeds.filter((i:any) => (!(i.disabled))).forEach((feed:any) => {
       const df:any = feed;
       // drop UI fields unused by the Agent
-      if (df.dataValues.dataFeed === 's3upload' || df.dataValues.dataFeed === 'dataRepository') {
+      if (df.dataValues.dataFeed === 's3upload') {
         delete df.dataValues.dataFeedConfig.addAllS3Uploads;
         delete df.dataValues.dataFeedConfig.uploadFileChecked;
         delete df.dataValues.dataFeedConfig.s3Bucket;
       } else if (df.dataValues.dataFeed === 'digitalTwin') {
-        df.dataValues.dataFeedConfig.connectionId = df.dataValues.uuid;
-
         if (df.dataValues.dataFeedConfig.enablePostUpdatePreparedStatements) {
           const postUpdateKeyValues:any = {};
           df.dataValues.dataFeedConfig.postUpdateKeyValues.forEach((kv:any) => {
@@ -382,40 +392,6 @@ export async function getWorkflow(req: Request, res: Response) {
   }
 }
 
-async function regenERLEvaluationDataFeed(workflow:any) {
-  // reset/save s3 upload datafeed
-  await DataFeed.destroy({
-    where: {
-      workflowId: workflow.dataValues.id,
-    },
-  });
-  const uploadFiles = 'table-athletes.csv,table-marketing_campaign.csv';
-  const uploadBucket = `s3://redactics-sample-exports/${workflow.dataValues.uuid}`;
-  const dataFeedConfig = {
-    image: (process.env.NODE_ENV === 'development') ? 'localhost:5010/postexport-s3upload' : 'redactics/postexport-s3upload',
-    tag: '1.0.1',
-    shell: '/bin/bash',
-    command: `/bin/upload-to-s3 ${workflow.dataValues.uuid} ${uploadFiles} ${uploadBucket}`,
-    args: '',
-    uploadFileChecked: ['table-marketing_campaign.csv', 'table-athletes.csv'],
-    S3UploadBucket: 's3://redactics-sample-exports.s3.amazonaws.com',
-  };
-  const dataFeedSecrets = [{
-    secretKey: 'credentials', secretName: 'aws', secretPath: '/root/.aws', secretType: 'volume',
-  }];
-  const df = await DataFeed.create({
-    dataFeedConfig,
-    feedSecrets: dataFeedSecrets,
-    dataFeed: 's3upload',
-    workflowId: workflow.dataValues.id,
-  });
-
-  delete df.dataValues.id;
-  delete df.dataValues.workflowId;
-
-  return df.dataValues;
-}
-
 export async function createWorkflow(req: Request, res: Response) {
   try {
     const workflowRecord:WorkflowCreate = {
@@ -455,24 +431,6 @@ export async function createWorkflow(req: Request, res: Response) {
     const wfCreate = await Workflow.create(workflowRecord);
     const response = wfCreate.dataValues;
 
-    // create workflow inputs
-    const agentInputs = await AgentInput.findAll({
-      where: {
-        agentId: workflowRecord.agentId,
-      }
-    });
-    const wfInputPromises:any[] = [];
-    agentInputs.forEach((ai:any) => {
-      let workflowInputRecord:WorkflowInputRecord = {
-        enabled: false,
-        inputId: ai.dataValues.inputId, 
-        workflowId: response.id,
-        tables: [],
-      };
-      wfInputPromises.push(WorkflowInput.create(workflowInputRecord));
-    })
-    await Promise.all(wfInputPromises);
-
     response.inputs = [];
     response.datafeeds = [];
 
@@ -487,22 +445,6 @@ export async function createWorkflow(req: Request, res: Response) {
     logger.error(e.stack);
     return res.status(500).send(e);
   }
-}
-
-async function triggerWorkflowJobUIRefresh(uuid:string, refresh:boolean) {
-  // TODO: refactor
-  // const db = firebaseAdmin.database();
-  // const ref = db.ref(`workflowJobProgress/${uuid}`).child('triggerRefresh');
-  // ref.update({
-  //   refresh,
-  // });
-}
-
-async function removeProgressData(uuid:string, workflowJobId:string) {
-  // TODO: refactor
-  // const db = firebaseAdmin.database();
-  // const ref = db.ref(`workflowJobProgress/${uuid}`).child(workflowJobId);
-  // await ref.remove();
 }
 
 async function saveRedactRules(workflow:any, req: Request) {
@@ -573,37 +515,23 @@ async function saveInputs(workflow:any, req: Request) {
     },
   });
 
-  const savedInputs:string[] = [];
   await WorkflowInput.destroy({
     where: {
       workflowId: workflow.id
     }
   })
-  Object.values(req.body.inputs).forEach((i:any) => {
-    const input = inputs.find((input:any) => {
-      return (input.dataValues.uuid === i.uuid)
-    });
-
-    const inputRecord:WorkflowInputRecord = {
-      workflowId: workflow.dataValues.id,
-      inputId: input.dataValues.id,
-      tables: i.tables,
-      enabled: i.enabled,
-    };
-    inputrulePromises.push(WorkflowInput.create(inputRecord));
-    savedInputs.push(input.dataValues.uuid);
-  });
-  // disable inputs no longer defined
   inputs.forEach((input:any) => {
-    if (!savedInputs.includes(input.dataValues.uuid)) {
-      // disable input
-      inputrulePromises.push(Input.update({
-        disabled: true,
-      }, {
-        where: {
-          uuid: input.dataValues.uuid,
-        },
-      }));
+    const findInput = req.body.inputs.find((i:any) => {
+      return (i.uuid === input.dataValues.uuid)
+    });
+    if (findInput) {
+      const inputRecord:WorkflowInputRecord = {
+        workflowId: workflow.dataValues.id,
+        inputId: input.dataValues.id,
+        tables: findInput.tables,
+        enabled: findInput.enabled,
+      };
+      inputrulePromises.push(WorkflowInput.create(inputRecord));
     }
   });
   await Promise.all(inputrulePromises);
@@ -719,13 +647,13 @@ async function saveERL(req: Request, res: Response) {
       Object.values(req.body.dataFeeds).forEach((feed:any) => {
         const df:any = feed;
         df.workflowId = workflow.dataValues.id;
-        if (df.dataFeed === 's3upload' || df.dataFeed === 'dataRepository') {
+        if (df.dataFeed === 's3upload') {
           if (!df.dataFeedConfig.S3UploadBucket.match(/^s3:\/\//)) {
             // ensure bucket URL is prefaced with s3 protocol
             df.dataFeedConfig.S3UploadBucket = `s3://${df.dataFeedConfig.S3UploadBucket}`;
           }
           const uploadFiles = df.dataFeedConfig.uploadFileChecked.join(',');
-          df.dataFeedConfig.image = (process.env.NODE_ENV === 'development') ? 'localhost:5010/postexport-s3upload' : 'redactics/postexport-s3upload';
+          df.dataFeedConfig.image = 'redactics/postexport-s3upload';
           df.dataFeedConfig.tag = '1.0.1';
           df.dataFeedConfig.shell = '/bin/bash';
           df.dataFeedConfig.command = `/bin/upload-to-s3 ${workflow.dataValues.uuid} ${uploadFiles} ${df.dataFeedConfig.S3UploadBucket}`;
@@ -1320,7 +1248,9 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     job.totalTaskNum = req.body.totalTaskNum;
     job.lastTask = req.body.task;
     job.lastTaskEnd = Date.now();
-    job.status = 'inProgress';
+    if (job.status !== "error") {
+      job.status = 'inProgress';
+    }
     
     await job.save();
 
