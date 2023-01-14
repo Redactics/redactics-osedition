@@ -31,7 +31,7 @@ jobs:
       - run:
           name: Dockerhub Auth
           command: |
-            echo "$DOCKERHUB_PASS" | docker login -u "redactics" --password-stdin
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
       - docker-registry-image-cache/with-save-restore-images:
           repository: redactics
           images: "api:${CIRCLE_BRANCH}"
@@ -64,7 +64,7 @@ jobs:
       - run:
           name: Dockerhub Auth
           command: |
-            echo "$DOCKERHUB_PASS" | docker login -u "redactics" --password-stdin
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
       - run:
           name: Expose Environment Variables
           command: |
@@ -96,7 +96,7 @@ jobs:
       - run:
           name: Dockerhub Auth
           command: |
-            echo "$DOCKERHUB_PASS" | docker login -u "redactics" --password-stdin
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
       - run:
           name: Run tests
           command: |
@@ -122,7 +122,7 @@ jobs:
       - run:
           name: Dockerhub Auth
           command: |
-            echo "$DOCKERHUB_PASS" | docker login -u "redactics" --password-stdin
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
       - run:
           name: Run eslint
           command: |
