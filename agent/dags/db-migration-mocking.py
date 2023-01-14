@@ -143,7 +143,7 @@ def db_migration_mocking():
         apiUrl = API_URL + '/workflow/job/' + context["params"]["workflowJobId"] + '/postTaskEnd'
         payload = {
             'task': context["task_instance"].task_id,
-            'totalTaskNum': 4
+            'totalTaskNum': 3
         }
         payloadJSON = json.dumps(payload)
         request = requests.put(apiUrl, data=payloadJSON, headers=headers)
