@@ -12,7 +12,6 @@ import Workflow from '../models/workflow';
 import AgentInput from '../models/agentinput';
 import Input from '../models/input';
 import HelmCmd from '../models/helmcmd';
-import DataFeed from '../models/datafeed';
 import Notification from '../models/notification';
 
 const { validationResult } = require('express-validator');
@@ -39,7 +38,7 @@ export async function getAgent(req: Request, res: Response) {
         disabled: {
           [Op.not]: true,
         },
-      }
+      },
     });
 
     const formattedInputs:string[] = [];
@@ -48,17 +47,15 @@ export async function getAgent(req: Request, res: Response) {
       delete agent.id;
       if (agent.inputs) {
         agent.inputs.forEach((ci:any) => {
-          const input = inputs.find((i:any) => {
-            return (i.dataValues.id === ci.dataValues.inputId);
-          })
+          const input = inputs.find((i:any) => (i.dataValues.id === ci.dataValues.inputId));
           formattedInputs.push(input.dataValues.uuid);
-        })
+        });
         delete agent.inputs;
         agent.inputs = formattedInputs;
       }
       return agent;
     });
-    //console.log(agents);
+    // console.log(agents);
     res.send(agents);
   } catch (e) {
     logger.error(e.stack);
@@ -94,22 +91,20 @@ export async function createAgent(req: Request, res: Response) {
     const response = agentCreate.dataValues;
 
     // create agentinput records
-    let inputs = await Input.findAll({
+    const inputs = await Input.findAll({
       where: {
         disabled: {
           [Op.not]: true,
         },
-      }
-    })
-    let agentInputPromises:any[] = [];
+      },
+    });
+    const agentInputPromises:any[] = [];
     req.body.inputs.forEach((inputUuid:string) => {
-      let input = inputs.find((i:any) => {
-        return (i.dataValues.uuid === inputUuid)
-      });
-      let agentInputRecord:AgentInputRecord = {
+      const input = inputs.find((i:any) => (i.dataValues.uuid === inputUuid));
+      const agentInputRecord:AgentInputRecord = {
         inputId: input.dataValues.id,
         agentId: response.id,
-      }
+      };
       agentInputPromises.push(AgentInput.create(agentInputRecord));
     });
     await Promise.all(agentInputPromises);
@@ -142,7 +137,7 @@ export async function updateAgent(req: Request, res: Response) {
         disabled: {
           [Op.not]: true,
         },
-      }
+      },
     });
     const inputUuids:string[] = [];
     inputs.forEach((input:any) => {
@@ -153,7 +148,7 @@ export async function updateAgent(req: Request, res: Response) {
       if (!inputUuids.includes(inputUuid)) {
         invalidInput = true;
       }
-    })
+    });
     if (invalidInput) {
       return res.status(403).json({ errors: 'invalid input' });
     }
@@ -170,19 +165,17 @@ export async function updateAgent(req: Request, res: Response) {
     const agentInputPromises:any[] = [];
     await AgentInput.destroy({
       where: {
-        agentId: agent.dataValues.id
-      }
+        agentId: agent.dataValues.id,
+      },
     });
     req.body.inputs.forEach((inputUuid:string) => {
-      const findInput = inputs.find((input:any) => {
-        return (input.dataValues.uuid === inputUuid)
-      });
+      const findInput = inputs.find((input:any) => (input.dataValues.uuid === inputUuid));
       const agentInputRecord:AgentInputRecord = {
         agentId: agent.dataValues.id,
-        inputId: findInput.dataValues.id
-      }
+        inputId: findInput.dataValues.id,
+      };
       agentInputPromises.push(AgentInput.create(agentInputRecord));
-    })
+    });
     await Promise.all(agentInputPromises);
 
     // strip primary key from response since we use UUIDs instead
@@ -281,10 +274,10 @@ export async function heartbeat(req: Request, res: Response) {
         acked: false,
         firstHeartbeat: true,
         agentId: agentCheck.dataValues.id,
-      }
+      };
       await Notification.create(notificationRecord);
     }
-    
+
     return res.send(response);
   } catch (e) {
     logger.error(e.stack);
@@ -322,12 +315,12 @@ export async function helmCmd(req: Request, res: Response) {
     const agentInputs = await AgentInput.findAll({
       where: {
         agentId: agent.dataValues.id,
-      }
+      },
     });
-    let inputIds:number[] = [];
+    const inputIds:number[] = [];
     agentInputs.forEach((input:any) => {
       inputIds.push(input.dataValues.inputId);
-    })
+    });
 
     const allInputs = await Input.findAll({
       where: {
@@ -337,7 +330,7 @@ export async function helmCmd(req: Request, res: Response) {
         disabled: {
           [Op.not]: true,
         },
-      }
+      },
     });
 
     // enable PG for Airflow data and reserve 1GB
@@ -371,9 +364,9 @@ export async function helmCmd(req: Request, res: Response) {
           tables: i.dataValues.tables,
         });
 
-        let findInput = allInputs.find((input:any) => {
-          return (input.dataValues.id === i.dataValues.inputId)
-        })
+        const findInput = allInputs.find((input:any) => (
+          input.dataValues.id === i.dataValues.inputId
+        ));
 
         // calculate http-nas space
         if (findInput.dataValues.diskSize > largestDisk) {
@@ -410,7 +403,7 @@ export async function helmCmd(req: Request, res: Response) {
     const chartUrl = process.env.NODE_ENV === 'development' ? './helmcharts/agent-osedition' : 'redactics/agent-osedition';
     helmArgs.agentUpgradeAvailable = !!((agent.dataValues.lastAgentVersion
       && (String(process.env.LATEST_CHART_VERSION) || '') !== agent.dataValues.lastAgentVersion));
-    let helmUpgrade = (agent.dataValues.agentInstallationDate) ? '' : 'helm repo add redactics https://chartmuseum.redactics.com && '
+    let helmUpgrade = (agent.dataValues.agentInstallationDate) ? '' : 'helm repo add redactics https://chartmuseum.redactics.com && ';
     helmUpgrade += (helmArgs.agentUpgradeAvailable && process.env.NODE_ENV !== 'development') ? 'helm repo update && helm upgrade --install' : 'helm upgrade --install';
 
     const helmCmdArray = [
@@ -437,7 +430,7 @@ export async function helmCmd(req: Request, res: Response) {
 
     if (helmArgs.postgresql.persistence.size) {
       helmCmdSet.push(`--set "postgresql.persistence.size=${helmArgs.postgresql.persistence.size}Gi"`);
-      helmCmdSet.push(`--set "postgresql.persistence.enabled=true"`);
+      helmCmdSet.push('--set "postgresql.persistence.enabled=true"');
     } else {
       helmCmdSet.push('--set "postgresql.persistence.enabled=false"');
     }
@@ -487,11 +480,10 @@ export async function helmCmd(req: Request, res: Response) {
       },
       order: [
         ['createdAt', 'DESC'],
-      ]
+      ],
     });
     const helmCmdHistory:HelmCmdHistory[] = [];
     let latest = true;
-    let invokedBy = '';
     helmCmdList.forEach((c:any) => {
       if (latest || c.dataValues.heartbeat) {
         helmCmdHistory.push({
@@ -566,8 +558,8 @@ export async function helmConfig(req: Request, res: Response) {
     const inputIds:number[] = [];
     const agentInputs = await AgentInput.findAll({
       where: {
-        agentId: agent.id
-      }
+        agentId: agent.id,
+      },
     });
     agentInputs.forEach((ai:any) => {
       inputIds.push(ai.dataValues.inputId);
@@ -595,7 +587,7 @@ export async function helmConfig(req: Request, res: Response) {
         (connection:any) => (connection.id === input.dataValues.uuid),
       );
       if (!searchConnections) {
-        let connection:AgentConnection = {
+        const connection:AgentConnection = {
           id: input.dataValues.uuid,
           type: 'postgres',
           host: 'changeme',
@@ -607,10 +599,10 @@ export async function helmConfig(req: Request, res: Response) {
 
         if (input.dataValues.enableSSL) {
           connection.enableSSL = true;
-          connection.extra = '{"sslmode":"verify-ca", "sslrootcert":"/pgcerts/' + input.dataValues.uuid + '/sslrootcert", "sslcert": "/pgcerts/' + input.dataValues.uuid + '/sslcert", "sslkey": "/pgcerts/' + input.dataValues.uuid + '/sslkey"}';
+          connection.extra = `{"sslmode":"verify-ca", "sslrootcert":"/pgcerts/${input.dataValues.uuid}/sslrootcert", "sslcert": "/pgcerts/${input.dataValues.uuid}/sslcert", "sslkey": "/pgcerts/${input.dataValues.uuid}/sslkey"}`;
           sslSecrets.push({
             inputSource: input.dataValues.inputName,
-            cmd: "kubectl create secret -n " + agent.dataValues.namespace + " generic pgcert-" + input.dataValues.uuid + " --from-file=sslrootcert=/path/to/server-ca.pem --from-file=sslcert=/path/to/client-cert.pem  --from-file=sslkey=/path/to/client-key.pem"
+            cmd: `kubectl create secret -n ${agent.dataValues.namespace} generic pgcert-${input.dataValues.uuid} --from-file=sslrootcert=/path/to/server-ca.pem --from-file=sslcert=/path/to/client-cert.pem  --from-file=sslkey=/path/to/client-key.pem`,
           });
         }
         connections.push(connection);
@@ -643,9 +635,9 @@ export async function helmConfig(req: Request, res: Response) {
     };
 
     if (process.env.NODE_ENV === 'development') {
-      helmArgs.redactics.env = "development";
-      helmArgs.redactics.apiURL = "http://host.docker.internal:3000";
-      
+      helmArgs.redactics.env = 'development';
+      helmArgs.redactics.apiURL = 'http://host.docker.internal:3000';
+
       // enable access to logs via web GUI
       helmArgs.workers = {
         persistence: {
