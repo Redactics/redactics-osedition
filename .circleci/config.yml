@@ -3,8 +3,6 @@ version: 2.1
 orbs:
   helm: circleci/helm@1.2.0
   docker: circleci/docker@1.5.0
-  gcp-gcr: circleci/gcp-gcr@0.13.0
-  gcp-gke: circleci/gcp-gke@1.2.0
   # third-party experimental ORB
   docker-registry-image-cache: cci-x/docker-registry-image-cache@0.2.12
 
@@ -12,6 +10,9 @@ jobs:
   build_api:
     docker:
       - image: cimg/base:2020.01
+        auth:
+          username: redactics
+          password: $DOCKERHUB_PASSWORD 
     steps:
       - setup_remote_docker:
           docker_layer_caching: false
@@ -41,6 +42,9 @@ jobs:
   build_dashboard:
     docker:
       - image: cimg/base:2020.01
+        auth:
+          username: redactics
+          password: $DOCKERHUB_PASSWORD 
     steps:
       - setup_remote_docker:
           docker_layer_caching: false
