@@ -63,7 +63,7 @@ jobs:
       - run:
           name: Expose Environment Variables
           command: |
-            echo "$BUILD_ENV_VARS" | base64 -d > .env.production
+            echo "$BUILD_ENV_VARS" | base64 -d > dashboard/.env.production
       - run:
           name: Debug
           command: |
