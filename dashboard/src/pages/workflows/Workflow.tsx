@@ -1076,14 +1076,15 @@ class Workflow extends React.Component<IProps, IState> {
 
   selectInputSource(event:any) {
     const state:any = this.state;
-    const findInput = this.props.agentInputs.find((input:AgentInputRecord) => {
+    const agentInput = this.props.agentInputs.find((input:AgentInputRecord) => {
       return (input.uuid === event.target.value)
     })
-    if (findInput) {
+    if (agentInput) {
       state.inputs = [{
-        uuid: findInput.uuid,
+        uuid: event.target.value,
         enabled: true,
-        inputName: findInput.inputName,
+        inputName: agentInput.inputName,
+        tables: [],
       }]
       this.setState(state);
     }
@@ -1791,7 +1792,7 @@ class Workflow extends React.Component<IProps, IState> {
             <Paper variant="outlined">
               <ExpansionPanel expanded={this.state.outputExpanded} onChange={(event, expanded) => this.outputExpansion(event, expanded)}>
                 <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography>Setup Instructions</Typography>
+                  <Typography>Settings and Setup Instructions</Typography>
                 </ExpansionPanelSummary>
                 <ExpansionPanelDetails>
                   <DatabaseMigrationSetup

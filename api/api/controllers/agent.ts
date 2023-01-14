@@ -421,6 +421,7 @@ export async function helmCmd(req: Request, res: Response) {
 
     if (largestDiskPadded) {
       helmCmdSet.push(`--set "http-nas.persistence.pvc.size=${largestDiskPadded}Gi"`);
+      helmCmdSet.push('--set "http-nas.persistence.enabled=true"');
     } else {
       helmCmdSet.push('--set "http-nas.persistence.enabled=false"');
     }
@@ -432,6 +433,7 @@ export async function helmCmd(req: Request, res: Response) {
 
     if (helmArgs.postgresql.persistence.size) {
       helmCmdSet.push(`--set "postgresql.persistence.size=${helmArgs.postgresql.persistence.size}Gi"`);
+      helmCmdSet.push(`--set "postgresql.persistence.enabled=true"`);
     } else {
       helmCmdSet.push('--set "postgresql.persistence.enabled=false"');
     }
@@ -661,7 +663,7 @@ export async function helmConfig(req: Request, res: Response) {
           password: agent.dataValues.generatedAirflowAPIPassword,
         },
       };
-      helmArgs.redactics.basicAuth = Buffer.from(`airflow:${agent.dataValues.generatedAirflowAPIPassword}`).toString('base64');
+      helmArgs.redactics.basicAuth = Buffer.from(`redactics:${agent.dataValues.generatedAirflowAPIPassword}`).toString('base64');
       if (migrationNamespaces.length) {
         helmArgs.redactics.migrationNamespaces = migrationNamespaces;
       }

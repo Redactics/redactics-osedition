@@ -249,8 +249,15 @@ export async function getWorkflow(req: Request, res: Response) {
         }
       })
 
-      if (i.dataValues.tables && i.dataValues.tables.length) {
+      if (workflow.dataValues.workflowType === "ERL" && i.dataValues.tables && i.dataValues.tables.length) {
         // skip inputs with no tables to export
+        inputs.push({
+          id: i.dataValues.Input.dataValues.uuid,
+          tables: i.dataValues.tables,
+          fullcopies: fullCopies,
+        });
+      }
+      else {
         inputs.push({
           id: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,
@@ -424,24 +431,6 @@ export async function createWorkflow(req: Request, res: Response) {
     const wfCreate = await Workflow.create(workflowRecord);
     const response = wfCreate.dataValues;
 
-    // create workflow inputs
-    const agentInputs = await AgentInput.findAll({
-      where: {
-        agentId: workflowRecord.agentId,
-      }
-    });
-    const wfInputPromises:any[] = [];
-    agentInputs.forEach((ai:any) => {
-      let workflowInputRecord:WorkflowInputRecord = {
-        enabled: false,
-        inputId: ai.dataValues.inputId, 
-        workflowId: response.id,
-        tables: [],
-      };
-      wfInputPromises.push(WorkflowInput.create(workflowInputRecord));
-    })
-    await Promise.all(wfInputPromises);
-
     response.inputs = [];
     response.datafeeds = [];
 
@@ -531,18 +520,19 @@ async function saveInputs(workflow:any, req: Request) {
       workflowId: workflow.id
     }
   })
-  Object.values(req.body.inputs).forEach((i:any) => {
-    const input = inputs.find((input:any) => {
-      return (input.dataValues.uuid === i.uuid)
+  inputs.forEach((input:any) => {
+    const findInput = req.body.inputs.find((i:any) => {
+      return (i.uuid === input.dataValues.uuid)
     });
-
-    const inputRecord:WorkflowInputRecord = {
-      workflowId: workflow.dataValues.id,
-      inputId: input.dataValues.id,
-      tables: i.tables,
-      enabled: i.enabled,
-    };
-    inputrulePromises.push(WorkflowInput.create(inputRecord));
+    if (findInput) {
+      const inputRecord:WorkflowInputRecord = {
+        workflowId: workflow.dataValues.id,
+        inputId: input.dataValues.id,
+        tables: findInput.tables,
+        enabled: findInput.enabled,
+      };
+      inputrulePromises.push(WorkflowInput.create(inputRecord));
+    }
   });
   await Promise.all(inputrulePromises);
 }
