@@ -8,11 +8,10 @@ services:
       POSTGRES_PASSWORD: postgres
    
   api:
-    image: gcr.io/redactics-prod-310503/api:${CIRCLE_SHA1}
+    image: redactics/api:${CIRCLE_SHA1}
     command: npm run test
     environment:
       NODE_ENV: test
-      FIREBASE_SERVICE_ACCOUNT: '${FIREBASE_SERVICE_ACCOUNT}'
       PGHOST: postgres_test
       PGUSER: postgres
       PGPASSWORD: postgres
