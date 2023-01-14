@@ -37,7 +37,7 @@ jobs:
           parallelism: 2
           steps:
             - docker-registry-image-cache/build:
-                command: "docker build -t redactics/api-osedition:${CIRCLE_SHA1} -t redactics/api-osedition:${CIRCLE_BRANCH} -f api/Dockerfile api"
+                command: "docker build -t redactics/api:${CIRCLE_SHA1} -t redactics/api:${CIRCLE_BRANCH} -f api/Dockerfile api"
   build_dashboard:
     docker:
       - image: cimg/base:2020.01
@@ -70,7 +70,7 @@ jobs:
           parallelism: 2
           steps:
             - docker-registry-image-cache/build:
-                command: "docker build -t redactics/dashbaord:${CIRCLE_SHA1} -t redactics/dashboard:${CIRCLE_BRANCH} -f dashboard/Dockerfile dashboard"
+                command: "docker build -t redactics/dashboard:${CIRCLE_SHA1} -t redactics/dashboard:${CIRCLE_BRANCH} -f dashboard/Dockerfile dashboard"
   test:
     docker:
       - image: cimg/base:2020.01
