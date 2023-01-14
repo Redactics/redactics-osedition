@@ -67,7 +67,7 @@ jobs:
       - run:
           name: Debug
           command: |
-            ls -al
+            ls -al dashboard/
       - docker-registry-image-cache/with-save-restore-images:
           repository: redactics
           images: "api:${CIRCLE_BRANCH}"
