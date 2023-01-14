@@ -124,8 +124,14 @@ workflows:
     jobs:
       - build_api:
           name: 'Build API'
+          context:
+            - build-env-vars
+            - docker-hub-creds
       - build_dashboard:
           name: 'Build Dashboard'
+          context:
+            - build-env-vars
+            - docker-hub-creds
       - test:
           name: 'Test API'
           requires:
