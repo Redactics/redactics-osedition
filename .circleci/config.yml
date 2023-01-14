@@ -91,7 +91,7 @@ jobs:
       - run:
           name: Run tests
           command: |
-            docker-compose -f docker-compose-ci.yml run api
+            docker-compose -f api/docker-compose-ci.yml run api
 
   eslint:
     docker:
@@ -113,7 +113,7 @@ jobs:
       - run:
           name: Run eslint
           command: |
-            docker-compose -f docker-compose-ci.yml run api npm run eslint
+            docker-compose -f api/docker-compose-ci.yml run api npm run eslint
 
 workflows:
   osedition:
