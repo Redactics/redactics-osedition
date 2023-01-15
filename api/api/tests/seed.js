@@ -35,18 +35,18 @@ exports.genSeedData = async function() {
 
   var redactRuleSets = await RedactRuleset.findAll({});
 
-  var ruleRedactEmail = redactRuleSets.filter(r => {
+  var ruleRedactEmail = redactRuleSets.find(r => {
     return (r.dataValues.redactKey === "redact_email");
   })
-  var ruleReplacement = redactRuleSets.filter(r => {
+  var ruleReplacement = redactRuleSets.find(r => {
     return (r.dataValues.redactKey === "replacement");
   })
-  var ruleRandomString = redactRuleSets.filter(r => {
+  var ruleRandomString = redactRuleSets.find(r => {
     return (r.dataValues.redactKey === "random_string");
   })
 
   const redactEmailPreset = await RedactRulePresets.create({
-    ruleId: ruleRedactEmail[0].id,
+    ruleId: ruleRedactEmail.id,
     isDefault: false,
     presetName: "testRedactEmail",
     redactData: {
@@ -56,12 +56,40 @@ exports.genSeedData = async function() {
     }
   });
 
+  // set defaults
+  await RedactRulePresets.create({
+    ruleId: ruleRedactEmail.id,
+    isDefault: true,
+    presetName: "default-redactemail",
+    redactData: {
+      domain: "redactics.com",
+      primaryKey: "id",
+      prefix: "redacted"
+    }
+  });
+  await RedactRulePresets.create({
+    ruleId: ruleReplacement.id,
+    isDefault: true,
+    presetName: "default-replacement",
+    redactData: {
+      replacement: "redacted"
+    }
+  });
+  await RedactRulePresets.create({
+    ruleId: ruleRandomString.id,
+    isDefault: true,
+    presetName: "default-randomstring",
+    redactData: {
+      chars: "10"
+    }
+  });
+
   return {
     redactRuleSets: redactRuleSets,
     redactEmailPreset: redactEmailPreset,
-    ruleRedactEmail: ruleRedactEmail[0],
-    ruleReplacement: ruleReplacement[0],
-    ruleRandomString: ruleRandomString[0],
+    ruleRedactEmail: ruleRedactEmail,
+    ruleReplacement: ruleReplacement,
+    ruleRandomString: ruleRandomString,
   }
 }
 

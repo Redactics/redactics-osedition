@@ -4,10 +4,10 @@ import request from 'supertest';
 const agent = request.agent(app);
 
 import DB from '../db/sequelize';
-const { User, Company, CompanyUser, Cluster, Database, RedactRules, RedactRuleset, RedactRulePresets, EmailValidation } = DB.models;
+const { RedactRulePresets } = DB.models;
 const util = require('util');
 
-var userId, companyId, jwtToken, redactRuleSets, redactRulePresets, clusterId, clusterUuid, databaseUuid, ruleRedactEmail, ruleReplacement, ruleRandomString, presetReplacement, newRedactEmail, newReplacement;
+var redactRuleSets, redactRulePresets, clusterId, clusterUuid, databaseUuid, ruleRedactEmail, ruleReplacement, ruleRandomString, presetReplacement, newRedactEmail, newReplacement;
 
 const { genSeedData } = require('./seed');
 
@@ -27,14 +27,10 @@ describe('Settings endpoints', () => {
     ruleRedactEmail = seedData.ruleRedactEmail;
     ruleReplacement = seedData.ruleReplacement;
     ruleRandomString = seedData.ruleRandomString;
-    userId = seedData.userId;
-    companyId = seedData.companyId;
-    jwtToken = seedData.jwtToken;
   })
 
   it('get settings - no custom presets', async () => {
     const res = await agent.get('/settings')
-    .set('Cookie', 'token=' + jwtToken)
 
     expect(res.status).toBe(200);
 
@@ -76,14 +72,6 @@ describe('Settings endpoints', () => {
     expect(searchRedactEmail.length).toBe(1);
     expect(searchReplacement.length).toBe(1);
     expect(searchRandomString.length).toBe(1);
-
-    expect(res.body.companyUsers[0].firstName).toBe("Joe")
-    expect(res.body.companyUsers[0].lastName).toBe("Auty")
-    expect(res.body.companyUsers[0].email).toBe("joeauty@gmail.com")
-    expect(res.body.companyUsers[0].isOwner).toBe(true)
-
-    // user fetching request is owner and should have full control over UI
-    expect(res.body.isOwner).toBe(true);
   })
 
   it('save settings: rule defaults', async () => {
@@ -107,7 +95,6 @@ describe('Settings endpoints', () => {
     }]
 
     const res = await agent.put('/settings/saveRuleDefaults')
-    .set('Cookie', 'token=' + jwtToken)
     .send(payload)
 
     expect(res.status).toBe(200);
@@ -127,7 +114,6 @@ describe('Settings endpoints', () => {
     }];
 
     const res = await agent.post('/settings/presets')
-    .set('Cookie', 'token=' + jwtToken)
     .send(payload)
 
     expect(res.status).toBe(200);
@@ -141,7 +127,6 @@ describe('Settings endpoints', () => {
     expect(rule.dataValues.ruleId).toBe(ruleRedactEmail.id);
     expect(rule.dataValues.uuid).toBeDefined();
     expect(rule.dataValues.presetName).toBe("newRedactEmail");
-    expect(rule.dataValues.companyId).toBe(companyId);
     expect(rule.dataValues.isDefault).toBe(false);
     expect(rule.dataValues.redactData.prefix).toBe("test");
     expect(rule.dataValues.redactData.primaryKey).toBe("id");
@@ -169,7 +154,6 @@ describe('Settings endpoints', () => {
     }];
 
     const res = await agent.post('/settings/presets')
-    .set('Cookie', 'token=' + jwtToken)
     .send(payload)
 
     expect(res.status).toBe(200);
@@ -206,7 +190,6 @@ describe('Settings endpoints', () => {
     }];
 
     const res = await agent.post('/settings/presets')
-    .set('Cookie', 'token=' + jwtToken)
     .send(payload)
 
     expect(res.status).toBe(200);
@@ -235,7 +218,6 @@ describe('Settings endpoints', () => {
     }];
 
     const res = await agent.post('/settings/presets')
-    .set('Cookie', 'token=' + jwtToken)
     .send(payload)
 
     expect(res.status).toBe(200);

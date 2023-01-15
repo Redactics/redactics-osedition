@@ -44,7 +44,6 @@ export async function getSettings(req: Request, res: Response) {
     defaults = defaults.map((df: any) => {
       const d = df;
       delete d.dataValues.id;
-      delete d.dataValues.companyId;
       d.dataValues.rule = redactrules[d.dataValues.ruleId];
       delete d.dataValues.ruleId;
 
@@ -54,7 +53,6 @@ export async function getSettings(req: Request, res: Response) {
     presets = presets.map((preset: any) => {
       const p = preset;
       delete p.dataValues.id;
-      delete p.dataValues.companyId;
       p.dataValues.rule = redactrules[p.dataValues.ruleId];
       delete p.dataValues.ruleId;
 
