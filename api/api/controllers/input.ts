@@ -54,6 +54,19 @@ export async function saveInputs(req: Request, res: Response) {
       inputUuids.push(input.dataValues.uuid);
     });
 
+    // validate inputs
+    let validInputs = true;
+    Object.values(req.body.inputs).forEach((i:any) => {
+      if (i.inputType !== "postgresql" || 
+        !i.sslMode.match(/(allow|prefer|require|verify-ca|verify-full)/) ||
+        i.diskSize < 0) {
+        validInputs = false;
+      }
+    });
+    if (!validInputs) {
+      return res.status(400).json({ errors: 'invalid input value' });
+    }
+
     const savedInputs:string[] = [];
     Object.values(req.body.inputs).forEach((i:any) => {
       const inputRecord:InputRecord = {
