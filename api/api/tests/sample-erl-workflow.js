@@ -14,17 +14,19 @@ exports.genSampleERLWorkflow = async function(agentId, name, inputs) {
     exportTableDataConfig: [{"athletes": {"table": "athletes", "fields": [], "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}, "marketing_campaign": {"table": "marketing_campaign", "fields": [], "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}}],
   });
 
-  let workflowInputPromises = [];
-  inputs.forEach((input) => {
-    workflowInputPromises.push(WorkflowInput.create({
-      workflowId: sampleWorkflow.dataValues.id,
-      inputId: input.id,
-      tables: ["marketing_campaign", "athletes"],
-      enabled: true,
-    }))
-  });
+  if (inputs && inputs.length) {
+    let workflowInputPromises = [];
+    inputs.forEach((input) => {
+      workflowInputPromises.push(WorkflowInput.create({
+        workflowId: sampleWorkflow.dataValues.id,
+        inputId: input.dataValues.id,
+        tables: ["marketing_campaign", "athletes"],
+        enabled: true,
+      }))
+    });
 
-  await Promise.all(workflowInputPromises);
+    await Promise.all(workflowInputPromises);
+  }
 
   return sampleWorkflow;
 }

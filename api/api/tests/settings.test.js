@@ -7,7 +7,7 @@ import DB from '../db/sequelize';
 const { RedactRulePresets } = DB.models;
 const util = require('util');
 
-var redactRuleSets, redactRulePresets, clusterId, clusterUuid, databaseUuid, ruleRedactEmail, ruleReplacement, ruleRandomString, presetReplacement, newRedactEmail, newReplacement;
+var redactRuleSets, redactRulePresets, ruleRedactEmail, ruleReplacement, ruleRandomString, presetReplacement, newRedactEmail, newReplacement;
 
 const { genSeedData } = require('./seed');
 
