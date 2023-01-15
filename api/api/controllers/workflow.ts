@@ -40,7 +40,7 @@ export async function getWorkflows(req: Request, res: Response) {
     presets.forEach((p: any) => {
       presetrules[p.id] = p.uuid;
     });
-   
+
     let workflows = await Workflow.findAll({
       where: {
         disabled: {
@@ -75,20 +75,20 @@ export async function getWorkflows(req: Request, res: Response) {
       return a.dataValues;
     });
 
-    let allInputs = await Input.findAll({
+    const allInputs = await Input.findAll({
       where: {
         disabled: {
           [Op.not]: true,
         },
-      }
-    })
+      },
+    });
 
     let agentInputs = await AgentInput.findAll({
       where: {
         agentId: {
           [Op.in]: agentIdKeys,
         },
-      }
+      },
     });
 
     redactrulesets = redactrulesets.map((rs: any) => {
@@ -134,9 +134,7 @@ export async function getWorkflows(req: Request, res: Response) {
       const allDatabaseTables:string[] = [];
       d.dataValues.inputs = d.dataValues.inputs.map((input: any) => {
         const wi = input;
-        const inputData = allInputs.find((i: any) => {
-          return (i.dataValues.id === wi.dataValues.inputId)
-        });
+        const inputData = allInputs.find((i: any) => (i.dataValues.id === wi.dataValues.inputId));
         if (inputData) {
           wi.dataValues.inputName = inputData.dataValues.inputName;
           wi.dataValues.uuid = inputData.dataValues.uuid;
@@ -145,8 +143,7 @@ export async function getWorkflows(req: Request, res: Response) {
           wi.dataValues.tables.forEach((t:string) => {
             allDatabaseTables.push(`${wi.dataValues.inputName}: ${t}`);
           });
-        }
-        else {
+        } else {
           wi.dataValues.tables = [];
         }
         delete wi.dataValues.id;
@@ -170,9 +167,9 @@ export async function getWorkflows(req: Request, res: Response) {
 
     agentInputs = agentInputs.map((ai:any) => {
       const i = ai;
-      const inputData = allInputs.find((i: any) => {
-        return (i.dataValues.id === ai.dataValues.inputId)
-      });
+      const inputData = allInputs.find(
+        (alli: any) => (alli.dataValues.id === ai.dataValues.inputId),
+      );
       if (inputData) {
         i.dataValues.inputName = inputData.dataValues.inputName;
         i.dataValues.uuid = inputData.dataValues.uuid;
@@ -218,7 +215,7 @@ export async function getWorkflow(req: Request, res: Response) {
         workflowId: workflow.dataValues.id,
         enabled: true,
       },
-      include: [Input]
+      include: [Input],
     });
 
     const allRedactRuleSets = await RedactRuleset.findAll({});
@@ -237,8 +234,8 @@ export async function getWorkflow(req: Request, res: Response) {
       where: {
         inputId: {
           [Op.in]: inputIds,
-        }
-      }
+        },
+      },
     });
 
     workflowInputs.forEach((i:any) => {
@@ -247,17 +244,16 @@ export async function getWorkflow(req: Request, res: Response) {
         if (c.dataValues.inputId === i.dataValues.Input.id) {
           fullCopies.push(c.dataValues.tableName);
         }
-      })
+      });
 
-      if (workflow.dataValues.workflowType === "ERL" && i.dataValues.tables && i.dataValues.tables.length) {
+      if (workflow.dataValues.workflowType === 'ERL' && i.dataValues.tables && i.dataValues.tables.length) {
         // skip inputs with no tables to export
         inputs.push({
           id: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,
           fullcopies: fullCopies,
         });
-      }
-      else {
+      } else {
         inputs.push({
           id: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,
@@ -517,13 +513,11 @@ async function saveInputs(workflow:any, req: Request) {
 
   await WorkflowInput.destroy({
     where: {
-      workflowId: workflow.id
-    }
-  })
+      workflowId: workflow.id,
+    },
+  });
   inputs.forEach((input:any) => {
-    const findInput = req.body.inputs.find((i:any) => {
-      return (i.uuid === input.dataValues.uuid)
-    });
+    const findInput = req.body.inputs.find((i:any) => (i.uuid === input.dataValues.uuid));
     if (findInput) {
       const inputRecord:WorkflowInputRecord = {
         workflowId: workflow.dataValues.id,
@@ -827,86 +821,6 @@ async function saveMockMigration(req: Request, res: Response) {
   }
 }
 
-async function buildRedactRuleConfig(workflow:any, req: Request) {
-  const allRedactRuleSets = await RedactRuleset.findAll({});
-  const allRedactRules = await RedactRule.findAll({});
-  const allRedactRulePresets = await RedactRulePreset.findAll({});
-
-  const rules = allRedactRules.filter((r:any) => (
-    r.dataValues.workflowId === workflow.dataValues.id
-  ));
-  const redactRules:any = [];
-
-  Object.values(rules).forEach((r:any) => {
-    let preset;
-
-    // see if there is already a rule for current table, append columns if there is
-    const tableSearch = redactRules.find((rule:any) => Object.keys(rule)[0] === r.table);
-    const rule:any = tableSearch || {};
-    if (!rule[r.table]) {
-      rule[r.table] = [];
-    }
-    const column:any = {};
-    const ruleset = allRedactRuleSets.find((p:any) => (p.dataValues.id === r.ruleId));
-
-    if (r.presetId) {
-      preset = allRedactRulePresets.find((p:any) => (p.dataValues.id === r.presetId));
-    } else {
-      // get default data
-      preset = allRedactRulePresets.find((p:any) => (p.dataValues.isDefault
-        && p.dataValues.ruleId === r.ruleId));
-
-      if (preset) {
-        preset = preset.dataValues;
-      } else {
-        // no default value saved to DB, provide default
-        switch (ruleset.redactKey) {
-          case 'replacement':
-            preset = {
-              redactData: {
-                replacement: 'redacted',
-              },
-            };
-            break;
-
-          case 'redact_email':
-            preset = {
-              redactData: {
-                domain: 'redactics.com',
-                prefix: 'redacted',
-                primaryKey: 'id',
-              },
-            };
-            break;
-
-          case 'random_string':
-            preset = {
-              redactData: {
-                chars: '25',
-              },
-            };
-            break;
-
-          default:
-            preset = {
-              redactData: {},
-            };
-            break;
-        }
-      }
-    }
-
-    column[r.column] = { rule: ruleset.redactKey, ...preset.redactData };
-
-    rule[r.table].push(column);
-    if (!tableSearch) {
-      // prevent duplicate table entries
-      redactRules.push(rule);
-    }
-  });
-  return redactRules;
-}
-
 export async function updateWorkflow(req: Request, res: Response) {
   switch (req.body.workflowType) {
     case 'ERL':
@@ -1064,7 +978,7 @@ export async function postJobException(req: Request, res: Response) {
     const job = await WorkflowJob.findOne({
       where: {
         uuid: req.params.uuid,
-      }
+      },
     });
     if (!job) {
       return res.status(404).json({ errors: 'this workflow job does not exist' });
@@ -1080,8 +994,8 @@ export async function postJobException(req: Request, res: Response) {
       acked: false,
       exception: exception.exception,
       stackTrace: exception.stackTrace,
-      workflowId: job.dataValues.workflowId,      
-    }
+      workflowId: job.dataValues.workflowId,
+    };
     await Notification.create(notificationRecord);
 
     return res.send(job);
@@ -1195,7 +1109,7 @@ export async function postJobEnd(req: Request, res: Response) {
     const job = await WorkflowJob.findOne({
       where: {
         uuid: req.params.uuid,
-      }
+      },
     });
     if (!job) {
       return res.status(404).json({ errors: 'this workflow job does not exist' });
@@ -1204,9 +1118,9 @@ export async function postJobEnd(req: Request, res: Response) {
     job.status = 'completed';
     job.currentTaskNum = null;
     const workflow = (job.dataValues.workflowId)
-        ? await Workflow.findByPk(job.dataValues.workflowId, {
-          include: ['redactrules', 'inputs', 'datafeeds'],
-        }) : null;
+      ? await Workflow.findByPk(job.dataValues.workflowId, {
+        include: ['redactrules', 'inputs', 'datafeeds'],
+      }) : null;
     job.outputSummary = buildOutputSummary(job, workflow);
     job.outputMetadata = buildOutputMetadata(job);
     await job.save();
@@ -1214,7 +1128,6 @@ export async function postJobEnd(req: Request, res: Response) {
     return res.send({
       ack: true,
     });
-
   } catch (e) {
     logger.error(e.stack);
     return res.status(500).send(e);
@@ -1238,7 +1151,7 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     const job = await WorkflowJob.findOne({
       where: {
         uuid: req.params.uuid,
-      }
+      },
     });
     if (!job) {
       return res.status(404).json({ errors: 'this workflow job does not exist' });
@@ -1248,10 +1161,10 @@ export async function postJobTaskEnd(req: Request, res: Response) {
     job.totalTaskNum = req.body.totalTaskNum;
     job.lastTask = req.body.task;
     job.lastTaskEnd = Date.now();
-    if (job.status !== "error") {
+    if (job.status !== 'error') {
       job.status = 'inProgress';
     }
-    
+
     await job.save();
 
     return res.send({

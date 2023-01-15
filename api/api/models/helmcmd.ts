@@ -28,7 +28,7 @@ const HelmCmdModel = Sequelize.define('HelmCmd', {
   heartbeat: {
     type: DataTypes.BOOLEAN,
     allowNull: true,
-  }
+  },
 }, {
   tableName: 'helmcmds',
 });
