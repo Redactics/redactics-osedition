@@ -528,8 +528,7 @@ async function saveInputs(workflow:any, req: Request) {
           enabled: findInput.enabled,
         };
         inputrulePromises.push(WorkflowInput.create(inputRecord));
-      }
-      else {
+      } else {
         invalidInput = true;
       }
     });

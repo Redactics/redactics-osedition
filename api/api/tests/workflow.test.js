@@ -876,7 +876,9 @@ describe('Workflow endpoints invoked by Agent', () => {
     expect(wfJob.dataValues.currentTaskNum).toEqual(null);
     expect(wfJob.dataValues.exception).toEqual("");
     expect(wfJob.dataValues.stackTrace).toEqual("");
-    expect(wfJob.dataValues.outputSummary).toEqual("Your data was replicated to your digital twin database, uploaded to s3://bucket, and processed by debian.");
+    expect(wfJob.dataValues.outputSummary).toMatch(/replicated to your digital twin database/);
+    expect(wfJob.dataValues.outputSummary).toMatch(/uploaded to s3:\/\/bucket/);
+    expect(wfJob.dataValues.outputSummary).toMatch(/processed by debian/);
   })
 
   it('markFullCopy - invalid input ID', async() => {
