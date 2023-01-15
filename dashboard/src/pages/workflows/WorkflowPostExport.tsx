@@ -3,7 +3,6 @@ import styled from 'styled-components';
 import { withStyles } from '@material-ui/core/styles';
 
 import { spacing } from '@material-ui/system';
-import { blue } from '@material-ui/core/colors';
 
 import {
   Grid as MuiGrid,
@@ -45,7 +44,6 @@ import {
   Edit as EditIcon,
   HelpOutline as HelpIcon,
   ExpandMore as ExpandMoreIcon,
-  Info as InfoIcon,
 } from '@material-ui/icons';
 
 import {

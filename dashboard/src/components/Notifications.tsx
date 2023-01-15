@@ -19,8 +19,6 @@ import {
   DialogContentText,
   DialogTitle,
   Button,
-  FormControlLabel,
-  Checkbox,
 } from '@material-ui/core';
 
 import {

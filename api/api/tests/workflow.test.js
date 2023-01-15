@@ -4,7 +4,7 @@ import request from 'supertest';
 const agent = request.agent(app);
 
 import DB from '../db/sequelize';
-const { Workflow, WorkflowInput, RedactRules, RedactRuleset, RedactRulePresets, EmailValidation, Scan, ScanTable, Input, Datafeed, WorkflowJob, Metric, TableFullCopy } = DB.models;
+const { Workflow, WorkflowInput, RedactRules, RedactRuleset, RedactRulePresets, EmailValidation, Scan, ScanTable, Input, Datafeed, WorkflowJob, Notification, TableFullCopy } = DB.models;
 const util = require('util');
 
 const { Op } = require('sequelize');
@@ -120,6 +120,25 @@ describe('Workflow endpoints', () => {
     .expect(404);
   });
 
+  it('update ERL workflow - add invalid input', async() => {
+    const res = await agent.put('/workflow/' + workflowUuid)
+    .send({
+      agentId: agentUuid,
+      name: "Test Workflow",
+      workflowType: "ERL",
+      schedule: "0 0 * * *",
+      maskingRules: [],
+      inputs: {
+        uuid: "f1e5456c-89be-49c0-aa27-42af34b6c0f0",
+        enabled: true,
+        tables: ["athletes", "marketing_campaign"]
+      },
+      exportTableDataConfig: [],
+      dataFeeds: [],
+    })
+    .expect(400);
+  });
+
   it('update ERL workflow - add input', async() => {
     workflowInputs = [{
       uuid: sampleInput.dataValues.uuid,
@@ -147,12 +166,16 @@ describe('Workflow endpoints', () => {
     })
     workflowId = workflow.dataValues.id;
 
-    var input = await WorkflowInput.findOne({
+    var wfInput = await WorkflowInput.findOne({
       where: {
         workflowId: workflowId
       }
     })
-    expect(input).toBeDefined();
+    expect(wfInput).toBeDefined();
+    expect(wfInput.dataValues.enabled).toEqual(true);
+    expect(wfInput.dataValues.inputId).toEqual(sampleInput.dataValues.id);
+    expect(wfInput.dataValues.workflowId).toEqual(workflowId);
+    expect(wfInput.dataValues.tables).toEqual(["athletes", "marketing_campaign"]);
   });
 
   it('update ERL workflow - valid redaction rules and inputs', async() => {
@@ -768,6 +791,14 @@ describe('Workflow endpoints invoked by Agent', () => {
     expect(res.body.currentTaskNum).toEqual(null);
 
     // verify notification
+    const notif = await Notification.findOne({
+      where: {
+        exception: "some error"
+      }
+    });
+    expect(notif.dataValues.acked).toEqual(false);
+    expect(notif.dataValues.stackTrace).toEqual("error message details");
+    expect(notif.dataValues.workflowId).toEqual(workflowId);
   })
 
   it('postException - invalid workflow job ID', async() => {
@@ -787,8 +818,8 @@ describe('Workflow endpoints invoked by Agent', () => {
       }
     })
     wfJob.status = "queued";
-    // save this value for later
-    workflowJobId = wfJob.dataValues.id;
+    wfJob.exception = "";
+    wfJob.stackTrace = "";
     await wfJob.save();
   });
 
@@ -824,39 +855,29 @@ describe('Workflow endpoints invoked by Agent', () => {
     .expect(404);
   })
 
-  it('postJobEnd', async() => {
-
+  it('postJobEnd - invalid workflow job ID', async() => {
+    const res = await agent
+    .put('/workflow/job/4ea29447-fb3b-4db1-a2eb-9a57dc228b56/postJobEnd')
+    .expect(404);
   })
 
-  // it('postTaskEnd - trigger task completion', async() => {
-  //   const res = await agent
-  //   .put('/workflow/job/' + workflowJobUuid + '/postTaskEnd')
-  //   .set({'x-api-key': apiKey})
-  //   .send({
-  //     task: "end-noop",
-  //     totalTaskNum: 10,
-  //     lastTask: "end-noop"
-  //   })
-  //   .expect(200);
+  it('postJobEnd', async() => {
+    const res = await agent
+    .put('/workflow/job/' + workflowJobUuid + '/postJobEnd')
+    .expect(200);
 
-  //   const wfJob = await WorkflowJob.findOne({
-  //     where: {
-  //       uuid: workflowJobUuid
-  //     }
-  //   });
+    const wfJob = await WorkflowJob.findOne({
+      where: {
+        uuid: workflowJobUuid
+      }
+    });
 
-  //   expect(wfJob.dataValues.status).toEqual('completed');
-  //   expect(wfJob.dataValues.currentTaskNum).toEqual(null);
-  //   expect(wfJob.dataValues.outputSummary).toMatch(/1000 total rows created or updated, 5 column\(s\) containing PII\/confidential info, 1 table\(s\) exported./)
-  //   expect(wfJob.dataValues.outputMetadata.copySummary[0]).toEqual("Your tables have been created for the first time on a brand new Redactics Agent installation")
-  //   expect(wfJob.dataValues.outputMetadata.copySummary.length).toBe(1);
-  //   expect(wfJob.dataValues.outputMetadata.deltaCopies[0]).toEqual("athletes")
-  //   expect(wfJob.dataValues.outputMetadata.initialCopies[0]).toEqual("marketing_campaign")
-  //   expect(wfJob.dataValues.outputSummary).toMatch(/processed by debian/)
-  //   expect(wfJob.dataValues.outputSummary).toMatch(/uploaded to s3:\/\/bucket/)
-  //   expect(wfJob.dataValues.outputSummary).toMatch(/uploaded to your internal data repository/)
-  //   expect(wfJob.dataValues.outputSummary).toMatch(/uploaded to your internal data repository/)
-  // });
+    expect(wfJob.dataValues.status).toEqual('completed');
+    expect(wfJob.dataValues.currentTaskNum).toEqual(null);
+    expect(wfJob.dataValues.exception).toEqual("");
+    expect(wfJob.dataValues.stackTrace).toEqual("");
+    expect(wfJob.dataValues.outputSummary).toEqual("Your data was replicated to your digital twin database, uploaded to s3://bucket, and processed by debian.");
+  })
 
   it('markFullCopy - invalid input ID', async() => {
     const res = await agent

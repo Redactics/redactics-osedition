@@ -2,7 +2,6 @@ import React from 'react';
 import styled from 'styled-components';
 
 import { spacing } from '@material-ui/system';
-import { blue } from '@material-ui/core/colors';
 
 import {
   Typography,
@@ -22,7 +21,6 @@ import {
 
 import {
   HelpOutline as HelpIcon,
-  Info as InfoIcon,
 } from '@material-ui/icons';
 
 const TextFieldSpacing = styled(MuiTextField)(spacing);

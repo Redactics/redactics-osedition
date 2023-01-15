@@ -502,33 +502,45 @@ async function saveRedactRules(workflow:any, req: Request) {
 }
 
 async function saveInputs(workflow:any, req: Request) {
-  const inputrulePromises:any = [];
-  const inputs = await Input.findAll({
-    where: {
-      disabled: {
-        [Op.not]: true,
+  try {
+    const inputrulePromises:any = [];
+    const inputs = await Input.findAll({
+      where: {
+        disabled: {
+          [Op.not]: true,
+        },
       },
-    },
-  });
+    });
 
-  await WorkflowInput.destroy({
-    where: {
-      workflowId: workflow.id,
-    },
-  });
-  inputs.forEach((input:any) => {
-    const findInput = req.body.inputs.find((i:any) => (i.uuid === input.dataValues.uuid));
-    if (findInput) {
-      const inputRecord:WorkflowInputRecord = {
-        workflowId: workflow.dataValues.id,
-        inputId: input.dataValues.id,
-        tables: findInput.tables,
-        enabled: findInput.enabled,
-      };
-      inputrulePromises.push(WorkflowInput.create(inputRecord));
+    await WorkflowInput.destroy({
+      where: {
+        workflowId: workflow.id,
+      },
+    });
+    let invalidInput = false;
+    inputs.forEach((input:any) => {
+      const findInput = req.body.inputs.find((i:any) => (i.uuid === input.dataValues.uuid));
+      if (findInput) {
+        const inputRecord:WorkflowInputRecord = {
+          workflowId: workflow.dataValues.id,
+          inputId: input.dataValues.id,
+          tables: findInput.tables,
+          enabled: findInput.enabled,
+        };
+        inputrulePromises.push(WorkflowInput.create(inputRecord));
+      }
+      else {
+        invalidInput = true;
+      }
+    });
+    if (invalidInput) {
+      return false;
     }
-  });
-  await Promise.all(inputrulePromises);
+    await Promise.all(inputrulePromises);
+    return true;
+  } catch (err) {
+    return false;
+  }
 }
 
 async function saveERL(req: Request, res: Response) {
@@ -620,7 +632,10 @@ async function saveERL(req: Request, res: Response) {
     // save redact rules
     const redactRuleUuids = await saveRedactRules(workflow, req);
     // save inputs
-    await saveInputs(workflow, req);
+    const validInputs = await saveInputs(workflow, req);
+    if (!validInputs) {
+      return res.status(400).json({ errors: 'invalid input source data' });
+    }
 
     // save (upsert) data feeds
     const dfUuids:string[] = [];
@@ -772,7 +787,10 @@ async function saveMockMigration(req: Request, res: Response) {
     const oldMigrationNamespace = workflow.dataValues.migrationNamespace;
 
     // save inputs
-    await saveInputs(workflow, req);
+    const validInputs = await saveInputs(workflow, req);
+    if (!validInputs) {
+      return res.status(400).json({ errors: 'invalid input source data' });
+    }
 
     const workflowUpdate:WorkflowUpdate = {
       name: req.body.name,
@@ -899,10 +917,6 @@ export async function getWorkflowJobs(req: Request, res: Response) {
       return wfJob;
     });
 
-    if (process.env.NODE_ENV !== 'test') {
-      // const company = await Company.findByPk(req.currentUser.companyId);
-      // triggerWorkflowJobUIRefresh(company.dataValues.uuid, false);
-    }
     return res.send(wfJobData);
   } catch (e) {
     logger.error(e.stack);
@@ -935,7 +949,7 @@ export async function createWorkflowJob(req: Request, res: Response) {
     };
     let workflow:any;
     if (req.body.workflowId) {
-      // verify workflow ownership
+      // verify workflow existence
       workflow = await Workflow.findOne({
         where: {
           uuid: req.body.workflowId,
@@ -947,9 +961,6 @@ export async function createWorkflowJob(req: Request, res: Response) {
       createWfJob.workflowId = workflow.dataValues.id;
     }
     const wfJob = await WorkflowJob.create(createWfJob);
-
-    // const company = await Company.findByPk(apiKeyOwner.dataValues.companyId);
-    // triggerWorkflowJobUIRefresh(company.dataValues.uuid, true);
 
     if (workflow) {
       wfJob.workflowId = workflow.dataValues.uuid;
@@ -1018,7 +1029,7 @@ function buildOutputSummary(job:any, workflow:any) {
     )) : [];
   if (job.dataValues.workflowType === 'ERL') {
     if (dataFeeds.length) {
-      summary += ' Your data was ';
+      summary += 'Your data was ';
       const dfSummary:string[] = [];
       dataFeeds.forEach((df:any) => {
         // exclude disabled datafeeds

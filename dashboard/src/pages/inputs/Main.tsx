@@ -1,5 +1,5 @@
 import React from 'react';
-import styled, { withTheme } from 'styled-components';
+import styled from 'styled-components';
 import { withStyles } from '@material-ui/core/styles';
 
 import Helmet from 'react-helmet';
@@ -13,7 +13,6 @@ import {
   Box,
   CardContent,
   Card as MuiCard,
-  Link,
   Grid,
   Dialog,
   DialogTitle,
@@ -27,7 +26,6 @@ import {
   TableBody,
   FormControlLabel,
   Checkbox,
-  Paper,
   TextField as MuiTextField,
   InputAdornment,
   Tooltip,
@@ -35,9 +33,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  ExpansionPanel,
-  ExpansionPanelSummary,
-  ExpansionPanelDetails as MuiExpansionPanelDetails,
   Snackbar,
   IconButton,
 } from '@material-ui/core';
@@ -47,7 +42,6 @@ import {
   Edit as EditIcon,
   DeleteOutline as DeleteIcon,
   HelpOutline as HelpIcon,
-  ExpandMore as ExpandMoreIcon,
   Close as CloseIcon,
 } from '@material-ui/icons';
 
@@ -82,12 +76,6 @@ const FormControl = styled(FormControlSpacing)`
 const TextField = styled(TextFieldSpacing)`
   width: 200px;
 `;
-
-const ExpansionPanelDetails = withStyles({
-  root: {
-    display: 'block',
-  },
-})(MuiExpansionPanelDetails);
 
 const NWTableCell = withStyles({
   root: {

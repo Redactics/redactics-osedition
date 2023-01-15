@@ -2,8 +2,6 @@ import React from 'react';
 import styled from 'styled-components';
 
 import Helmet from 'react-helmet';
-import { CopyToClipboard } from 'react-copy-to-clipboard';
-
 
 // import { red, green, blue } from "@material-ui/core/colors";
 
@@ -31,12 +29,10 @@ import {
   Add as AddIcon,
   HelpOutline as HelpIcon,
   Close as CloseIcon,
-  LockOpen as LockOpenIcon,
 } from '@material-ui/icons';
 
 import {
   Save as SaveIcon,
-  Clipboard as ClipboardIcon,
 } from 'react-feather';
 
 import { spacing } from '@material-ui/system';
@@ -397,7 +393,7 @@ class Agents extends React.Component<IProps, IState> {
     if (errorsFound) { return; }
 
     try {
-      const response = await fetch(`${this.context.apiUrl}/agent`, {
+      await fetch(`${this.context.apiUrl}/agent`, {
         method: 'post',
         headers: {
           'Content-Type': 'application/json',

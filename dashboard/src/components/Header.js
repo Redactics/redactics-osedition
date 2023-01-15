@@ -1,12 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import styled, { withTheme } from 'styled-components';
 import { connect } from 'react-redux';
 
 import {
   Grid,
   Hidden,
-  Menu,
-  MenuItem,
   AppBar as MuiAppBar,
   IconButton as MuiIconButton,
   Toolbar,
@@ -14,15 +12,9 @@ import {
 
 import { Menu as MenuIcon } from '@material-ui/icons';
 
-import {
-  User,
-} from 'react-feather';
-
 import Notifications from './Notifications';
 
 /* eslint-disable no-undef */
-
-const API_URL = process.env.REACT_APP_API_URL || '';
 
 const AppBar = styled(MuiAppBar)`
   background: ${(props) => props.theme.header.background};

@@ -1,12 +1,9 @@
 import React from 'react';
 
 import {
-  TrendingUp as TrendingUpIcon,
   Layers as LayersIcon,
   Settings as SettingsIcon,
   Terminal as TerminalIcon,
-  Search as SearchIcon,
-  Archive as ArchiveIcon,
 } from 'react-feather';
 
 import {

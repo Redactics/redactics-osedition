@@ -8,7 +8,6 @@ import { withStyles } from '@material-ui/core/styles';
 
 import {
   Divider as MuiDivider,
-  FormControl as MuiFormControl,
   Grid as MuiGrid,
   Typography,
   Dialog,
@@ -16,13 +15,10 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  TextField as MuiTextField,
   Button as MuiButton,
   Card as MuiCard,
   CardContent,
   Box,
-  FormControlLabel,
-  Checkbox,
   Snackbar,
   IconButton,
   ExpansionPanel,
@@ -38,7 +34,6 @@ import {
 
 import {
   Save as SaveIcon,
-  Send as SendIcon,
 } from 'react-feather';
 
 import { spacing } from '@material-ui/system';
@@ -58,15 +53,7 @@ const Divider = styled(MuiDivider)(spacing);
 
 const Card = styled(MuiCard)(spacing);
 
-const FormControl = styled(MuiFormControl)(spacing);
-
 const Grid = styled(MuiGrid)(spacing);
-
-const TextFieldSpacing = styled(MuiTextField)(spacing);
-
-const TextField = styled(TextFieldSpacing)`
-  width: 300px;
-`;
 
 const Button = styled(MuiButton)(spacing);
 

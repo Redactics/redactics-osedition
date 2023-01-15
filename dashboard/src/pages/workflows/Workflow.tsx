@@ -40,14 +40,11 @@ import {
   Clipboard as ClipboardIcon,
 } from 'react-feather';
 
-import { Alert as MuiAlert } from '@material-ui/lab';
-
 import { spacing } from '@material-ui/system';
 import RedacticsContext from '../../contexts/RedacticsContext';
 
 import WorkflowRedactionRules from './WorkflowRedactionRules';
 import WorkflowInputs from './WorkflowInputs';
-//import WorkflowCompliance from './WorkflowCompliance';
 import WorkflowSchedule from './WorkflowSchedule';
 import WorkflowExport from './WorkflowExport';
 import WorkflowPostExport from './WorkflowPostExport';
@@ -85,8 +82,6 @@ const ExpansionPanelDetails = withStyles({
     display: 'block',
   },
 })(MuiExpansionPanelDetails);
-
-const Alert = styled(MuiAlert)(spacing);
 
 interface IProps {
   deleteWorkflow: any;
@@ -1185,7 +1180,6 @@ class Workflow extends React.Component<IProps, IState> {
 
   saveInputChanges() {
     const state:IState = this.state;
-    let errorsFound:boolean = false;
     let inputs:WorkflowInputRecord[] = this.state.inputs;
 
     if (!state.input.tables) {
