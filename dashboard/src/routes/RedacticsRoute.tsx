@@ -4,6 +4,8 @@ import { ContextObj } from '../types/redactics';
 import RedacticsContext from '../contexts/RedacticsContext';
 
 const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const cliUrl = process.env.REACT_APP_CLI_URL || 'https://github.com/Redactics/redactics-osedition/releases/download/3.0.0/redactics.sh';
+const cliVersion = process.env.REACT_APP_CLI_VERSION || '3.0.0';
 
 interface IProps {
   component: any;
@@ -13,8 +15,8 @@ interface IProps {
 
 interface IState {
   apiUrl: string;
-  cliUrl?: string;
-  cliVersion?: string;
+  cliUrl: string;
+  cliVersion: string;
 }
 
 class RedacticsRoute extends React.Component<IProps, IState> {
@@ -23,12 +25,16 @@ class RedacticsRoute extends React.Component<IProps, IState> {
 
     this.state = {
       apiUrl: '',
+      cliUrl: '',
+      cliVersion: '',
     };
   }
 
   componentDidMount() {
     this.setState({
       apiUrl,
+      cliUrl,
+      cliVersion,
     });
   }
 

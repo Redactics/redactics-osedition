@@ -13,6 +13,8 @@ export interface AuthInfo {
 
 export interface ContextObj {
   apiUrl: string;
+  cliUrl: string;
+  cliVersion: string;
 }
 
 export interface SettingsRedactRulesets {

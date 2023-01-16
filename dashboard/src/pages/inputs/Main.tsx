@@ -436,7 +436,6 @@ class Inputs extends React.Component<IProps, IState> {
       });
 
       this.setState({
-        saveButtonDisabled: false,
         showSnackbar: true,
       });
 

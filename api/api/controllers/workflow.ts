@@ -517,10 +517,11 @@ async function saveInputs(workflow:any, req: Request) {
         workflowId: workflow.id,
       },
     });
-    let invalidInput = false;
+    let inputFound = false;
     inputs.forEach((input:any) => {
       const findInput = req.body.inputs.find((i:any) => (i.uuid === input.dataValues.uuid));
       if (findInput) {
+        inputFound = true;
         const inputRecord:WorkflowInputRecord = {
           workflowId: workflow.dataValues.id,
           inputId: input.dataValues.id,
@@ -528,11 +529,9 @@ async function saveInputs(workflow:any, req: Request) {
           enabled: findInput.enabled,
         };
         inputrulePromises.push(WorkflowInput.create(inputRecord));
-      } else {
-        invalidInput = true;
       }
     });
-    if (invalidInput) {
+    if (!inputFound) {
       return false;
     }
     await Promise.all(inputrulePromises);
