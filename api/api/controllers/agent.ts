@@ -396,7 +396,7 @@ export async function helmCmd(req: Request, res: Response) {
     ];
 
     if (largestDiskPadded) {
-      helmCmdSet.push(`--set "http-nas.persistence.pvc.size=${largestDiskPadded}Gi"`);
+      helmCmdSet.push(`--set "http-nas.persistence.size=${largestDiskPadded}Gi"`);
       helmCmdSet.push('--set "http-nas.persistence.enabled=true"');
     } else {
       helmCmdSet.push('--set "http-nas.persistence.enabled=false"');
