@@ -35,10 +35,34 @@ describe('Agent endpoints', () => {
     sampleInput2 = await genSampleInput("Test Input 2");
   })
 
-  it('create agent', async () => {
+  it('create agent with no inputs', async () => {
     const res = await ragent.post('/agent')
     .send({
-      name: "newcluster",
+      name: "emptyagent",
+      namespace: "redactics",
+      nodeSelector: "nodePool.agent",
+      configPath: "~/.redactics/values.yaml"
+    })
+    expect(res.status).toBe(200);
+    
+    agentUuid = res.body.uuid;
+  })
+
+  it('get helm cmd, confirm no disk allocation', async () => {
+    const res = await ragent
+    .get('/agent/' + agentUuid + '/helmCmd')
+    expect(res.status).toBe(200);
+    
+    expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(false);
+    expect(!res.body.helmArgs.postgresql.persistence.size);
+    expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(false);
+    expect(!res.body.helmArgs.httpNas.persistence.size);
+  });
+
+  it('create agent with inputs', async () => {
+    const res = await ragent.post('/agent')
+    .send({
+      name: "newagent",
       namespace: "redactics",
       nodeSelector: "nodePool.agent",
       configPath: "~/.redactics/values.yaml",
@@ -46,7 +70,7 @@ describe('Agent endpoints', () => {
     })
 
     agentUuid = res.body.uuid;
-    expect(res.body.name).toEqual("newcluster");
+    expect(res.body.name).toEqual("newagent");
     expect(res.body.namespace).toEqual("redactics");
     expect(res.body.nodeSelector).toEqual("nodePool.agent");
     expect(res.body.configPath).toEqual("~/.redactics/values.yaml");
@@ -61,7 +85,7 @@ describe('Agent endpoints', () => {
 
     var agent = await Agent.findOne({
       where: {
-        name: "newcluster"
+        name: "newagent"
       }
     });
     agentId = agent.dataValues.id;
@@ -112,7 +136,6 @@ describe('Agent endpoints', () => {
         agentId: agentId
       }
     });
-    console.log("AGENT INPUT", agentInputs[0].dataValues)
     expect(agentInputs.length).toEqual(1);
     expect(agentInputs[0].dataValues.agentId).toEqual(agentId);
     expect(agentInputs[0].dataValues.inputId).toEqual(sampleInput.dataValues.id);
@@ -122,28 +145,13 @@ describe('Agent endpoints', () => {
     const res = await ragent.get('/agent')
 
     expect(res.status).toBe(200);
-    expect(res.body.length).toBe(1);
+    expect(res.body.length).toBe(2);
     expect(res.body.find(c => {
       return (c.uuid === agentUuid)
     })).toBeDefined();
   });
 
-  it('get helm cmd, no workflows created', async () => {
-    const res = await ragent
-    .get('/agent/' + agentUuid + '/helmCmd')
-    expect(res.status).toBe(200);
-    
-    expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(false);
-    expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(false);
-  });
-
-  it('create workflow', async () => {
-    var workflow = await genSampleERLWorkflow(agentId, "Test Workflow", [sampleInput]);
-    workflowUuid = workflow.dataValues.uuid;
-    workflowId = workflow.dataValues.id;
-  });
-
-  it('get helm cmd', async () => {
+  it('get helm cmd, confirm disk sizes and other updated settings', async () => {
     const res = await ragent
     .get('/agent/' + agentUuid + '/helmCmd')
     expect(res.status).toBe(200);
@@ -165,7 +173,10 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.lastAgentVersion).toEqual(null);
     expect(res.body.helmArgs.latestChartVersion).toEqual(process.env.LATEST_CHART_VERSION);
     expect(res.body.helmArgs.agentUpgradeAvailable).toEqual(false);
-    expect(res.body.helmArgs.httpNas.pvc.size).toEqual(3); // 3x the size for plain text dumps
+    expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(true);
+    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(1);
+    expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(true);
+    expect(res.body.helmArgs.httpNas.persistence.size).toEqual(3);
   });
 
   it('verify helmCmd creation', async() => {
@@ -260,7 +271,7 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.airflow.connections.length).toEqual(2);
   });
 
-  it('test cluster heartbeat - initial contact', async() => {
+  it('test agent heartbeat - initial contact', async() => {
     const res = await ragent
     .put('/agent/' + agentUuid + '/heartbeat')
     .send({
@@ -286,7 +297,7 @@ describe('Agent endpoints', () => {
     expect(notif.dataValues.acked).toEqual(false);
   })
 
-  it('test cluster heartbeat - via Helm post-upgrade hook', async() => {
+  it('test agent heartbeat - via Helm post-upgrade hook', async() => {
     const res = await ragent
     .put('/agent/' + agentUuid + '/heartbeat')
     .send({
@@ -321,7 +332,7 @@ describe('Agent endpoints', () => {
     expect(notif.length).toEqual(1);
   })
 
-  it('delete cluster', async () => {
+  it('delete agent', async () => {
     const res = await ragent
     .delete('/agent/' + agentUuid)
     expect(res.status).toBe(200);
@@ -334,7 +345,7 @@ describe('Agent endpoints', () => {
     expect(agent.dataValues.disabled).toEqual(true)
   })
 
-  it('confirm cluster is no longer being returned in listings', async () => {
+  it('confirm agent is no longer being returned in listings', async () => {
     const res = await ragent.get('/agent')
 
     expect(res.status).toBe(200);

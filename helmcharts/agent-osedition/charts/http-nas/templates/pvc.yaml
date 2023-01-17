@@ -8,5 +8,5 @@ spec:
   - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .Values.persistence.pvc.size | quote }}
+      storage: {{ .Values.persistence.size | quote }}
 {{- end }}

@@ -91,23 +91,25 @@ export async function createAgent(req: Request, res: Response) {
     const response = agentCreate.dataValues;
 
     // create agentinput records
-    const inputs = await Input.findAll({
-      where: {
-        disabled: {
-          [Op.not]: true,
+    if (req.body.inputs && req.body.inputs.length) {
+      const inputs = await Input.findAll({
+        where: {
+          disabled: {
+            [Op.not]: true,
+          },
         },
-      },
-    });
-    const agentInputPromises:any[] = [];
-    req.body.inputs.forEach((inputUuid:string) => {
-      const input = inputs.find((i:any) => (i.dataValues.uuid === inputUuid));
-      const agentInputRecord:AgentInputRecord = {
-        inputId: input.dataValues.id,
-        agentId: response.id,
-      };
-      agentInputPromises.push(AgentInput.create(agentInputRecord));
-    });
-    await Promise.all(agentInputPromises);
+      });
+      const agentInputPromises:any[] = [];
+      req.body.inputs.forEach((inputUuid:string) => {
+        const input = inputs.find((i:any) => (i.dataValues.uuid === inputUuid));
+        const agentInputRecord:AgentInputRecord = {
+          inputId: input.dataValues.id,
+          agentId: response.id,
+        };
+        agentInputPromises.push(AgentInput.create(agentInputRecord));
+      });
+      await Promise.all(agentInputPromises);
+    }
 
     // strip primary key from response since we use UUIDs instead
     delete response.id;
@@ -345,41 +347,30 @@ export async function helmCmd(req: Request, res: Response) {
       helmCmd: null,
       postgresql: {
         persistence: {
-          size: 0,
-        },
+         size: 0
+        }
       },
     };
 
     let largestDisk = 0;
     let largestDiskPadded = 0;
 
-    const inputs:any = [];
-    Object.values(workflows).forEach((workflow:any) => {
-      const d = workflow;
-
-      // build inputs
-      d.dataValues.inputs.filter((i:any) => (i.enabled)).forEach((i:any) => {
-        inputs.push({
-          id: i.dataValues.uuid,
-          tables: i.dataValues.tables,
-        });
-
-        const findInput = allInputs.find((input:any) => (
-          input.dataValues.id === i.dataValues.inputId
-        ));
-
-        // calculate http-nas space
-        if (findInput.dataValues.diskSize > largestDisk) {
+    agentInputs.forEach((i:any) => {
+      const findInput = allInputs.find((input:any) => (
+        input.dataValues.id === i.dataValues.inputId
+      ));
+      if (findInput) {
+        if (!helmArgs.postgresql.persistence.size || findInput.dataValues.diskSize > largestDisk) {
           // add additional buffer for uncompressed, plain text files
           largestDisk = findInput.dataValues.diskSize;
           largestDiskPadded = Math.ceil(largestDisk * 3);
+          helmArgs.postgresql.persistence.enabled = true;
         }
-
         helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
-      });
-    });
+      }
+    })
 
-    if (!inputs.length) {
+    if (helmArgs.postgresql.persistence.size === 0) {
       delete helmArgs.postgresql.persistence.size;
       helmArgs.postgresql.persistence.enabled = false;
     }
@@ -388,9 +379,10 @@ export async function helmCmd(req: Request, res: Response) {
 
     if (largestDiskPadded) {
       helmArgs.httpNas = {
-        pvc: {
-          size: largestDiskPadded,
-        },
+        persistence: {
+          enabled: true,
+          size: largestDiskPadded
+        }
       };
     } else {
       helmArgs.httpNas = {
