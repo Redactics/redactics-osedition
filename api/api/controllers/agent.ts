@@ -301,19 +301,6 @@ export async function helmCmd(req: Request, res: Response) {
       return res.status(404).json({ errors: 'this agent does not exist, or you do not have access to it' });
     }
 
-    const workflows = await Workflow.findAll({
-      where: {
-        agentId: agent.dataValues.id,
-        disabled: {
-          [Op.not]: true,
-        },
-      },
-      order: [
-        ['createdAt', 'ASC'],
-      ],
-      include: ['inputs', 'datafeeds'],
-    });
-
     const agentInputs = await AgentInput.findAll({
       where: {
         agentId: agent.dataValues.id,
@@ -347,8 +334,8 @@ export async function helmCmd(req: Request, res: Response) {
       helmCmd: null,
       postgresql: {
         persistence: {
-         size: 0
-        }
+          size: 0,
+        },
       },
     };
 
@@ -368,7 +355,7 @@ export async function helmCmd(req: Request, res: Response) {
         }
         helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
       }
-    })
+    });
 
     if (helmArgs.postgresql.persistence.size === 0) {
       delete helmArgs.postgresql.persistence.size;
@@ -381,8 +368,8 @@ export async function helmCmd(req: Request, res: Response) {
       helmArgs.httpNas = {
         persistence: {
           enabled: true,
-          size: largestDiskPadded
-        }
+          size: largestDiskPadded,
+        },
       };
     } else {
       helmArgs.httpNas = {
