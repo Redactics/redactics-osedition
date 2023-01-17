@@ -395,7 +395,7 @@ export async function helmCmd(req: Request, res: Response) {
     const chartUrl = process.env.NODE_ENV === 'development' ? './helmcharts/agent-osedition' : 'redactics/agent-osedition';
     helmArgs.agentUpgradeAvailable = !!((agent.dataValues.lastAgentVersion
       && (String(process.env.LATEST_CHART_VERSION) || '') !== agent.dataValues.lastAgentVersion));
-    let helmUpgrade = (agent.dataValues.agentInstallationDate) ? '' : 'helm repo add redactics https://chartmuseum.redactics.com && ';
+    let helmUpgrade = (agent.dataValues.agentInstallationDate) ? '' : 'helm repo add redactics https://chartmuseum.redactics.com && helm repo update && ';
     helmUpgrade += (helmArgs.agentUpgradeAvailable && process.env.NODE_ENV !== 'development') ? 'helm repo update && helm upgrade --install' : 'helm upgrade --install';
 
     const helmCmdArray = [
