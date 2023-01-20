@@ -92,6 +92,22 @@ is_true_false_value() {
 }
 
 ########################
+# Check if the provided argument is a boolean 1/0 value
+# Arguments:
+#   $1 - Value to check
+# Returns:
+#   Boolean
+#########################
+is_1_0_value() {
+    local -r bool="${1:-}"
+    if [[ "$bool" =~ ^[10]$ ]]; then
+        true
+    else
+        false
+    fi
+}
+
+########################
 # Check if the provided argument is an empty string or not defined
 # Arguments:
 #   $1 - Value to check
@@ -181,7 +197,7 @@ validate_ipv4() {
     local stat=1
 
     if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-	read -r -a ip_array <<< "$(tr '.' ' ' <<< "$ip")"
+        read -r -a ip_array <<< "$(tr '.' ' ' <<< "$ip")"
         [[ ${ip_array[0]} -le 255 && ${ip_array[1]} -le 255 \
             && ${ip_array[2]} -le 255 && ${ip_array[3]} -le 255 ]]
         stat=$?

@@ -20,8 +20,13 @@
 owned_by() {
     local path="${1:?path is missing}"
     local owner="${2:?owner is missing}"
+    local group="${3:-}"
 
-    chown "$owner":"$owner" "$path"
+    if [[ -n $group ]]; then
+        chown "$owner":"$group" "$path"
+    else
+        chown "$owner":"$owner" "$path"
+    fi
 }
 
 ########################
@@ -34,11 +39,12 @@ owned_by() {
 #########################
 ensure_dir_exists() {
     local dir="${1:?directory is missing}"
-    local owner="${2:-}"
+    local owner_user="${2:-}"
+    local owner_group="${3:-}"
 
     mkdir -p "${dir}"
-    if [[ -n $owner ]]; then
-        owned_by "$dir" "$owner"
+    if [[ -n $owner_user ]]; then
+        owned_by "$dir" "$owner_user" "$owner_group"
     fi
 }
 
@@ -50,8 +56,9 @@ ensure_dir_exists() {
 #   boolean
 #########################
 is_dir_empty() {
-    local dir="${1:?missing directory}"
-
+    local -r path="${1:?missing directory}"
+    # Calculate real path in order to avoid issues with symlinks
+    local -r dir="$(realpath "$path")"
     if [[ ! -e "$dir" ]] || [[ -z "$(ls -A "$dir")" ]]; then
         true
     else
@@ -88,7 +95,7 @@ is_file_writable() {
     local dir
     dir="$(dirname "$file")"
 
-    if [[ ( -f "$file" && -w "$file" ) || ( ! -f "$file" && -d "$dir" && -w "$dir" ) ]]; then
+    if [[ (-f "$file" && -w "$file") || (! -f "$file" && -d "$dir" && -w "$dir") ]]; then
         true
     else
         false
@@ -106,9 +113,9 @@ is_file_writable() {
 relativize() {
     local -r path="${1:?missing path}"
     local -r base="${2:?missing base}"
-    pushd "$base" >/dev/null
+    pushd "$base" >/dev/null || exit
     realpath -q --no-symlinks --relative-base="$base" "$path" | sed -e 's|^/$|.|' -e 's|^/||'
-    popd >/dev/null
+    popd >/dev/null || exit
 }
 
 ########################
@@ -136,45 +143,46 @@ configure_permissions_ownership() {
     shift 1
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            -f|--file-mode)
-                shift
-                file_mode="${1:?missing mode for files}"
-                ;;
-            -d|--dir-mode)
-                shift
-                dir_mode="${1:?missing mode for directories}"
-                ;;
-            -u|--user)
-                shift
-                user="${1:?missing user}"
-                ;;
-            -g|--group)
-                shift
-                group="${1:?missing group}"
-                ;;
-            *)
-                echo "Invalid command line flag $1" >&2
-                return 1
-                ;;
+        -f | --file-mode)
+            shift
+            file_mode="${1:?missing mode for files}"
+            ;;
+        -d | --dir-mode)
+            shift
+            dir_mode="${1:?missing mode for directories}"
+            ;;
+        -u | --user)
+            shift
+            user="${1:?missing user}"
+            ;;
+        -g | --group)
+            shift
+            group="${1:?missing group}"
+            ;;
+        *)
+            echo "Invalid command line flag $1" >&2
+            return 1
+            ;;
         esac
         shift
     done
 
-    read -r -a filepaths <<< "$paths"
+    read -r -a filepaths <<<"$paths"
     for p in "${filepaths[@]}"; do
         if [[ -e "$p" ]]; then
+            find -L "$p" -printf ""
             if [[ -n $dir_mode ]]; then
-                find -L "$p" -type d -exec chmod "$dir_mode" {} \;
+                find -L "$p" -type d ! -perm "$dir_mode" -print0 | xargs -r -0 chmod "$dir_mode"
             fi
             if [[ -n $file_mode ]]; then
-                find -L "$p" -type f -exec chmod "$file_mode" {} \;
+                find -L "$p" -type f ! -perm "$file_mode" -print0 | xargs -r -0 chmod "$file_mode"
             fi
             if [[ -n $user ]] && [[ -n $group ]]; then
-                chown -LR "$user":"$group" "$p"
+                find -L "$p" -print0 | xargs -r -0 chown "${user}:${group}"
             elif [[ -n $user ]] && [[ -z $group ]]; then
-                chown -LR "$user" "$p"
+                find -L "$p" -print0 | xargs -r -0 chown "${user}"
             elif [[ -z $user ]] && [[ -n $group ]]; then
-                chgrp -LR "$group" "$p"
+                find -L "$p" -print0 | xargs -r -0 chgrp "${group}"
             fi
         else
             stderr_print "$p does not exist"

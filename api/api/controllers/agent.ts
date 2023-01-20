@@ -408,10 +408,10 @@ export async function helmCmd(req: Request, res: Response) {
     }
 
     if (helmArgs.postgresql.persistence.size) {
-      helmCmdSet.push(`--set "postgresql.persistence.size=${helmArgs.postgresql.persistence.size}Gi"`);
-      helmCmdSet.push('--set "postgresql.persistence.enabled=true"');
+      helmCmdSet.push(`--set "postgresql.primary.persistence.size=${helmArgs.postgresql.persistence.size}Gi"`);
+      helmCmdSet.push('--set "postgresql.primary.persistence.enabled=true"');
     } else {
-      helmCmdSet.push('--set "postgresql.persistence.enabled=false"');
+      helmCmdSet.push('--set "postgresql.primary.persistence.enabled=false"');
     }
 
     // convert to readable string
@@ -642,6 +642,10 @@ export async function helmConfig(req: Request, res: Response) {
       if (migrationNamespaces.length) {
         helmArgs.redactics.migrationNamespaces = migrationNamespaces;
       }
+    }
+    if (!helmArgs.redactics.env && !helmArgs.redactics.basicAuth) {
+      // cleanup object
+      delete helmArgs.redactics;
     }
 
     // attach comments to YAML file

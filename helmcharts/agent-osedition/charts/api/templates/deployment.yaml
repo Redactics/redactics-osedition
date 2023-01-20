@@ -70,5 +70,3 @@ spec:
           value: {{ .Values.redactics.cliVersion }}
         - name: LATEST_CHART_VERSION
           value: {{ $.Chart.Version }}
-        - name: WEBSOCKETS_URL
-          value: ws://{{ .Release.Name }}-notifications

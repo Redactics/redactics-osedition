@@ -1,6 +1,6 @@
 dependencies:
 - name: postgresql
   repository: https://chartmuseum.redactics.com
-  version: 9.1.0
-digest: sha256:603aafa6d717a215b90b8e80cb70197370c8556d517b149167576aee6f806642
-generated: "2023-01-04T20:05:10.180214-08:00"
+  version: 12.1.9
+digest: sha256:7dc1ebfe4bdf42886f778be74eb6ae1284c056b9acdff5eca5f954d982ccdc40
+generated: "2023-01-18T20:38:38.457266-08:00"

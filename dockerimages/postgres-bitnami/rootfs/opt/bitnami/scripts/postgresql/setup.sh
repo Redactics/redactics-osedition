@@ -22,9 +22,11 @@ postgresql_validate
 # Ensure PostgreSQL is stopped when this script ends.
 trap "postgresql_stop" EXIT
 # Ensure 'daemon' user exists when running as 'root'
-am_i_root && ensure_user_exists "$POSTGRESQL_DAEMON_USER" "$POSTGRESQL_DAEMON_GROUP"
+am_i_root && ensure_user_exists "$POSTGRESQL_DAEMON_USER" --group "$POSTGRESQL_DAEMON_GROUP"
 # Fix logging issue when running as root
 am_i_root && chmod o+w "$(readlink /dev/stdout)"
+# Remove flags and postmaster files from a previous run
+postgresql_clean_from_restart
 # Allow running custom pre-initialization scripts
 postgresql_custom_pre_init_scripts
 # Ensure PostgreSQL is initialized
@@ -36,5 +38,10 @@ postgresql_custom_init_scripts
 if ! postgresql_is_file_external "postgresql.conf" && is_boolean_yes "$POSTGRESQL_ALLOW_REMOTE_CONNECTIONS"; then
     info "Enabling remote connections"
     postgresql_enable_remote_connections
-    postgresql_set_property "port" "$POSTGRESQL_PORT_NUMBER"
+fi
+
+# Remove any pg_hba.conf lines that match the given filters
+if ! postgresql_is_file_external "pg_hba.conf" && [[ -n "$POSTGRESQL_PGHBA_REMOVE_FILTERS" ]]; then
+    info "Removing lines that match these filters: ${POSTGRESQL_PGHBA_REMOVE_FILTERS}"
+    postgresql_remove_pghba_lines
 fi

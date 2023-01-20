@@ -1,4 +1,4 @@
-FROM postgres:12
+FROM postgres:15
 
 COPY csvquote /csvquote
 

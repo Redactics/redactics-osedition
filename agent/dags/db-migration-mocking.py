@@ -195,7 +195,7 @@ def db_migration_mocking():
     clone_db = KubernetesPodOperator(
         task_id="clone-db",
         namespace=NAMESPACE,
-        image=REGISTRY_URL + "/postgres-client:12-" + AGENT_VERSION,
+        image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
         cmds=["/scripts/clone-db.sh", database, clone_database],
         # ensure latest PG image is cached
         image_pull_policy="Always",
