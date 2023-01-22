@@ -643,27 +643,30 @@ export async function helmConfig(req: Request, res: Response) {
         helmArgs.redactics.migrationNamespaces = migrationNamespaces;
       }
     }
+    let setRedacticsObj = true;
     if (!helmArgs.redactics.env && !helmArgs.redactics.basicAuth) {
       // cleanup object
       delete helmArgs.redactics;
+      setRedacticsObj = false;
     }
 
     // attach comments to YAML file
     const helmConfigYAML = YAML.stringify(helmArgs);
     const helmConfigObj:any = YAML.parseDocument(helmConfigYAML.replace(/httpNas/g, 'http-nas'));
-    // console.log(helmConfigObj.contents.items)
-    helmConfigObj.contents.items[1].value.items[0].value.comment = ' used for encrypting your input credentials (do not alter)';
-    helmConfigObj.contents.items[1].value.items[1].value.comment = ' for web and other security related functions (do not alter)';
+    //console.log(helmConfigObj.contents.items)
+    const airflowIdx = (setRedacticsObj) ? 1 : 0;
+    helmConfigObj.contents.items[airflowIdx].value.items[0].value.comment = ' used for encrypting your input credentials (do not alter)';
+    helmConfigObj.contents.items[airflowIdx].value.items[1].value.comment = ' for web and other security related functions (do not alter)';
 
     connections.forEach((connection, idx) => {
       if (connection.id === 'redacticsDB') {
         // Redactics Airflow DB
-        helmConfigObj.contents.items[1].value.items[2].value.items[idx].items[0].value.comment = ' ID for internal Redactics database';
-        helmConfigObj.contents.items[1].value.items[2].value.items[idx].items[3].value.comment = ' Internal Redactics DB hostname (do not alter)';
+        helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[0].value.comment = ' ID for internal Redactics database';
+        helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[3].value.comment = ' Internal Redactics DB hostname (do not alter)';
       } else {
         // customer database
-        helmConfigObj.contents.items[1].value.items[2].value.items[idx].items[2].value.comment = ' database hostname';
-        helmConfigObj.contents.items[1].value.items[2].value.items[idx].items[6].value.comment = ' database name';
+        helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[2].value.comment = ' database hostname';
+        helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[6].value.comment = ' database name';
       }
     });
 
