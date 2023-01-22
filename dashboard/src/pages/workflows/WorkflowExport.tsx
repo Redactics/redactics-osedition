@@ -2,7 +2,6 @@ import React from 'react';
 import styled from 'styled-components';
 
 import { spacing } from '@material-ui/system';
-import { blue } from '@material-ui/core/colors';
 
 import {
   Typography,
@@ -33,7 +32,6 @@ import {
   Add as AddIcon,
   HelpOutline as HelpIcon,
   Edit as EditIcon,
-  Info as InfoIcon,
 } from '@material-ui/icons';
 
 import { WorkflowRecord } from '../../types/redactics';

@@ -213,7 +213,7 @@ class Workflows extends React.Component<IProps, IState> {
         }),
       });
 
-      const data = await response.json();
+      await response.json();
       this.refreshWorkflows();
 
       this.setState({

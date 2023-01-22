@@ -1,5 +1,5 @@
 import React from 'react';
-import styled, { withTheme } from 'styled-components';
+import styled from 'styled-components';
 import { withStyles } from '@material-ui/core/styles';
 
 import Helmet from 'react-helmet';
@@ -13,7 +13,6 @@ import {
   Box,
   CardContent,
   Card as MuiCard,
-  Link,
   Grid,
   Dialog,
   DialogTitle,
@@ -27,7 +26,6 @@ import {
   TableBody,
   FormControlLabel,
   Checkbox,
-  Paper,
   TextField as MuiTextField,
   InputAdornment,
   Tooltip,
@@ -35,9 +33,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  ExpansionPanel,
-  ExpansionPanelSummary,
-  ExpansionPanelDetails as MuiExpansionPanelDetails,
   Snackbar,
   IconButton,
 } from '@material-ui/core';
@@ -47,7 +42,6 @@ import {
   Edit as EditIcon,
   DeleteOutline as DeleteIcon,
   HelpOutline as HelpIcon,
-  ExpandMore as ExpandMoreIcon,
   Close as CloseIcon,
 } from '@material-ui/icons';
 
@@ -82,12 +76,6 @@ const FormControl = styled(FormControlSpacing)`
 const TextField = styled(TextFieldSpacing)`
   width: 200px;
 `;
-
-const ExpansionPanelDetails = withStyles({
-  root: {
-    display: 'block',
-  },
-})(MuiExpansionPanelDetails);
 
 const NWTableCell = withStyles({
   root: {
@@ -321,36 +309,6 @@ class Inputs extends React.Component<IProps, IState> {
                 </FormControl>
               </Box>
             </Box>
-
-            {/* <Box mt={4} display={(!this.state.input.uuid.match(/^new/) && this.state.input.enableSSL) ? 'block' : 'none'}>
-              <Paper variant="outlined">
-                <ExpansionPanel>
-                  <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
-                    <Typography>TLS/SSL Encryption Setup Instructions</Typography>
-                  </ExpansionPanelSummary>
-                  <ExpansionPanelDetails>
-                    Enabling TLS/SSL encryption requires having an engineer perform the following four steps. These steps (even upon completion) will remain available here for reference:
-
-                    <ol>
-                      <li>Figure out what <code>sslmode</code> option is required by your database host/provider. Possibilities include <code>allow, prefer, require, verify-ca, verify-full</code> (<Link href="https://www.postgresql.org/docs/12/libpq-ssl.html" target="_blank">more info</Link>). Also figure out whether your database requires presenting only the root CA certificate, or the root CA as well as client cert and key files. Download these required files - we&apos;ll need them for step 3.</li>
-                      <li>Update your Helm configuration file (i.e. <code>{this.getAgent().configPath}</code>) and add the following in the block (respecting proper indentation level) that includes <code>id: {this.props.input.uuid}</code>. Take out the <code>sslcert</code> and <code>sslkey</code> params if your server doesn&apos;t require these, and you can adjust the <code>sslmode</code> value as necessary:<br/><br/>
-                        <code>
-                          enableSSL: true<br/>
-                          extra: &apos;&#123;&quot;sslmode&quot;:&quot;verify-ca&quot;, &quot;sslrootcert&quot;:&quot;/pgcerts/{this.props.input.uuid}/sslrootcert&quot;, &quot;sslcert&quot;: &quot;/pgcerts/{this.props.input.uuid}/sslcert&quot;, &quot;sslkey&quot;: &quot;/pgcerts/{this.props.input.uuid}/sslkey&quot;&#125;&apos;
-                        </code><br/><br/>
-                        If, for whatever reason, you&apos;d like to disable this TLS/SSL connectivity you can simply comment out these two lines by entering a hash (i.e. <code>#</code>) character before each line.
-                      </li>
-                      <li>Create a Kubernetes secret containing the certificates required by your database. Adjust the file paths, and take out the <code>sslcert</code> and <code>sslkey</code> params if your server doesn&apos;t require these:<br/><br/>
-                        <code>
-                          kubectl create secret -n {this.getAgent().namespace} generic pgcert-{this.props.input.uuid} --from-file=sslrootcert=/path/to/server-ca.pem --from-file=sslcert=/path/to/client-cert.pem  --from-file=sslkey=/path/to/client-key.pem
-                        </code>
-                      </li>
-                      <li>Visit the Agent page and reapply the provided configuration to your cluster, which will update all agent database connections to use the updated configuration you&apos;ve provided in your Helm configuration file.</li>
-                    </ol>
-                  </ExpansionPanelDetails>
-                </ExpansionPanel>
-              </Paper>
-            </Box> */}
           </Box>
         </Box>
       </Box>
@@ -478,7 +436,6 @@ class Inputs extends React.Component<IProps, IState> {
       });
 
       this.setState({
-        saveButtonDisabled: false,
         showSnackbar: true,
       });
 

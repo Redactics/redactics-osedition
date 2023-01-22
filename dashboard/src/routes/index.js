@@ -1,12 +1,9 @@
 import React from 'react';
 
 import {
-  TrendingUp as TrendingUpIcon,
   Layers as LayersIcon,
   Settings as SettingsIcon,
   Terminal as TerminalIcon,
-  Search as SearchIcon,
-  Archive as ArchiveIcon,
 } from 'react-feather';
 
 import {
@@ -21,7 +18,7 @@ const Inputs = async(() => import('../pages/inputs/Main'));
 const Agents = async(() => import('../pages/agents/Main'));
 const Workflows = async(() => import('../pages/workflows/Main'));
 const JobListing = async(() => import('../pages/workflows/JobListing'));
-const Developers = async(() => import('../pages/developers/Main'));
+const CLI = async(() => import('../pages/CLI/Main'));
 const Settings = async(() => import('../pages/settings/Main'));
 
 const inputSourcesRoutes = {
@@ -56,10 +53,10 @@ const workflowsRoutes = {
   ]
 };
 
-const developersRoutes = {
-  id: 'Developers',
-  path: '/developers',
-  component: Developers,
+const cliRoutes = {
+  id: 'CLI',
+  path: '/cli',
+  component: CLI,
   icon: <TerminalIcon />,
 };
 
@@ -74,7 +71,7 @@ export const dashboard = [
   inputSourcesRoutes,
   agentsRoutes,
   workflowsRoutes,
-  developersRoutes,
+  cliRoutes,
   settingsRoutes,
 ];
 
@@ -82,6 +79,6 @@ export default [
   inputSourcesRoutes,
   agentsRoutes,
   workflowsRoutes,
-  developersRoutes,
+  cliRoutes,
   settingsRoutes,
 ];

@@ -24,13 +24,13 @@ export async function getInputs(req: Request, res: Response) {
       ],
     });
     inputs = inputs.map((i:any) => {
-      let inputRecord:InputRecord = i.dataValues;
+      const inputRecord:InputRecord = i.dataValues;
       delete inputRecord.id;
       return inputRecord;
-    })
+    });
 
     res.send({
-      inputs: inputs,
+      inputs,
     });
   } catch (e) {
     logger.error(e.stack);
@@ -53,6 +53,19 @@ export async function saveInputs(req: Request, res: Response) {
     inputs.forEach((input:any) => {
       inputUuids.push(input.dataValues.uuid);
     });
+
+    // validate inputs
+    let validInputs = true;
+    Object.values(req.body.inputs).forEach((i:any) => {
+      if (i.inputType !== 'postgresql'
+        || !i.sslMode.match(/(allow|prefer|require|verify-ca|verify-full)/)
+        || i.diskSize < 0) {
+        validInputs = false;
+      }
+    });
+    if (!validInputs) {
+      return res.status(400).json({ errors: 'invalid input value' });
+    }
 
     const savedInputs:string[] = [];
     Object.values(req.body.inputs).forEach((i:any) => {
@@ -94,11 +107,11 @@ export async function saveInputs(req: Request, res: Response) {
     });
     await Promise.all(inputrulePromises);
 
-    res.send({
-      updated: true
+    return res.send({
+      updated: true,
     });
   } catch (e) {
     logger.error(e.stack);
-    res.send(e);
+    return res.send(e);
   }
 }

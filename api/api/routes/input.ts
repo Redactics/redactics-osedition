@@ -1,5 +1,3 @@
-import { check } from 'express-validator';
-
 import {
   getInputs, saveInputs,
 } from '../controllers/input';

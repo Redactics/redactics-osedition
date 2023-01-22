@@ -3,7 +3,6 @@ import styled from 'styled-components';
 import { withStyles } from '@material-ui/core/styles';
 
 import { spacing } from '@material-ui/system';
-import { blue } from '@material-ui/core/colors';
 
 import {
   Button as MuiButton,
@@ -14,10 +13,7 @@ import {
   MenuItem,
   Box,
   Link,
-  FormControlLabel,
   Checkbox,
-  Tooltip,
-  InputAdornment,
   Typography,
   Table,
   TableHead,
@@ -30,22 +26,11 @@ import {
   DialogContentText,
   DialogActions,
   Chip,
-  ExpansionPanel,
-  ExpansionPanelSummary,
-  ExpansionPanelDetails as MuiExpansionPanelDetails,
-  Grid as MuiGrid,
-  Paper,
-  RadioGroup,
-  Radio,
 } from '@material-ui/core';
 
 import {
   Add as AddIcon,
   Edit as EditIcon,
-  HelpOutline as HelpIcon,
-  DeleteOutline as DeleteIcon,
-  ExpandMore as ExpandMoreIcon,
-  Info as InfoIcon,
 } from '@material-ui/icons';
 
 import { AgentRecord, WorkflowRecord, AgentInputRecord, WorkflowInputRecord } from '../../types/redactics';
@@ -72,14 +57,6 @@ const NWTableCell = withStyles({
 })(TableCell);
 
 const Select = styled(MuiSelect)(spacing);
-
-const Grid = styled(MuiGrid)(spacing);
-
-const ExpansionPanelDetails = withStyles({
-  root: {
-    display: 'block',
-  },
-})(MuiExpansionPanelDetails);
 
 const styles = {
   selectAdornment: {

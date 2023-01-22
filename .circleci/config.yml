@@ -1,0 +1,149 @@
+version: 2.1
+
+orbs:
+  docker: circleci/docker@1.5.0
+  # third-party experimental ORB
+  docker-registry-image-cache: cci-x/docker-registry-image-cache@0.2.12
+
+jobs:
+  build_api:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      # replace CIRCLE_BRANCH env var for Docker
+      - run:
+          name: Replace CIRCLE_BRANCH for Docker build
+          command: |
+            echo "export CIRCLE_BRANCH=`echo $CIRCLE_BRANCH | sed -E 's/\//-/g' | sed -E 's/#//g'`" >> $BASH_ENV
+      - run:
+          name: Dockerhub Auth
+          command: |
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
+      - docker-registry-image-cache/with-save-restore-images:
+          repository: redactics
+          images: "api:${CIRCLE_BRANCH}"
+          parallelism: 2
+          steps:
+            - docker-registry-image-cache/build:
+                command: "docker build -t redactics/api:${CIRCLE_SHA1} -t redactics/api:${CIRCLE_BRANCH} -f api/Dockerfile api"
+      - run:
+          name: Push image
+          command: |
+            docker push redactics/api:${CIRCLE_SHA1}
+  build_dashboard:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      # replace CIRCLE_BRANCH env var for Docker
+      - run:
+          name: Replace CIRCLE_BRANCH for Docker build
+          command: |
+            echo "export CIRCLE_BRANCH=`echo $CIRCLE_BRANCH | sed -E 's/\//-/g' | sed -E 's/#//g'`" >> $BASH_ENV
+      - run:
+          name: Dockerhub Auth
+          command: |
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
+      - run:
+          name: Expose Environment Variables
+          command: |
+            echo "$BUILD_ENV_VARS" | base64 -d > dashboard/.env.production
+      - docker-registry-image-cache/with-save-restore-images:
+          repository: redactics
+          images: "api:${CIRCLE_BRANCH}"
+          parallelism: 2
+          steps:
+            - docker-registry-image-cache/build:
+                command: "docker build -t redactics/dashboard:${CIRCLE_SHA1} -t redactics/dashboard:${CIRCLE_BRANCH} -f dashboard/Dockerfile dashboard"
+  test:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      - run:
+          name: Dockerhub Auth
+          command: |
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
+      - run:
+          name: Run tests
+          command: |
+            docker-compose -f api/docker-compose-ci.yml run api
+
+  eslint:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: false
+          version: 20.10.2
+      - restore_cache:
+          keys:
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
+      - checkout
+      - save_cache:
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ".git"
+      - run:
+          name: Dockerhub Auth
+          command: |
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "redactics" --password-stdin
+      - run:
+          name: Run eslint
+          command: |
+            docker-compose -f api/docker-compose-ci.yml run api npm run eslint
+
+workflows:
+  osedition:
+    jobs:
+      - build_api:
+          name: 'Build API'
+      - build_dashboard:
+          name: 'Build Dashboard'
+      - test:
+          name: 'Test API'
+          requires:
+            - 'Build API'
+      - eslint:
+          name: 'Run ESLint'
+          requires:
+            - 'Build API'

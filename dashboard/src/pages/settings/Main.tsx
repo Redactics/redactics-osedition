@@ -8,7 +8,6 @@ import { withStyles } from '@material-ui/core/styles';
 
 import {
   Divider as MuiDivider,
-  FormControl as MuiFormControl,
   Grid as MuiGrid,
   Typography,
   Dialog,
@@ -16,13 +15,10 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  TextField as MuiTextField,
   Button as MuiButton,
   Card as MuiCard,
   CardContent,
   Box,
-  FormControlLabel,
-  Checkbox,
   Snackbar,
   IconButton,
   ExpansionPanel,
@@ -38,7 +34,6 @@ import {
 
 import {
   Save as SaveIcon,
-  Send as SendIcon,
 } from 'react-feather';
 
 import { spacing } from '@material-ui/system';
@@ -58,15 +53,7 @@ const Divider = styled(MuiDivider)(spacing);
 
 const Card = styled(MuiCard)(spacing);
 
-const FormControl = styled(MuiFormControl)(spacing);
-
 const Grid = styled(MuiGrid)(spacing);
-
-const TextFieldSpacing = styled(MuiTextField)(spacing);
-
-const TextField = styled(TextFieldSpacing)`
-  width: 300px;
-`;
 
 const Button = styled(MuiButton)(spacing);
 
@@ -93,7 +80,6 @@ interface IState {
   selectedPreset?: RedactRulePreset;
   saveDefaultRulesButtonDisabled: boolean;
   saveCustomPresetButtonDisabled: boolean;
-  showHelmReminder: boolean;
   helmReminderCheckbox: boolean;
   ackHelmReminder: boolean;
   showSnackbar: boolean;
@@ -114,7 +100,6 @@ class Settings extends React.Component<IProps, IState> {
       isOwner: false,
       saveDefaultRulesButtonDisabled: false,
       saveCustomPresetButtonDisabled: false,
-      showHelmReminder: false,
       helmReminderCheckbox: false,
       ackHelmReminder: false,
       showSnackbar: false,
@@ -148,8 +133,6 @@ class Settings extends React.Component<IProps, IState> {
     this.handleRandomStringChange = this.handleRandomStringChange.bind(this);
     this.handlePresetSave = this.handlePresetSave.bind(this);
     this.handlePresetDelete = this.handlePresetDelete.bind(this);
-    this.hideHelmReminder = this.hideHelmReminder.bind(this);
-    this.toggleHelmReminder = this.toggleHelmReminder.bind(this);
     this.handlePresetChange = this.handlePresetChange.bind(this);
     this.toggleExpandPanel = this.toggleExpandPanel.bind(this);
     this.validatePreset = this.validatePreset.bind(this);
@@ -359,21 +342,11 @@ class Settings extends React.Component<IProps, IState> {
           return thisPreset;
         });
 
-        if (!this.state.ackHelmReminder) {
-          this.setState({
-            showHelmReminder: true,
-            showSnackbar: false,
-            saveCustomPresetButtonDisabled: false,
-            presets,
-          });
-        } else {
-          this.setState({
-            showHelmReminder: false,
-            showSnackbar: true,
-            saveCustomPresetButtonDisabled: false,
-            presets,
-          });
-        }
+        this.setState({
+          showSnackbar: true,
+          saveCustomPresetButtonDisabled: false,
+          presets,
+        });
       } catch (err) {
         this.setState({
           saveCustomPresetButtonDisabled: false,
@@ -460,19 +433,10 @@ class Settings extends React.Component<IProps, IState> {
           body: JSON.stringify(payload),
         });
 
-        if (!this.state.ackHelmReminder) {
-          this.setState({
-            showHelmReminder: true,
-            showSnackbar: false,
-            saveDefaultRulesButtonDisabled: false,
-          });
-        } else {
-          this.setState({
-            showHelmReminder: false,
-            showSnackbar: true,
-            saveDefaultRulesButtonDisabled: false,
-          });
-        }
+        this.setState({
+          showSnackbar: true,
+          saveDefaultRulesButtonDisabled: false,
+        });
       } catch (err) {
         // console.log('ERR', error);
       }
@@ -481,33 +445,6 @@ class Settings extends React.Component<IProps, IState> {
         saveDefaultRulesButtonDisabled: false,
       });
     }
-  }
-
-  async hideHelmReminder() {
-    if (this.state.helmReminderCheckbox) {
-      // record acknowledgement of reminder
-      await fetch(`${this.context.apiUrl}/database/ackReminder`, {
-        method: 'post',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      this.setState({
-        ackHelmReminder: true,
-        showHelmReminder: false,
-      });
-    } else {
-      this.setState({
-        showHelmReminder: false,
-      });
-    }
-  }
-
-  toggleHelmReminder(event: any) {
-    this.setState({
-      helmReminderCheckbox: (!!event.target.checked),
-    });
   }
 
   toggleExpandPanel(event: any, preset:RedactRulePreset) {
@@ -644,40 +581,6 @@ class Settings extends React.Component<IProps, IState> {
         </Card>
 
         <Dialog
-          open={this.state.showHelmReminder}
-          aria-labelledby="dialog-title"
-          aria-describedby="dialog-description"
-        >
-          <DialogTitle id="dialog-title">Your changes have been saved!</DialogTitle>
-          <DialogContent>
-            <DialogContentText id="dialog-description">
-              However, they will not be applied to your Kubernetes cluster until you run the <code>helm upgrade</code> command that is provided when you click on the <b>Generate Helm Upgrade Command</b> button (located in the <i>Databases</i> section).
-            </DialogContentText>
-
-            <Box mt={4}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={this.state.helmReminderCheckbox}
-                    onChange={this.toggleHelmReminder}
-                    name="helmReminder"
-                    color="primary"
-                  />
-                }
-                label="I got it, don't remind me again"
-              />
-            </Box>
-
-            <DialogActions>
-              <Button onClick={this.hideHelmReminder} color="primary" autoFocus>
-                Okay
-              </Button>
-            </DialogActions>
-
-          </DialogContent>
-        </Dialog>
-
-        <Dialog
           open={this.state.incompletePreset}
           aria-labelledby="dialog-title"
           aria-describedby="dialog-description"
@@ -707,7 +610,7 @@ class Settings extends React.Component<IProps, IState> {
           ContentProps={{
             'aria-describedby': 'message-id',
           }}
-          message={<span id="message-id"><b>Saved!</b> Please find your updated helm upgrade command in the &quot;Agents&quot; section...</span>}
+          message={<span id="message-id"><b>Your changes have been saved!</b></span>}
           action={[
             <IconButton
               key="close"

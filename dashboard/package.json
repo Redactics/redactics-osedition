@@ -6,7 +6,8 @@
   "proxy": "http://localhost:3000",
   "scripts": {
     "start": "PORT=8000 react-scripts start",
-    "build": "mv .env.local tmp.env.local && react-scripts build && mv tmp.env.local .env.local",
+    "localbuild": "mv .env.local tmp.env.local && react-scripts build && mv tmp.env.local .env.local",
+    "build": "react-scripts build",
     "eslint": "eslint --fix src"
   },
   "eslintConfig": {
