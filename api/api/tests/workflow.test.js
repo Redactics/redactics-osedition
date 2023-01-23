@@ -105,6 +105,21 @@ describe('Workflow endpoints', () => {
     .expect(422);
   });
 
+  it('update ERL workflow - invalid agent ID', async() => {
+    const res = await agent.put('/workflow/' + workflowUuid)
+    .send({
+      agentId: "e43e2f24-83c0-4f1d-8f34-687578721ebd",
+      name: "Test Workflow",
+      workflowType: "ERL",
+      schedule: "0 0 * * *",
+      maskingRules: [],
+      inputs: [],
+      exportTableDataConfig: [],
+      dataFeeds: [],
+    })
+    .expect(404);
+  });
+
   it('update ERL workflow - invalid workflow ID', async() => {
     const res = await agent.put('/workflow/f1e5456c-89be-49c0-aa27-42af34b6c0f0')
     .send({
