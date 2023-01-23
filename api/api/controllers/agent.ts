@@ -653,7 +653,7 @@ export async function helmConfig(req: Request, res: Response) {
     // attach comments to YAML file
     const helmConfigYAML = YAML.stringify(helmArgs);
     const helmConfigObj:any = YAML.parseDocument(helmConfigYAML.replace(/httpNas/g, 'http-nas'));
-    //console.log(helmConfigObj.contents.items)
+    // console.log(helmConfigObj.contents.items)
     const airflowIdx = (setRedacticsObj) ? 1 : 0;
     helmConfigObj.contents.items[airflowIdx].value.items[0].value.comment = ' used for encrypting your input credentials (do not alter)';
     helmConfigObj.contents.items[airflowIdx].value.items[1].value.comment = ' for web and other security related functions (do not alter)';
