@@ -1,5 +1,3 @@
-Congratulations, you have just installed the Redactics SMART Agent!
+Congratulations, you have just installed the Redactics Agent!
 
-If you wish to test a Redactics workflow by kicking off a job manually, you can do so via the Redactics SMART Agent CLI which you can download here:
-
-https://app.redactics.com/developers
+If you wish to test a Redactics workflow by kicking off a job manually, you can do so via the Redactics Agent CLI which you can download from the "CLI" section in your Dashboard.

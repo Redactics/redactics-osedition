@@ -10,15 +10,17 @@
 # Functions
 
 ########################
-# Resolve dns
+# Resolve IP address for a host/domain (i.e. DNS lookup)
 # Arguments:
 #   $1 - Hostname to resolve
+#   $2 - IP address version (v4, v6), leave empty for resolving to any version
 # Returns:
 #   IP
 #########################
 dns_lookup() {
     local host="${1:?host is missing}"
-    getent ahosts "$host" | awk '/STREAM/ {print $1 }'
+    local ip_version="${2:-}"
+    getent "ahosts${ip_version}" "$host" | awk '/STREAM/ {print $1 }' | head -n 1
 }
 
 #########################
@@ -137,4 +139,25 @@ parse_uri() {
             ;;
     esac
     [[ "$uri" =~ $URI_REGEX ]] && echo "${BASH_REMATCH[${index}]}"
+}
+
+########################
+# Wait for a HTTP connection to succeed
+# Globals:
+#   *
+# Arguments:
+#   $1 - URL to wait for
+#   $2 - Maximum amount of retries (optional)
+#   $3 - Time between retries (optional)
+# Returns:
+#   true if the HTTP connection succeeded, false otherwise
+#########################
+wait_for_http_connection() {
+    local url="${1:?missing url}"
+    local retries="${2:-}"
+    local sleep_time="${3:-}"
+    if ! retry_while "debug_execute curl --silent ${url}" "$retries" "$sleep_time"; then
+        error "Could not connect to ${url}"
+        return 1
+    fi
 }

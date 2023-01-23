@@ -153,7 +153,6 @@ web_server_restart() {
 #   None
 #########################
 web_server_reload() {
-    info "Reloading $(web_server_type) configuration"
     "${BITNAMI_ROOT_DIR}/scripts/$(web_server_type)/reload.sh"
 }
 
@@ -165,22 +164,32 @@ web_server_reload() {
 # Arguments:
 #   $1 - App name
 # Flags:
-#   --hosts - Hosts to enable
 #   --type - Application type, which has an effect on which configuration template to use
+#   --hosts - Host listen addresses
+#   --server-name - Server name
+#   --server-aliases - Server aliases
 #   --allow-remote-connections - Whether to allow remote connections or to require local connections
-#   --disabled - Whether to render the file with a .disabled prefix
-#   --enable-https - Enable app configuration on HTTPS port
+#   --disable - Whether to render server configurations with a .disabled prefix
+#   --disable-http - Whether to render the app's HTTP server configuration with a .disabled prefix
+#   --disable-https - Whether to render the app's HTTPS server configuration with a .disabled prefix
 #   --http-port - HTTP port number
 #   --https-port - HTTPS port number
 #   --document-root - Path to document root directory
 # Apache-specific flags:
 #   --apache-additional-configuration - Additional vhost configuration (no default)
+#   --apache-additional-http-configuration - Additional HTTP vhost configuration (no default)
+#   --apache-additional-https-configuration - Additional HTTPS vhost configuration (no default)
 #   --apache-before-vhost-configuration - Configuration to add before the <VirtualHost> directive (no default)
-#   --apache-allow-override - Whether to allow .htaccess files (only allowed when --move-htaccess is set to 'no')
+#   --apache-allow-override - Whether to allow .htaccess files (only allowed when --move-htaccess is set to 'no' and type is not defined)
 #   --apache-extra-directory-configuration - Extra configuration for the document root directory
-#   --apache-move-htaccess - Move .htaccess files to a common place so they can be loaded during Apache startup
+#   --apache-proxy-address - Address where to proxy requests
+#   --apache-proxy-configuration - Extra configuration for the proxy
+#   --apache-proxy-http-configuration - Extra configuration for the proxy HTTP vhost
+#   --apache-proxy-https-configuration - Extra configuration for the proxy HTTPS vhost
+#   --apache-move-htaccess - Move .htaccess files to a common place so they can be loaded during Apache startup (only allowed when type is not defined)
 # NGINX-specific flags:
 #   --nginx-additional-configuration - Additional server block configuration (no default)
+#   --nginx-external-configuration - Configuration external to server block (no default)
 # Returns:
 #   true if the configuration was enabled, false otherwise
 ########################
@@ -194,11 +203,18 @@ ensure_web_server_app_configuration_exists() {
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             # Common flags
+            --disable \
+            | --disable-http \
+            | --disable-https \
+            )
+                apache_args+=("$1")
+                nginx_args+=("$1")
+                ;;
             --hosts \
+            | --server-name \
+            | --server-aliases \
             | --type \
             | --allow-remote-connections \
-            | --disabled \
-            | --enable-https \
             | --http-port \
             | --https-port \
             | --document-root \
@@ -210,9 +226,15 @@ ensure_web_server_app_configuration_exists() {
 
             # Specific Apache flags
             --apache-additional-configuration \
+            | --apache-additional-http-configuration \
+            | --apache-additional-https-configuration \
             | --apache-before-vhost-configuration \
             | --apache-allow-override \
             | --apache-extra-directory-configuration \
+            | --apache-proxy-address \
+            | --apache-proxy-configuration \
+            | --apache-proxy-http-configuration \
+            | --apache-proxy-https-configuration \
             | --apache-move-htaccess \
             )
                 apache_args+=("${1//apache-/}" "${2:?missing value}")
@@ -220,7 +242,8 @@ ensure_web_server_app_configuration_exists() {
                 ;;
 
             # Specific NGINX flags
-            --nginx-additional-configuration)
+            --nginx-additional-configuration \
+            | --nginx-external-configuration)
                 nginx_args+=("${1//nginx-/}" "${2:?missing value}")
                 shift
                 ;;
@@ -338,8 +361,13 @@ ensure_web_server_prefix_configuration_exists() {
 # Arguments:
 #   $1 - App name
 # Flags:
-#   --hosts - Hosts to enable
-#   --enable-https - Update HTTPS app configuration
+#   --hosts - Host listen addresses
+#   --server-name - Server name
+#   --server-aliases - Server aliases
+#   --enable-http - Enable HTTP app configuration (if not enabled already)
+#   --enable-https - Enable HTTPS app configuration (if not enabled already)
+#   --disable-http - Disable HTTP app configuration (if not disabled already)
+#   --disable-https - Disable HTTPS app configuration (if not disabled already)
 #   --http-port - HTTP port number
 #   --https-port - HTTPS port number
 # Returns:
@@ -354,8 +382,16 @@ web_server_update_app_configuration() {
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             # Common flags
-            --hosts \
+            --enable-http \
             | --enable-https \
+            | --disable-http \
+            | --disable-https \
+            )
+                args+=("$1")
+                ;;
+            --hosts \
+            | --server-name \
+            | --server-aliases \
             | --http-port \
             | --https-port \
             )
