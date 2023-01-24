@@ -127,6 +127,7 @@ export interface WorkflowInputRecord {
 
 export interface AgentConnection {
   id: string;
+  inputName?: string;
   type: string;
   host: string;
   port: number;
