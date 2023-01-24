@@ -353,7 +353,9 @@ export async function helmCmd(req: Request, res: Response) {
           largestDiskPadded = Math.ceil(largestDisk * 3);
           helmArgs.postgresql.persistence.enabled = true;
         }
-        helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
+        if (findInput.dataValues.exportData) {
+          helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
+        }
       }
     });
 
