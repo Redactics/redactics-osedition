@@ -37,7 +37,7 @@ AGENT_VERSION = os.environ['AGENT_VERSION']
 NODESELECTOR = os.environ['NODESELECTOR']
 if "DIGITAL_TWIN_PREPARED_STATEMENTS" in os.environ:
     DIGITAL_TWIN_PREPARED_STATEMENTS = os.environ['DIGITAL_TWIN_PREPARED_STATEMENTS']
-PG_CLIENT_VERSION = 15
+PG_CLIENT_VERSION = "15"
 
 is_delete_operator_pod = False if ENV == "development" else True
 secrets = []

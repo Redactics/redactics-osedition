@@ -22,6 +22,7 @@ ENV = os.environ['ENV']
 API_URL = os.environ['API_URL']
 REGISTRY_URL = "redactics"
 AGENT_VERSION = os.environ['AGENT_VERSION']
+PG_CLIENT_VERSION = "15"
 
 NODESELECTOR = os.environ['NODESELECTOR']
 if NODESELECTOR != "<nil>":
@@ -195,7 +196,7 @@ def db_migration_mocking():
     clone_db = KubernetesPodOperator(
         task_id="clone-db",
         namespace=NAMESPACE,
-        image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
         cmds=["/scripts/clone-db.sh", database, clone_database],
         # ensure latest PG image is cached
         image_pull_policy="Always",
