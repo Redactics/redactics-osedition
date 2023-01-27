@@ -253,8 +253,8 @@ class Inputs extends React.Component<IProps, IState> {
                     color="primary"
                   />
                 }
-                label="Export data from this input source"
-              />&nbsp;<Tooltip title="Checking this option means that you intend to export data from this input source, in which case temporary disk space will be required for this export (CSV) data" placement="right-start"><HelpIcon /></Tooltip>
+                label="Export data from this data source"
+              />&nbsp;<Tooltip title="Checking this option means that you intend to export data from this data source, in which case temporary disk space will be required for this export (CSV) data" placement="right-start"><HelpIcon /></Tooltip>
             </Box>
 
             <Box mt={4} display={(this.state.input.exportData) ? 'block' : 'none'}>
@@ -455,17 +455,17 @@ class Inputs extends React.Component<IProps, IState> {
   render() {
     return (
       <React.Fragment>
-        <Helmet title="Input Sources" />
+        <Helmet title="Data Sources" />
 
         <Typography variant="h1" gutterBottom display="inline">
-          Input Sources
+          Data Sources
         </Typography>
 
         <Divider my={6} />
 
         <Box mt={4}>
           <Typography variant="body1" gutterBottom>
-            Define your input sources (i.e. databases, API inputs, etc.) here.
+            Define your data sources (i.e. databases, API inputs, etc.) here.
           </Typography>
 
           <Box mt={8}>
@@ -479,7 +479,7 @@ class Inputs extends React.Component<IProps, IState> {
                 <div>
                   <Button variant="contained" color="secondary" size="small" onClick={() => this.inputDialog()}>
                     <AddIcon />&nbsp;
-                    Add Input Source
+                    Add Data Source
                   </Button>
                 </div>
               </Grid>
@@ -495,6 +495,7 @@ class Inputs extends React.Component<IProps, IState> {
                     <TableCell>Name</TableCell>
                     <TableCell>Input Type</TableCell>
                     <TableCell>Disk Space Allocation</TableCell>
+                    <TableCell>Export Data</TableCell>
                     <TableCell>TLS/SSL Encrypted</TableCell>
                     <TableCell></TableCell>
                   </TableRow>
@@ -506,7 +507,8 @@ class Inputs extends React.Component<IProps, IState> {
                         <TableCell>{(input.uuid.match(/^new/)) ? "" : input.uuid}</TableCell>
                         <TableCell>{input.inputName}</TableCell>
                         <TableCell>{input.inputType}</TableCell>
-                        <TableCell>{(input.diskSize) ? input.diskSize + " GB" : "None"}</TableCell>
+                        <TableCell>{(input.diskSize && input.exportData) ? input.diskSize + " GB" : "None"}</TableCell>
+                        <TableCell>{(input.exportData) ? "yes" : "no"}</TableCell>
                         <TableCell>{(input.enableSSL) ? "yes" : "no"}</TableCell>
                         <NWTableCell>
                           <Button variant="contained" color="secondary" size="small" onClick={() => this.inputDialog(input)}>
@@ -547,7 +549,7 @@ class Inputs extends React.Component<IProps, IState> {
           aria-describedby="dialog-description"
           fullWidth
         >
-          <DialogTitle id="dialog-title">{this.state.input.inputDisplayMode} Input Source</DialogTitle>
+          <DialogTitle id="dialog-title">{this.state.input.inputDisplayMode} Data Source</DialogTitle>
           <DialogContent>
             <DialogContentText id="dialog-description">
               {this.editInputDialogContent()}
