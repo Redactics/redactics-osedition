@@ -562,7 +562,7 @@ export async function helmConfig(req: Request, res: Response) {
     });
 
     const connections:AgentConnection[] = [];
-    const connectionNames:any[] = [];
+    const connectionNames:any = [];
     const sslSecrets:any[] = [];
     inputs.forEach((input:any) => {
       // ensure unique connection UUIDs
@@ -573,7 +573,6 @@ export async function helmConfig(req: Request, res: Response) {
         connectionNames[input.dataValues.uuid] = input.dataValues.inputName;
         const connection:AgentConnection = {
           id: input.dataValues.uuid,
-          inputName: input.dataValues.inputName,
           type: 'postgres',
           host: 'changeme',
           port: 5432,
