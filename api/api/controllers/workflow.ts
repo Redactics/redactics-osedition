@@ -253,7 +253,7 @@ export async function getWorkflow(req: Request, res: Response) {
           tables: i.dataValues.tables,
           fullcopies: fullCopies,
         });
-      } else {
+      } else if (workflow.dataValues.workflowType !== 'ERL') {
         inputs.push({
           id: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,

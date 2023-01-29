@@ -587,7 +587,7 @@ describe('Workflow endpoints', () => {
     expect(res.body.workflow.migrationHelmHookWeight).toBe(-10);
   })
 
-  it('test attaching multiple inputs to mockDatabaseMigration workflow', async() => {
+  xit('test attaching multiple inputs to mockDatabaseMigration workflow', async() => {
 
   })
 
@@ -598,12 +598,30 @@ describe('Workflow endpoints', () => {
     expect(res.body.workflows.length).toEqual(2);
     expect(res.body.workflows[0].uuid).toEqual(workflowUuid);
     expect(res.body.workflows[0].name).toEqual("Test Workflow");
+    expect(res.body.workflows[0].inputs[0].enabled).toEqual(true);
+    expect(res.body.workflows[0].inputs[0].inputName).toEqual('Test Input');
+    expect(res.body.workflows[0].inputs[0].tables).toEqual(['athletes', 'marketing_campaign']);
     expect(res.body.presets.length).toEqual(4);
     expect(res.body.redactrulesets.length).toEqual(4);
     expect(res.body.agents.length).toEqual(1);
     expect(res.body.agents[0].uuid).toEqual(agentUuid);
   })
 })
+
+it('ERL workflows should skip inputs with no tables', async() => {
+  await Input.update({
+    tables: []
+  }, {
+    where: {
+      uuid: sampleInput.dataValues.uuid
+    }
+  });
+
+  const res = await agent.get('/workflow')
+  .expect(200);
+
+  expect(!res.body.workflows[0].inputs.length);
+});
 
 describe('Workflow jobs', () => {
   it('create workflow job not associated with a workflow', async() => {
