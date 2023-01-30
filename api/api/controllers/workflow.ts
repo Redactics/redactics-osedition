@@ -183,6 +183,7 @@ export async function getWorkflows(req: Request, res: Response) {
       if (inputData) {
         i.dataValues.inputName = inputData.dataValues.inputName;
         i.dataValues.uuid = inputData.dataValues.uuid;
+        i.dataValues.redacticsGenerated = inputData.dataValues.redacticsGenerated;
       }
       delete i.dataValues.id;
       delete i.dataValues.agentId;

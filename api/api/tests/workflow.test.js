@@ -605,6 +605,10 @@ describe('Workflow endpoints', () => {
     expect(res.body.redactrulesets.length).toEqual(4);
     expect(res.body.agents.length).toEqual(1);
     expect(res.body.agents[0].uuid).toEqual(agentUuid);
+    expect(res.body.agentInputs.length).toEqual(1);
+    expect(res.body.agentInputs[0].inputName).toEqual('Test Input');
+    expect(res.body.agentInputs[0].uuid).toEqual(sampleInput.dataValues.uuid);
+    expect(res.body.agentInputs[0].redacticsGenerated).toEqual(false);
   })
 })
 
