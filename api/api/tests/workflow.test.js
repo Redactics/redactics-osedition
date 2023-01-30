@@ -609,8 +609,31 @@ describe('Workflow endpoints', () => {
 })
 
 it('ERL workflows should skip inputs with no tables', async() => {
-  await Input.update({
+  await WorkflowInput.update({
     tables: []
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+
+  const res = await agent.get('/workflow')
+  .expect(200);
+
+  expect(!res.body.workflows[0].inputs.length);
+});
+
+it('ERL workflows should skip disabled inputs', async() => {
+  await WorkflowInput.update({
+    tables: ["athletes", "marketing_campaign"]
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+
+  await Input.update({
+    disabled: true
   }, {
     where: {
       uuid: sampleInput.dataValues.uuid
@@ -621,6 +644,15 @@ it('ERL workflows should skip inputs with no tables', async() => {
   .expect(200);
 
   expect(!res.body.workflows[0].inputs.length);
+
+  // re-enable input
+  await Input.update({
+    disabled: false
+  }, {
+    where: {
+      uuid: sampleInput.dataValues.uuid
+    }
+  });
 });
 
 describe('Workflow jobs', () => {

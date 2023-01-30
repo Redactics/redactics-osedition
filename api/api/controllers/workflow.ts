@@ -132,7 +132,12 @@ export async function getWorkflows(req: Request, res: Response) {
         return r.dataValues;
       });
       const allDatabaseTables:string[] = [];
-      d.dataValues.inputs = d.dataValues.inputs.map((input: any) => {
+      d.dataValues.inputs = d.dataValues.inputs.filter((input:any) => {
+        const findInput = allInputs.find((ai:any) => (
+          ai.dataValues.id === input.dataValues.inputId
+        ));
+        return (findInput && !findInput.dataValues.disabled);
+      }).map((input: any) => {
         const wi = input;
         const inputData = allInputs.find((i: any) => (i.dataValues.id === wi.dataValues.inputId));
         if (inputData) {
