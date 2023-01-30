@@ -170,7 +170,12 @@ export async function getWorkflows(req: Request, res: Response) {
       return d.dataValues;
     });
 
-    agentInputs = agentInputs.map((ai:any) => {
+    agentInputs = agentInputs.filter((input:any) => {
+      const findInput = allInputs.find((ai:any) => (
+        ai.dataValues.id === input.dataValues.inputId
+      ));
+      return (findInput && !findInput.dataValues.disabled);
+    }).map((ai:any) => {
       const i = ai;
       const inputData = allInputs.find(
         (alli: any) => (alli.dataValues.id === ai.dataValues.inputId),

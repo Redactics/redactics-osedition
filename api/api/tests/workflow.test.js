@@ -644,6 +644,7 @@ it('ERL workflows should skip disabled inputs', async() => {
   .expect(200);
 
   expect(!res.body.workflows[0].inputs.length);
+  expect(!res.body.agentInputs.length);
 
   // re-enable input
   await Input.update({
