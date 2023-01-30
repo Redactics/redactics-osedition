@@ -660,6 +660,31 @@ it('ERL workflows should skip disabled inputs', async() => {
   });
 });
 
+it('ERL workflows should skip disabled workflow inputs', async() => {
+  await WorkflowInput.update({
+    enabled: false
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+
+  const res = await agent.get('/workflow')
+  .expect(200);
+
+  expect(!res.body.workflows[0].inputs.length);
+  expect(!res.body.agentInputs.length);
+
+  // re-enable workflow input
+  await WorkflowInput.update({
+    enabled: true
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+});
+
 describe('Workflow jobs', () => {
   it('create workflow job not associated with a workflow', async() => {
     const res = await agent

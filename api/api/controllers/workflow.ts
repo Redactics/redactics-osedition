@@ -136,7 +136,7 @@ export async function getWorkflows(req: Request, res: Response) {
         const findInput = allInputs.find((ai:any) => (
           ai.dataValues.id === input.dataValues.inputId
         ));
-        return (findInput && !findInput.dataValues.disabled);
+        return (findInput && !findInput.dataValues.disabled && input.enabled);
       }).map((input: any) => {
         const wi = input;
         const inputData = allInputs.find((i: any) => (i.dataValues.id === wi.dataValues.inputId));
