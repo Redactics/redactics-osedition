@@ -147,8 +147,13 @@ class WorkflowInputs extends React.Component<IProps, IState> {
     ) 
   }
 
-  outputInputs() {
+  outputDataSources() {
     if (this.props.agentInputs.length) {
+      // constrain web ERL to redactics generated inputs and filter redactics generated from other workflows
+      const agentInputs = this.props.agentInputs.filter((ai:AgentInputRecord) => {
+        return (!ai.redacticsGenerated)
+      });
+
       if (this.props.workflow.workflowType === "mockDatabaseMigration") {
         const selectedInput = (this.props.inputs && this.props.inputs.length && this.props.inputs[0]) ? this.props.inputs[0].uuid : "";
         return (
@@ -162,7 +167,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 name="inputSource"
                 onChange={(event) => this.props.selectInputSource(event)}
               >
-                {this.props.agentInputs.map((input:AgentInputRecord) => (
+                {agentInputs.map((input:AgentInputRecord) => (
                   <MenuItem key={input.uuid} value={input.uuid}>{input.inputName}</MenuItem>
                 ))}
               </Select>
@@ -183,7 +188,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {this.props.agentInputs.map((input:AgentInputRecord) => {
+                {agentInputs.map((input:AgentInputRecord) => {
                   let workflowInput:any = this.props.inputs.find((i:WorkflowInputRecord) => {
                     return (i.uuid === input.uuid)
                   });
@@ -266,7 +271,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
         </Dialog>
 
         <Box mt={8}>
-          {this.outputInputs()}
+          {this.outputDataSources()}
         </Box>
        
       </React.Fragment>
