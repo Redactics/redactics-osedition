@@ -14,17 +14,17 @@ import {
 import async from '../components/Async';
 
 // Redactics components
-const Inputs = async(() => import('../pages/inputs/Main'));
+const DataSources = async(() => import('../pages/datasources/Main'));
 const Agents = async(() => import('../pages/agents/Main'));
 const Workflows = async(() => import('../pages/workflows/Main'));
 const JobListing = async(() => import('../pages/workflows/JobListing'));
 const CLI = async(() => import('../pages/CLI/Main'));
 const Settings = async(() => import('../pages/settings/Main'));
 
-const inputSourcesRoutes = {
-  id: 'Input Sources',
+const dataSourcesRoutes = {
+  id: 'Data Sources',
   path: '/',
-  component: Inputs,
+  component: DataSources,
   icon: <InputSourcesIcon />,
 };
 
@@ -68,7 +68,7 @@ const settingsRoutes = {
 };
 
 export const dashboard = [
-  inputSourcesRoutes,
+  dataSourcesRoutes,
   agentsRoutes,
   workflowsRoutes,
   cliRoutes,
@@ -76,7 +76,7 @@ export const dashboard = [
 ];
 
 export default [
-  inputSourcesRoutes,
+  dataSourcesRoutes,
   agentsRoutes,
   workflowsRoutes,
   cliRoutes,

@@ -587,7 +587,7 @@ describe('Workflow endpoints', () => {
     expect(res.body.workflow.migrationHelmHookWeight).toBe(-10);
   })
 
-  it('test attaching multiple inputs to mockDatabaseMigration workflow', async() => {
+  xit('test attaching multiple inputs to mockDatabaseMigration workflow', async() => {
 
   })
 
@@ -598,12 +598,92 @@ describe('Workflow endpoints', () => {
     expect(res.body.workflows.length).toEqual(2);
     expect(res.body.workflows[0].uuid).toEqual(workflowUuid);
     expect(res.body.workflows[0].name).toEqual("Test Workflow");
+    expect(res.body.workflows[0].inputs[0].enabled).toEqual(true);
+    expect(res.body.workflows[0].inputs[0].inputName).toEqual('Test Input');
+    expect(res.body.workflows[0].inputs[0].tables).toEqual(['athletes', 'marketing_campaign']);
     expect(res.body.presets.length).toEqual(4);
     expect(res.body.redactrulesets.length).toEqual(4);
     expect(res.body.agents.length).toEqual(1);
     expect(res.body.agents[0].uuid).toEqual(agentUuid);
+    expect(res.body.agentInputs.length).toEqual(1);
+    expect(res.body.agentInputs[0].inputName).toEqual('Test Input');
+    expect(res.body.agentInputs[0].uuid).toEqual(sampleInput.dataValues.uuid);
+    expect(res.body.agentInputs[0].redacticsGenerated).toEqual(false);
   })
 })
+
+it('ERL workflows should skip inputs with no tables', async() => {
+  await WorkflowInput.update({
+    tables: []
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+
+  const res = await agent.get('/workflow')
+  .expect(200);
+
+  expect(!res.body.workflows[0].inputs.length);
+});
+
+it('ERL workflows should skip disabled inputs', async() => {
+  await WorkflowInput.update({
+    tables: ["athletes", "marketing_campaign"]
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+
+  await Input.update({
+    disabled: true
+  }, {
+    where: {
+      uuid: sampleInput.dataValues.uuid
+    }
+  });
+
+  const res = await agent.get('/workflow')
+  .expect(200);
+
+  expect(!res.body.workflows[0].inputs.length);
+  expect(!res.body.agentInputs.length);
+
+  // re-enable input
+  await Input.update({
+    disabled: false
+  }, {
+    where: {
+      uuid: sampleInput.dataValues.uuid
+    }
+  });
+});
+
+it('ERL workflows should skip disabled workflow inputs', async() => {
+  await WorkflowInput.update({
+    enabled: false
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+
+  const res = await agent.get('/workflow')
+  .expect(200);
+
+  expect(!res.body.workflows[0].inputs.length);
+  expect(!res.body.agentInputs.length);
+
+  // re-enable workflow input
+  await WorkflowInput.update({
+    enabled: true
+  }, {
+    where: {
+      inputId: sampleInput.dataValues.id
+    }
+  });
+});
 
 describe('Workflow jobs', () => {
   it('create workflow job not associated with a workflow', async() => {

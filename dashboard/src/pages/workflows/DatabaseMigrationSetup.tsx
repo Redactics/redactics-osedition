@@ -77,6 +77,7 @@ interface IState {
 class DatabaseMigrationSetup extends React.Component<IProps, IState> {
   render() {
     const helmHook = `
+{{- if .Values.global.databaseMigrations.mock }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -118,7 +119,8 @@ spec:
               secretKeyRef:
                 name: agent
                 key: basic-auth
-    `
+{{- end }}`
+
     const script = `
 #!/bin/bash
 

@@ -150,6 +150,7 @@ export interface InputRecord {
 export interface AgentInputRecord {
   uuid: string;
   inputName: string;
+  redacticsGenerated: boolean;
 }
 
 export interface WorkflowInputRecord {

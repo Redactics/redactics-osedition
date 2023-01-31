@@ -37,6 +37,7 @@ AGENT_VERSION = os.environ['AGENT_VERSION']
 NODESELECTOR = os.environ['NODESELECTOR']
 if "DIGITAL_TWIN_PREPARED_STATEMENTS" in os.environ:
     DIGITAL_TWIN_PREPARED_STATEMENTS = os.environ['DIGITAL_TWIN_PREPARED_STATEMENTS']
+PG_CLIENT_VERSION = "15"
 
 is_delete_operator_pod = False if ENV == "development" else True
 secrets = []
@@ -796,7 +797,7 @@ try:
             schema_dump = KubernetesPodOperator.partial(
                 task_id="schema-dump-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 # ensure latest PG image is cached
                 image_pull_policy="Always",
                 get_logs=True,
@@ -820,7 +821,7 @@ try:
             table_resets = KubernetesPodOperator.partial(
                 task_id="table-resets-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -842,7 +843,7 @@ try:
             schema_restore = KubernetesPodOperator.partial(
                 task_id="schema-restore-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -864,7 +865,7 @@ try:
             data_dump = KubernetesPodOperator.partial(
                 task_id="data-dump-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 get_logs=True,
                 env_vars=k8s_pg_source_envvars,
                 secrets=secrets,
@@ -887,7 +888,7 @@ try:
             restore_data = KubernetesPodOperator.partial(
                 task_id="restore-data-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -918,7 +919,7 @@ try:
             delta_dump_newrow = KubernetesPodOperator.partial(
                 task_id="delta-dump-new-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 # ensure latest PG image is cached
                 image_pull_policy="Always",
                 get_logs=True,
@@ -942,7 +943,7 @@ try:
             delta_dump_updatedrow = KubernetesPodOperator.partial(
                 task_id="delta-dump-updated-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 # ensure latest PG image is cached
                 image_pull_policy="Always",
                 get_logs=True,
@@ -966,7 +967,7 @@ try:
             delta_restore = KubernetesPodOperator.partial(
                 task_id="delta-restore-" + str(input_idx),
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -1000,7 +1001,7 @@ try:
             table_dumps = KubernetesPodOperator.partial(
                 task_id="dump-tables",
                 namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -1048,7 +1049,7 @@ try:
                     dt_delta_dump_newrow = KubernetesPodOperator.partial(
                         task_id="delta-data-dump-digitaltwin-new-" + str(input_idx),
                         namespace=NAMESPACE,
-                        image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                         get_logs=True,
                         env_vars=k8s_pg_tmp_envvars,
                         secrets=dfSecrets,
@@ -1070,7 +1071,7 @@ try:
                     dt_delta_dump_updatedrow = KubernetesPodOperator.partial(
                         task_id="delta-data-dump-digitaltwin-updated-" + str(input_idx),
                         namespace=NAMESPACE,
-                        image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                         get_logs=True,
                         env_vars=k8s_pg_tmp_envvars,
                         secrets=dfSecrets,
@@ -1092,7 +1093,7 @@ try:
                     dt_delta_restore = KubernetesPodOperator.partial(
                         task_id="delta-data-restore-digitaltwin-" + str(input_idx),
                         namespace=NAMESPACE,
-                        image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                         get_logs=True,
                         env_vars=k8s_pg_twin_envvars,
                         secrets=dfSecrets,
@@ -1209,7 +1210,7 @@ try:
                 dt_table_resets = KubernetesPodOperator.partial(
                     task_id="table-resets-dt-" + str(input_idx),
                     namespace=NAMESPACE,
-                    image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                     get_logs=True,
                     env_vars=k8s_pg_twin_envvars,
                     secrets=dfSecrets,
@@ -1231,7 +1232,7 @@ try:
                 dt_schema_restore = KubernetesPodOperator.partial(
                     task_id="schema-restore-digitaltwin-" + str(input_idx),
                     namespace=NAMESPACE,
-                    image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                     get_logs=True,
                     env_vars=k8s_pg_twin_envvars,
                     secrets=dfSecrets,
@@ -1257,7 +1258,7 @@ try:
                 dt_data_restore = KubernetesPodOperator.partial(
                     task_id="restore-data-digitaltwin-" + str(input_idx),
                     namespace=NAMESPACE,
-                    image=REGISTRY_URL + "/postgres-client:15-" + AGENT_VERSION,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
                     get_logs=True,
                     env_vars=k8s_pg_twin_envvars,
                     secrets=dfSecrets,

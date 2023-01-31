@@ -132,7 +132,12 @@ export async function getWorkflows(req: Request, res: Response) {
         return r.dataValues;
       });
       const allDatabaseTables:string[] = [];
-      d.dataValues.inputs = d.dataValues.inputs.map((input: any) => {
+      d.dataValues.inputs = d.dataValues.inputs.filter((input:any) => {
+        const findInput = allInputs.find((ai:any) => (
+          ai.dataValues.id === input.dataValues.inputId
+        ));
+        return (findInput && !findInput.dataValues.disabled && input.enabled);
+      }).map((input: any) => {
         const wi = input;
         const inputData = allInputs.find((i: any) => (i.dataValues.id === wi.dataValues.inputId));
         if (inputData) {
@@ -165,7 +170,12 @@ export async function getWorkflows(req: Request, res: Response) {
       return d.dataValues;
     });
 
-    agentInputs = agentInputs.map((ai:any) => {
+    agentInputs = agentInputs.filter((input:any) => {
+      const findInput = allInputs.find((ai:any) => (
+        ai.dataValues.id === input.dataValues.inputId
+      ));
+      return (findInput && !findInput.dataValues.disabled);
+    }).map((ai:any) => {
       const i = ai;
       const inputData = allInputs.find(
         (alli: any) => (alli.dataValues.id === ai.dataValues.inputId),
@@ -173,6 +183,7 @@ export async function getWorkflows(req: Request, res: Response) {
       if (inputData) {
         i.dataValues.inputName = inputData.dataValues.inputName;
         i.dataValues.uuid = inputData.dataValues.uuid;
+        i.dataValues.redacticsGenerated = inputData.dataValues.redacticsGenerated;
       }
       delete i.dataValues.id;
       delete i.dataValues.agentId;
@@ -253,7 +264,7 @@ export async function getWorkflow(req: Request, res: Response) {
           tables: i.dataValues.tables,
           fullcopies: fullCopies,
         });
-      } else {
+      } else if (workflow.dataValues.workflowType !== 'ERL') {
         inputs.push({
           id: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,

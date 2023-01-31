@@ -186,7 +186,7 @@ dependencies:
   - name: postgresql
     version: 12.1.9
     repository: "@redactics"
-description: Helm chart for the Redactics SMART Agent (https://www.redactics.com)
+description: Helm chart for the Redactics Agent (https://www.redactics.com)
 home: https://airflow.apache.org/
 icon: https://airflow.apache.org/docs/apache-airflow/stable/_images/pin_large.png
 keywords:

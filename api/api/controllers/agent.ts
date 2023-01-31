@@ -347,13 +347,16 @@ export async function helmCmd(req: Request, res: Response) {
         input.dataValues.id === i.dataValues.inputId
       ));
       if (findInput) {
-        if (!helmArgs.postgresql.persistence.size || findInput.dataValues.diskSize > largestDisk) {
+        if (!helmArgs.postgresql.persistence.size
+          || (findInput.dataValues.exportData && findInput.dataValues.diskSize > largestDisk)) {
           // add additional buffer for uncompressed, plain text files
           largestDisk = findInput.dataValues.diskSize;
           largestDiskPadded = Math.ceil(largestDisk * 3);
           helmArgs.postgresql.persistence.enabled = true;
         }
-        helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
+        if (findInput.dataValues.exportData) {
+          helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
+        }
       }
     });
 
@@ -559,6 +562,7 @@ export async function helmConfig(req: Request, res: Response) {
     });
 
     const connections:AgentConnection[] = [];
+    const connectionNames:any = [];
     const sslSecrets:any[] = [];
     inputs.forEach((input:any) => {
       // ensure unique connection UUIDs
@@ -566,6 +570,7 @@ export async function helmConfig(req: Request, res: Response) {
         (connection:any) => (connection.id === input.dataValues.uuid),
       );
       if (!searchConnections) {
+        connectionNames[input.dataValues.uuid] = input.dataValues.inputName;
         const connection:AgentConnection = {
           id: input.dataValues.uuid,
           type: 'postgres',
@@ -665,6 +670,7 @@ export async function helmConfig(req: Request, res: Response) {
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[3].value.comment = ' Internal Redactics DB hostname (do not alter)';
       } else {
         // customer database
+        helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[0].value.comment = ` ${connectionNames[connection.id]}`;
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[2].value.comment = ' database hostname';
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[6].value.comment = ' database name';
       }
