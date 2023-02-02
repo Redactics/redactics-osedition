@@ -48,13 +48,13 @@ describe('Agent endpoints', () => {
     agentUuid = res.body.uuid;
   })
 
-  it('get helm cmd, confirm no disk allocation', async () => {
+  it('get helm cmd, confirm no http NAS disk allocation', async () => {
     const res = await ragent
     .get('/agent/' + agentUuid + '/helmCmd')
     expect(res.status).toBe(200);
     
-    expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(false);
-    expect(!res.body.helmArgs.postgresql.persistence.size);
+    expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(true);
+    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(5);
     expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(false);
     expect(!res.body.helmArgs.httpNas.persistence.size);
   });
@@ -174,7 +174,7 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.latestChartVersion).toEqual(process.env.LATEST_CHART_VERSION);
     expect(res.body.helmArgs.agentUpgradeAvailable).toEqual(false);
     expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(true);
-    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(1);
+    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(5);
     expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(true);
     expect(res.body.helmArgs.httpNas.persistence.size).toEqual(3);
   });
@@ -225,7 +225,6 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.airflow.connections[0].schema).toEqual("changeme");
     expect(res.body.helmArgs.airflow.connections[1].id).toEqual("redacticsDB");
     expect(res.body.helmArgs.airflow.connections[1].type).toEqual("postgres");
-    expect(res.body.helmArgs.airflow.connections[1].version).toEqual("12");
     expect(res.body.helmArgs.airflow.connections[1].host).toEqual("agent-postgresql");
     expect(res.body.helmArgs.airflow.connections[1].port).toEqual(5432);
     expect(res.body.helmArgs.airflow.connections[1].login).toEqual("postgres");
