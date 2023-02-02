@@ -334,7 +334,8 @@ export async function helmCmd(req: Request, res: Response) {
       helmCmd: null,
       postgresql: {
         persistence: {
-          size: 0,
+          enabled: true,
+          size: 5,
         },
       },
     };
@@ -352,18 +353,9 @@ export async function helmCmd(req: Request, res: Response) {
           // add additional buffer for uncompressed, plain text files
           largestDisk = findInput.dataValues.diskSize;
           largestDiskPadded = Math.ceil(largestDisk * 3);
-          helmArgs.postgresql.persistence.enabled = true;
-        }
-        if (findInput.dataValues.exportData) {
-          helmArgs.postgresql.persistence.size += findInput.dataValues.diskSize;
         }
       }
     });
-
-    if (helmArgs.postgresql.persistence.size === 0) {
-      delete helmArgs.postgresql.persistence.size;
-      helmArgs.postgresql.persistence.enabled = false;
-    }
 
     // console.log(helmArgs.workflows[0].inputs);
 
@@ -597,7 +589,6 @@ export async function helmConfig(req: Request, res: Response) {
     connections.push({
       id: 'redacticsDB',
       type: 'postgres',
-      version: '12',
       host: 'agent-postgresql',
       port: 5432,
       login: 'postgres',
