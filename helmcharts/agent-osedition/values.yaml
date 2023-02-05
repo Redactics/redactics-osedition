@@ -195,7 +195,7 @@ airflowConfigAnnotations: {}
 # `airflow_local_settings` file as a string (can be templated).
 airflowLocalSettings: |-
   {{- if semverCompare ">=2.2.0" .Values.airflowVersion }}
-  {{- if not (or .Values.webserverSecretKey .Values.webserverSecretKeySecretName) }}
+  {{- if not (or .Values.airflow.webserverSecretKey .Values.webserverSecretKeySecretName) }}
   from airflow.www.utils import UIAlert
 
   DASHBOARD_UIALERTS = [
@@ -1569,6 +1569,14 @@ heartbeat:
   image:
     registry: redactics
     repository: heartbeat
-    tag: 1.0.0
+    tag: 1.1.0
     pullPolicy: Always
   useHelmHooks: true
+
+# These settings have been pulled outside of the root scope into a different hierarchy with "airflow"
+# as the parent to help provide a more coherent structure to the Redactics Agent config file.
+# We need to define these settings to support first time installation of the Agent.
+airflow:
+  fernetKey: ~
+  webserverSecretKey: ~
+  connections: ~
