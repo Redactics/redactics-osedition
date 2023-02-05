@@ -30,8 +30,8 @@ We are working on building out our documentation as we speak, but for starters, 
 ```
 export PGPASSWORD=changeme
 export NAMESPACE=redactics
-helm upgrade --install --cleanup-on-fail --create-namespace -n redactics agent ./helmcharts/agent-osedition \
---set "redactics.namespace=redactics" \
+helm upgrade --install --cleanup-on-fail --create-namespace -n ${NAMESPACE} agent ./helmcharts/agent-osedition \
+--set "redactics.namespace=${NAMESPACE}" \
 --set "http-nas.persistence.enabled=false" \
 --set "airflow.connections[0].id=redacticsDB" \
 --set "airflow.connections[0].password=${PGPASSWORD}" \
