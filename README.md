@@ -30,8 +30,8 @@ We are working on building out our documentation as we speak, but for starters, 
 ```
 export PGPASSWORD=changeme
 export NAMESPACE=redactics
-helm upgrade --install --cleanup-on-fail --create-namespace -n redactics agent ./helmcharts/agent-osedition \
---set "redactics.namespace=redactics" \
+helm upgrade --install --cleanup-on-fail --create-namespace -n ${NAMESPACE} agent ./helmcharts/agent-osedition \
+--set "redactics.namespace=${NAMESPACE}" \
 --set "http-nas.persistence.enabled=false" \
 --set "airflow.connections[0].id=redacticsDB" \
 --set "airflow.connections[0].password=${PGPASSWORD}" \
@@ -94,6 +94,24 @@ dashboard:
   image:
     repository: [your repo URL for ./dashboard/Dockerfile]
 ```
+
+### Local Development
+
+To run the API locally you will have to do the following:
+
+1. Run the DB migrations: `docker-compose run api db-migrate up`
+1. In your configuration file add the following field: `redactics.apiUrl: http://host.docker.internal:3000`
+
+To run the Dashboard:
+
+If for some reason you need to change the API URL to something other than `localhost:3000` you can edit this value in your `dashboard/.env.local`. Otherwise from your dashboard directory, simply:
+
+1. npm install
+1. npm run start
+
+To update the Agent:
+
+You can develop locally with a local Kubernetes cluster running (e.g. the Kubernetes option in Docker Desktop), building the image locally referenced by the Helm chart, and then deleting the scheduler pod to load the updated image (the pull policy of this pod is set to `Always`).
 
 
 

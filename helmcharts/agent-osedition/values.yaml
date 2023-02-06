@@ -286,7 +286,7 @@ extraConfigMaps:
   '{{ .Release.Name }}-userparams':
     data: |
       ENV: {{ default "production" .Values.redactics.env | toString | quote }}
-      API_URL: {{ default "http://agent-api" .Values.redactics.apiURL | toString | quote }}
+      API_URL: {{ default "http://agent-api" .Values.redactics.apiUrl | toString | quote }}
       NAMESPACE: {{ .Values.redactics.namespace | toString | quote }}
       AGENT_UUID: {{ .Values.agentId | toString | quote }}
       NODESELECTOR: {{ .Values.redactics.nodeSelector | toString | quote }}
