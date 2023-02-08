@@ -158,6 +158,7 @@ export interface WorkflowInputRecord {
   inputName: string;
   enabled: boolean;
   tables: string[];
+  tableSelection: string;
 }
 
 export interface DataFeed {

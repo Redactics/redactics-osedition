@@ -109,9 +109,43 @@ class WorkflowInputs extends React.Component<IProps, IState> {
         {this.props.errors.JSX}
 
         <Box mt={8}>
-          <Typography variant="h4" gutterBottom>
-            Tables to Extract
-          </Typography>
+          <Box>
+            <FormControl margin="dense" fullWidth>
+              <InputLabel>
+                Table Selection
+              </InputLabel>
+              <Select
+                value={this.props.input.tableSelection}
+                name="tableSelection"
+                onChange={(event) => this.props.handleInputChanges(event, this.props.input)}
+              >
+                <MenuItem key="all" value="all">Select all tables in all schema</MenuItem>
+                <MenuItem key="allExclude" value="allExclude">Select all tables in all schema with specified exclusions</MenuItem>
+                <MenuItem key="specific" value="specific">Select specific tables</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+
+          <Box mt={4} display={(this.props.input.tableSelection === "allExclude" || this.props.input.tableSelection === "specific") ? "block" : "none"}>
+            You can use wildcards (i.e. <code><b>*</b></code>) for broad pattern matching. For example, <b><code>public.account_*</code></b> will match all tables starting with "account_" in the public schema, and <b><code>company_*.users</code></b> will match all users tables in schema starting with "company_". If you aren't aware of what schema your tables reside in, they probably reside in <b><code>public</code></b>, which is the PostgreSQL default.
+            <Box mt={8}>
+              <FormControl>
+                <TextField
+                  error={this.props.errors.addSchema}
+                  name="addSchema"
+                  label="Schema"
+                  value={localStorage.getItem("schema") || "public"}
+                  //onChange={(event) => this.props.handleAddTable(event)}
+                />.<TextField
+                  error={this.props.errors.addTable}
+                  name="addTable"
+                  label="Table"
+                  value={this.props.addTable}
+                  onChange={(event) => this.props.handleAddTable(event)}
+                />
+              </FormControl>
+            </Box>
+          </Box>
 
           <Box>
             {this.props.input.tables.map((table: string) => (
@@ -199,6 +233,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                       enabled: false,
                       uuid: input.uuid,
                       tables: [],
+                      tableSelection: "all",
                     }
                   }
                   return (

@@ -291,6 +291,7 @@ class Workflow extends React.Component<IProps, IState> {
         inputName: "",
         enabled: true,
         tables: [],
+        tableSelection: "all"
       },
       inputs: this.props.workflow.inputs,
       numInputs: this.props.workflow.inputs.length,
@@ -1044,6 +1045,7 @@ class Workflow extends React.Component<IProps, IState> {
       uuid: input.uuid,
       enabled: input.enabled,
       tables: input.tables,
+      tableSelection: input.tableSelection,
     }
     this.setState({
       input: inputCopy,
