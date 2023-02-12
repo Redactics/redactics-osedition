@@ -363,6 +363,8 @@ export async function getWorkflow(req: Request, res: Response) {
             postUpdateKeyValues[kv.key] = kv.value;
           });
           df.dataValues.dataFeedConfig.postUpdateKeyValues = postUpdateKeyValues;
+        } else {
+          df.dataValues.dataFeedConfig.enablePostUpdatePreparedStatements = false;
         }
       }
 
