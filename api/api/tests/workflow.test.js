@@ -158,7 +158,7 @@ describe('Workflow endpoints', () => {
     workflowInputs = [{
       uuid: sampleInput.dataValues.uuid,
       enabled: true,
-      tables: ["athletes", "marketing_campaign"]
+      tables: ["marketing_campaign", "athletes", "marketing_campaign"], // assure de-duplication and sorting
     }];
 
     const res = await agent.put('/workflow/' + workflowUuid)
