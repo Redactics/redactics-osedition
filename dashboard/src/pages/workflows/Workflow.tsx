@@ -223,6 +223,8 @@ class Workflow extends React.Component<IProps, IState> {
     this.triggerEditDataFeed = this.triggerEditDataFeed.bind(this);
     this.deleteDataFeed = this.deleteDataFeed.bind(this);
     this.resetDataFeedErrors = this.resetDataFeedErrors.bind(this);
+    this.addTableSelection = this.addTableSelection.bind(this);
+    this.deleteTableSelection = this.deleteTableSelection.bind(this);
     //this.saveFeedback = this.saveFeedback.bind(this);
 
     const maskingRuleValues:RedactRule[] = [];
@@ -770,6 +772,21 @@ class Workflow extends React.Component<IProps, IState> {
     });
   }
 
+  addTableSelection() {
+    const state:IState = this.state;
+    state.input.tables.push(localStorage.getItem("schema") || "public");
+    this.setState(state);
+  }
+
+  deleteTableSelection(idx:number) {
+    const state:IState = this.state;
+    let table = state.input.tables[idx];
+    state.input.tables = state.input.tables.filter((t:string) => {
+      return (t !== table)
+    })
+    this.setState(state);
+  }
+
   handleSnackbarClose = () => {
     this.setState({
       showSnackbar: false,
@@ -1087,10 +1104,17 @@ class Workflow extends React.Component<IProps, IState> {
     }
   }
 
-  handleAddTable(event:any) {
+  handleAddTable(event:any, idx:number, field:string) {
+    const state:IState = this.state;
+    if (field === "schema") {
+      state.input.tables[idx] = event.target.value + "." + state.input.tables[idx].split('.')[1];
+    }
+    else if (field === "table") {
+      state.input.tables[idx] = state.input.tables[idx].split('.')[0] + "." + event.target.value;
+    }
     this.setState({
-      addTable: event.target.value
-    })
+      input: state.input
+    });
   }
 
   triggerAddTable() {
@@ -1689,6 +1713,8 @@ class Workflow extends React.Component<IProps, IState> {
                     hideInputDialog={this.hideInputDialog}
                     deleteDatabaseTable={this.deleteDatabaseTable}
                     handleSnackbarClose={this.handleEditWorkflowSnackbarClose}
+                    addTableSelection={this.addTableSelection}
+                    deleteTableSelection={this.deleteTableSelection}
                   />
                 </ExpansionPanelDetails>
               </ExpansionPanel>

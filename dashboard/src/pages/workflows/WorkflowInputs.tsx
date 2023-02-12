@@ -25,12 +25,12 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
-  Chip,
 } from '@material-ui/core';
 
 import {
   Add as AddIcon,
   Edit as EditIcon,
+  DeleteOutline as DeleteIcon,
 } from '@material-ui/icons';
 
 import { AgentRecord, WorkflowRecord, AgentInputRecord, WorkflowInputRecord } from '../../types/redactics';
@@ -44,6 +44,11 @@ const FormControlSpacing = styled(MuiFormControl)(spacing);
 const FormControl = styled(FormControlSpacing)`
   min-width: 200px;
   max-width: 200px;
+`;
+
+const WideFormControl = styled(FormControlSpacing)`
+  min-width: 400px;
+  max-width: 400px;
 `;
 
 const TextField = styled(TextFieldSpacing)`
@@ -85,6 +90,8 @@ interface IProps {
   hideInputDialog: any;
   deleteDatabaseTable: any;
   handleSnackbarClose: any;
+  addTableSelection: any;
+  deleteTableSelection: any;
 }
 
 interface IState {
@@ -103,6 +110,70 @@ class WorkflowInputs extends React.Component<IProps, IState> {
     };
   }
 
+  displayTableSelection(tableSelection:string) {
+    let addButton = "Add Table";
+    if (tableSelection === "allExclude") { addButton += " Exclusion"; }
+    if (!this.props.input.tables || !this.props.input.tables.length) {
+      return (
+        <Box>
+          <Button variant="contained" color="secondary" size="small" onClick={this.props.addTableSelection}>
+            <AddIcon />&nbsp;&nbsp;{addButton}
+          </Button>
+        </Box>
+      )
+    }
+    else {
+      return (
+        <Table size="small" style={{ width: 'auto' }}>
+          <TableBody>
+            {this.props.input.tables.map((row:any, idx:number) => (
+              <TableRow key={idx}>
+                <TableCell style={{ paddingLeft: 0 }}>
+                  <TextField
+                    error={this.props.errors.addSchema}
+                    name="addSchema"
+                    label="Schema"
+                    value={row.split('.')[0]}
+                    onChange={(event) => this.props.handleAddTable(event, idx, "schema")}
+                    variant="outlined"
+                    margin="dense"
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    error={this.props.errors.addTable}
+                    name="addTable"
+                    label="Table"
+                    value={row.split('.')[1]}
+                    onChange={(event) => this.props.handleAddTable(event, idx, "table")}
+                    variant="outlined"
+                    margin="dense"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Box>
+                    <Button variant="contained" color="secondary" size="small" onClick={() => this.props.deleteTableSelection(idx)}>
+                      <DeleteIcon />&nbsp;&nbsp;Delete
+                    </Button>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ))}
+            <TableRow>
+              <TableCell></TableCell>
+              <TableCell></TableCell>
+              <TableCell>
+                <Button variant="contained" color="secondary" size="small" onClick={this.props.addTableSelection}>
+                  <AddIcon />&nbsp;&nbsp;Add
+                </Button>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      )
+    }
+  }
+
   editInputDialogContent() { 
     return (
       <Box>
@@ -110,7 +181,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
 
         <Box mt={8}>
           <Box>
-            <FormControl margin="dense" fullWidth>
+            <WideFormControl margin="dense" fullWidth>
               <InputLabel>
                 Table Selection
               </InputLabel>
@@ -123,59 +194,15 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 <MenuItem key="allExclude" value="allExclude">Select all tables in all schema with specified exclusions</MenuItem>
                 <MenuItem key="specific" value="specific">Select specific tables</MenuItem>
               </Select>
-            </FormControl>
+            </WideFormControl>
           </Box>
 
           <Box mt={4} display={(this.props.input.tableSelection === "allExclude" || this.props.input.tableSelection === "specific") ? "block" : "none"}>
             You can use wildcards (i.e. <code><b>*</b></code>) for broad pattern matching. For example, <b><code>public.account_*</code></b> will match all tables starting with "account_" in the public schema, and <b><code>company_*.users</code></b> will match all users tables in schema starting with "company_". If you aren't aware of what schema your tables reside in, they probably reside in <b><code>public</code></b>, which is the PostgreSQL default.
             <Box mt={8}>
-              <FormControl>
-                <TextField
-                  error={this.props.errors.addSchema}
-                  name="addSchema"
-                  label="Schema"
-                  value={localStorage.getItem("schema") || "public"}
-                  //onChange={(event) => this.props.handleAddTable(event)}
-                />.<TextField
-                  error={this.props.errors.addTable}
-                  name="addTable"
-                  label="Table"
-                  value={this.props.addTable}
-                  onChange={(event) => this.props.handleAddTable(event)}
-                />
-              </FormControl>
+              {this.displayTableSelection(this.props.input.tableSelection)}
             </Box>
           </Box>
-
-          <Box>
-            {this.props.input.tables.map((table: string) => (
-              <Box key={table} display="inline" pr={1}>
-                <Chip
-                  key={table}
-                  label={table}
-                  onDelete={() => this.props.deleteDatabaseTable(table)}
-                />
-              </Box>
-            ))}
-          </Box>
-
-          <Box mt={4}>
-            <FormControl fullWidth>
-              <TextField
-                error={this.props.errors.addTable}
-                name="addTable"
-                label="Add Table"
-                value={this.props.addTable}
-                onChange={(event) => this.props.handleAddTable(event)}
-              />
-            </FormControl>
-            <Box mt={2}>
-              <Button color="secondary" variant="outlined" onClick={this.props.triggerAddTable}>
-                <AddIcon />&nbsp;Add
-              </Button>
-            </Box>
-          </Box>
-
         </Box>
       </Box>
     ) 
@@ -217,7 +244,8 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 <TableRow>
                   <TableCell>Enabled</TableCell>
                   <TableCell>Name</TableCell>
-                  <TableCell>Tables to Extract</TableCell>
+                  <TableCell>Table Selection Scheme</TableCell>
+                  <TableCell>Tables</TableCell>
                   <TableCell></TableCell>
                 </TableRow>
               </TableHead>
@@ -236,6 +264,20 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                       tableSelection: "all",
                     }
                   }
+                  let tableSelection = "";
+                  switch (workflowInput.tableSelection) {
+                    case 'all':
+                    tableSelection = "All tables";
+                    break;
+
+                    case 'allExclude':
+                    tableSelection = "All tables with specific exclusions";
+                    break;
+
+                    case 'specific':
+                    tableSelection = "Specific tables"
+                    break;
+                  }
                   return (
                     <TableRow key={input.uuid}>
                       <TableCell>
@@ -247,6 +289,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                         />
                       </TableCell>
                       <TableCell>{input.inputName}</TableCell>
+                      <TableCell>{tableSelection}</TableCell>
                       <TableCell>{tables}</TableCell>
                       <NWTableCell>
                         <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditInputDialog(workflowInput)}>

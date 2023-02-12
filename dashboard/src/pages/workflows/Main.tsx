@@ -313,7 +313,7 @@ class Workflows extends React.Component<IProps, IState> {
 
         <Box mt={4}>
           <Typography variant="body1" gutterBottom>
-            Build and maintain your data management workflows here. Configuration changes will be picked up by your Agent install usually within a few minutes.
+            Build and maintain your data management workflows here. Configuration changes will be picked up by your installed Agent usually within a few minutes.
           </Typography>
         </Box>
 
