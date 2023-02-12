@@ -533,10 +533,14 @@ async function saveInputs(workflow:any, req: Request) {
       const findInput = req.body.inputs.find((i:any) => (i.uuid === input.dataValues.uuid));
       if (findInput) {
         inputFound = true;
+        // dedupe table listing
+        const uniqueTables = findInput.tables.filter(
+          (table:string, idx:number) => findInput.tables.indexOf(table) === idx,
+        );
         const inputRecord:WorkflowInputRecord = {
           workflowId: workflow.dataValues.id,
           inputId: input.dataValues.id,
-          tables: findInput.tables,
+          tables: uniqueTables.sort(),
           enabled: findInput.enabled,
         };
         inputrulePromises.push(WorkflowInput.create(inputRecord));
