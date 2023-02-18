@@ -190,6 +190,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 name="tableSelection"
                 onChange={(event) => this.props.handleInputChanges(event, this.props.input)}
               >
+                <MenuItem key="none" value="none">None</MenuItem>
                 <MenuItem key="all" value="all">Select all tables in all schema</MenuItem>
                 <MenuItem key="allExclude" value="allExclude">Select all tables in all schema with specified exclusions</MenuItem>
                 <MenuItem key="specific" value="specific">Select specific tables</MenuItem>
@@ -244,7 +245,6 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 <TableRow>
                   <TableCell>Enabled</TableCell>
                   <TableCell>Name</TableCell>
-                  <TableCell>Table Selection Scheme</TableCell>
                   <TableCell>Tables</TableCell>
                   <TableCell></TableCell>
                 </TableRow>
@@ -255,28 +255,30 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                     return (i.uuid === input.uuid)
                   });
                   let inputEnabled:boolean = (workflowInput) ? workflowInput.enabled : false;
-                  let tables:string = (workflowInput && workflowInput.tables && workflowInput.tables.length) ? workflowInput.tables.join(', ') : "none selected";
-                  if (!workflowInput) {
+                  let tables:string = "";
+                  if (workflowInput && workflowInput.tableSelection) {
+                    switch (workflowInput.tableSelection) {
+                      case 'all':
+                      tables = "all tables";
+                      break;
+  
+                      case 'allExclude':
+                      tables = "all tables except " + workflowInput.tables.join(', ');
+                      break;
+  
+                      case 'specific':
+                      tables = workflowInput.tables.join(', ');
+                      break;
+                    }
+                  }
+                  else {
                     workflowInput = {
                       enabled: false,
                       uuid: input.uuid,
                       tables: [],
-                      tableSelection: "all",
+                      tableSelection: "",
                     }
-                  }
-                  let tableSelection = "";
-                  switch (workflowInput.tableSelection) {
-                    case 'all':
-                    tableSelection = "All tables";
-                    break;
-
-                    case 'allExclude':
-                    tableSelection = "All tables with specific exclusions";
-                    break;
-
-                    case 'specific':
-                    tableSelection = "Specific tables"
-                    break;
+                    tables = "none selected";
                   }
                   return (
                     <TableRow key={input.uuid}>
@@ -289,7 +291,6 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                         />
                       </TableCell>
                       <TableCell>{input.inputName}</TableCell>
-                      <TableCell>{tableSelection}</TableCell>
                       <TableCell>{tables}</TableCell>
                       <NWTableCell>
                         <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditInputDialog(workflowInput)}>

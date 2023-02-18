@@ -123,6 +123,7 @@ export interface WorkflowInputRecord {
   inputId: number;
   enabled: boolean;
   tables: string[];
+  tableSelection: string;
 }
 
 export interface AgentConnection {

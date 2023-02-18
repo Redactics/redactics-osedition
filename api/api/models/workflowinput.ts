@@ -25,6 +25,10 @@ const WorkflowInputModel = Sequelize.define('WorkflowInput', {
     type: DataTypes.JSONB,
     allowNull: true,
   },
+  tableSelection: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
 }, {
   tableName: 'workflowinputs',
 });

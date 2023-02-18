@@ -270,7 +270,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Table</TableCell>
+                  <TableCell>Tables</TableCell>
                   <TableCell>Summary</TableCell>
                   <TableCell></TableCell>
                 </TableRow>

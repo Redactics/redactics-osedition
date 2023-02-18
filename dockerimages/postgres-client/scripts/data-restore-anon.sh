@@ -27,7 +27,7 @@ else
     # restore from delta dataset, and specify columns for digital twin to omit primary key
 
     # new rows
-    if [ -z $COLUMNS ]
+    if [ -z $AWK_PRINT ]
     then
         # clone to Redactics DB
         curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE}-new.csv | psql -c "\copy ${TABLE} from stdin DELIMITER ',' csv;"

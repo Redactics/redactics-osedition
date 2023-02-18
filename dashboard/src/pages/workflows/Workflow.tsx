@@ -781,8 +781,15 @@ class Workflow extends React.Component<IProps, IState> {
   deleteTableSelection(idx:number) {
     const state:IState = this.state;
     let table = state.input.tables[idx];
+
     state.input.tables = state.input.tables.filter((t:string) => {
       return (t !== table)
+    })
+    state.inputs = state.inputs.map((i:any) => {
+      if (i.uuid === state.input.uuid) {
+        return state.input;
+      }
+      return i;
     })
     this.setState(state);
   }
@@ -1082,6 +1089,7 @@ class Workflow extends React.Component<IProps, IState> {
     state.inputs = state.inputs.map((i:any) => {
       if (i.uuid === input.uuid) {
         i[event.target.name] = (event.target.name === "enabled") ? event.target.checked : event.target.value;
+        state.input[event.target.name] = i[event.target.name];
       }
       return i;
     })
@@ -1207,6 +1215,8 @@ class Workflow extends React.Component<IProps, IState> {
   saveInputChanges() {
     const state:IState = this.state;
     let inputs:WorkflowInputRecord[] = this.state.inputs;
+
+    console.log("INPUTS", inputs);
 
     if (!state.input.tables) {
       state.input.tables = [];

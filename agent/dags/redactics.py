@@ -10,6 +10,7 @@ import airflow
 import json
 import os
 import requests
+import re
 from airflow import DAG
 from airflow import AirflowException
 from airflow.hooks.base_hook import BaseHook
@@ -201,18 +202,62 @@ delta_copy_tasks = 0
 copy_status = {}
 redactics_db_init = db_init()
 totalTasks = 0
+input_tables = {}
+
+def set_input_tables(input):
+    # collect tables from workflow config, supporting wildcards
+    found_tables = []
+    append_sql = []
+    schema_sql = "table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'"
+    table_sql = ""
+    if input["tableSelection"] == "none":
+        tables = []
+    elif input["tableSelection"] == "all":
+        tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'").fetchall()
+    elif input["tableSelection"] == "specific" or input["tableSelection"] == "allExclude":
+        for t in input["tables"]:
+            schema = t.split('.')[0]
+            table = t.split('.')[1]
+
+            if "*" in schema:
+                schema = schema.replace("*", "%%")
+            if "*" in table:
+                table = table.replace("*", "%%")
+            sql = "(table_schema ILIKE '" + schema + "' AND "
+            sql += "table_name ILIKE '" + table + "'" if input["tableSelection"] == "specific" else "table_name NOT ILIKE '" + table + "')"
+            append_sql.append(sql)
+
+        idx=0
+        for sql in append_sql:
+            if (idx + 1) < len(append_sql):
+                table_sql += append_sql[idx] + " AND "
+            else:
+                table_sql += append_sql[idx]
+            idx+=1
+        
+        print("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql)
+        tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql).fetchall()
+        if len(tables):
+            for idx, t in enumerate(tables):
+                found_tables.append(t["table_schema"] + "." + t["table_name"])
+    print("FOUND TABLES")
+    print(list(dict.fromkeys(found_tables)))
+    input_tables[input["id"]] = list(dict.fromkeys(found_tables))
 
 for input in wf_config["inputs"]:
     source_dbs[input["id"]] = get_source_db(input["id"])
-    for table in input["tables"]:
+    set_input_tables(input)
+    for t in input_tables[input["id"]]:
+        schema = t.split('.')[0]
+        table = t.split('.')[1]
         schema_diff = False
 
-        source_tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE table_name = '" + table + "' ORDER BY ordinal_position ASC").fetchall()
-        tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_name = '" + table + "' ORDER BY ordinal_position ASC").fetchall()
+        source_tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
+        tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
         if digitalTwinEnabled:
             public_schema = MetaData(schema="public")
             digital_twin = get_digital_twin()
-            twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_name = '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
+            twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
             if len(twin_tables):
                 data = Table(table, public_schema, autoload=True, autoload_with=digital_twin)
                 twin_primary_key = data.primary_key.columns.values()[0].name
@@ -255,19 +300,19 @@ for input in wf_config["inputs"]:
         if not redactics_db_init:
             # Redactics DB not inited - first time usage
             copy_status[table] = "init"
-            initial_copies.append(table)
+            initial_copies.append(schema + "." + table)
         elif table in input["fullcopies"] and schema_diff:
             # table copied but schema has changed - re-copy entire table
             copy_status[table] = "schema-change-detected"
-            initial_copies.append(table)
+            initial_copies.append(schema + "." + table)
         elif table in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
             # table copied but schema has not changed - eligible for delta update
             copy_status[table] = "delta"
-            delta_copies.append(table)
+            delta_copies.append(schema + "." + table)
         else:
             # table not copied yet, or missing delta update field
             copy_status[table] = "missing-delta-update-field" if digitalTwinEnabled and not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
-            initial_copies.append(table)
+            initial_copies.append(schema + "." + table)
         
 print("COPY STATUS")
 print(copy_status)
@@ -415,19 +460,34 @@ try:
             connection = digital_twin
             public_schema = MetaData(schema="public")
             for input in wf_config["inputs"]:
-                for table in input["tables"]:
+                for t in input_tables[input["id"]]:
+                    schema = t.split('.')[0]
+                    table = t.split('.')[1]
+
                     data = Table(table, public_schema, autoload=True, autoload_with=connection)
                     primary_key = data.primary_key.columns.values()[0].name
 
-                    result = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name = '" + table + "' AND table_schema = 'public' AND column_name = 'source_primary_key'").fetchall()
+                    result = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name = 'source_primary_key'").fetchall()
                     if len(result) == 0:
-                        connection.execute("ALTER TABLE public." + table + " ADD COLUMN source_primary_key int4")
-                        connection.execute("CREATE UNIQUE INDEX " + table + "_source_primary_key ON public." + table + "(source_primary_key)")
-                    result = connection.execute("SELECT * FROM information_schema.columns WHERE table_name = '" + table + "' AND table_schema = 'public' AND column_name = '" + primary_key + "'").fetchone()
+                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key int4")
+                        connection.execute("CREATE UNIQUE INDEX \"" + table + "_source_primary_key\" ON \"" + schema + "\".\"" + table + "\"(source_primary_key)")
+                    result = connection.execute("SELECT * FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + primary_key + "'").fetchone()
                     # create default sequence for primary key column, if necessary
                     if result["column_default"] is None:
-                        connection.execute("CREATE SEQUENCE IF NOT EXISTS public." + table + "_pkey_seq")
-                        connection.execute("ALTER TABLE public." + table + " ALTER COLUMN " + primary_key + " SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
+                        connection.execute("CREATE SEQUENCE IF NOT EXISTS \"" + schema + "\".\"" + table + "_pkey_seq\"")
+                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + primary_key + "\" SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
+
+        @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
+        def drop_fk_constraints(input_id, **context):
+            connection = redactics_tmp
+            for t in input_tables[input_id]:
+                schema = t.split('.')[0]
+                table = t.split('.')[1]
+
+                results = connection.execute("SELECT DISTINCT(tc.constraint_name) FROM information_schema.table_constraints AS tc JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema WHERE tc.constraint_type = 'FOREIGN KEY' AND ccu.table_schema ILIKE '" + schema + "' AND tc.table_name ILIKE '" + table + "'").fetchall()
+                if len(results):
+                    for constraint in results:
+                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
 
         # dynamic task mapping functions
 
@@ -444,8 +504,11 @@ try:
             # sequences
             for input in wf_config["inputs"]:
                 connection = source_dbs[input["id"]]
-                for table in initial_copies:
-                    cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name = '" + table + "' AND table_schema = 'public'").fetchall()
+                for t in initial_copies:
+                    schema = t.split('.')[0]
+                    table = t.split('.')[1]
+
+                    cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
                     # sequence dump and restore
                     totalTasks += len(cols) * 2
 
@@ -462,7 +525,7 @@ try:
             redactics_db_init = db_init()
             if not redactics_db_init:
                 # reset DB
-                sql = ["DROP SCHEMA public CASCADE;CREATE SCHEMA public;GRANT ALL ON SCHEMA public TO postgres;GRANT ALL ON SCHEMA public TO public;DROP EXTENSION IF EXISTS anon CASCADE;CREATE EXTENSION IF NOT EXISTS anon CASCADE;SELECT anon.init();"]
+                sql = ["DROP EXTENSION IF EXISTS anon CASCADE;CREATE EXTENSION IF NOT EXISTS anon CASCADE;SELECT anon.init();"]
             return sql
 
         @task(on_failure_callback=post_logs)
@@ -487,17 +550,21 @@ try:
                 if input["id"] == input_id:
                     connection = source_dbs[input["id"]]
                     # always dump table schema
-                    for tables in wf_config["export"]:
-                        for table, settings in tables.items():
-                            cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name = '" + table + "' AND table_schema = 'public'").fetchall()
+                    for t in wf_config["export"]:
+                        for t in input_tables[input_id]:
+                            schema = t.split('.')[0]
+                            table = t.split('.')[1]
+
+                            cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
                             sequence_tables = []
                             if len(cols):
                                 for col in cols:
                                     # add schema for dependent sequences
                                     sequence_arr = col["column_default"].split("'")
                                     sequence_table = sequence_arr[1]
-                                    sequence_tables.append(table + ":" + sequence_table)
-                            cmds.append(["/scripts/schema-dump.sh", dag_name, table, ",".join(sequence_tables)])
+                                    sequence_tables.append(schema + "." + table + ":" + sequence_table)
+                            cmds.append(["/scripts/schema-dump.sh", dag_name, schema + "." + table, ",".join(sequence_tables)])
+                                
             return cmds
 
         @task(on_failure_callback=post_logs)
@@ -537,10 +604,10 @@ try:
         initial_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
-        def table_dump_cmds(outputs, **context):
+        def table_dump_cmds(outputs, input_id, **context):
             cmds = []
             if wf_config.get("export") and len(outputs):
-                for table, options in outputs.items():
+                for table in input_tables[input_id]:
                     if options["fields"]:
                         cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, table, ",".join(options["fields"])]
                     else:
@@ -574,11 +641,14 @@ try:
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     public_schema = MetaData(schema="public")
-                    for table in delta_copies:
+                    for t in delta_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+
                         data = Table(table, public_schema, autoload=True, autoload_with=connection)
                         # requires a single primary key
                         primary_key = data.primary_key.columns.values()[0].name
-                        results = connection.execute("SELECT \"" + str(primary_key) + "\" FROM " + table + " WHERE \"" + str(primary_key) + "\" IS NOT NULL ORDER BY \"" + str(primary_key) + "\" DESC LIMIT 1").scalar()
+                        results = connection.execute("SELECT \"" + str(primary_key) + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + str(primary_key) + "\" IS NOT NULL ORDER BY \"" + str(primary_key) + "\" DESC LIMIT 1").scalar()
                         primary_key_val = str(results)
                         cmds.append(["/scripts/delta-data-dump.sh", dag_name, table, primary_key, primary_key_val, "new"])
             return cmds
@@ -591,8 +661,11 @@ try:
             connection = redactics_tmp
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in delta_copies:
-                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM " + table + " WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
+                    for t in delta_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+
+                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
                         last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
                         cmds.append(["/scripts/delta-data-dump.sh", dag_name, table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
             return cmds
@@ -606,18 +679,21 @@ try:
             public_schema = MetaData(schema="public")
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in delta_copies:
+                    for t in delta_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+
                         # get primary key
                         data = Table(table, public_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         # get schema info
-                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name = '" + table + "' AND table_schema = 'public' ORDER BY ordinal_position ASC").fetchall()
+                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \"" + table + "\" AND table_schema = \"" + schema + "\" ORDER BY ordinal_position ASC").fetchall()
                         
                         restore_columns = []
                         for c in cols:
                             col = "".join(c)
                             restore_columns.append('"' + col + '"')
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, table, "1", ",".join(restore_columns), "", primary_key])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, schema + "." + table, "1", ",".join(restore_columns), "", primary_key])
             return cmds
         delta_copy_tasks += 1
 
@@ -631,13 +707,16 @@ try:
                 if input["id"] == input_id:
                     connection = source_dbs[input_id]
                     public_schema = MetaData(schema="public")
-                    for table in initial_copies:
+                    for t in initial_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+
                         awk_print = []
                         # get primary key
                         data = Table(table, public_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         # get schema info
-                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name = '" + table + "' AND table_schema = 'public' ORDER BY ordinal_position ASC").fetchall()
+                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \"" + table + "\" AND table_schema = \"" + schema + "\" ORDER BY ordinal_position ASC").fetchall()
                         # find primary key index
                         primary_key_idx = 0
                         for idx, c in enumerate(cols):
@@ -666,14 +745,17 @@ try:
             public_schema = MetaData(schema="public")
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in delta_copies:
+                    for t in delta_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+
                         # get primary key
                         data = Table(table, public_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
-                        results = connection.execute("SELECT source_primary_key FROM " + table + " ORDER BY source_primary_key DESC LIMIT 1").scalar()
+                        results = connection.execute("SELECT source_primary_key FROM \"" + schema + "\".\"" + table + "\" ORDER BY source_primary_key DESC LIMIT 1").scalar()
                         primary_key_val = str(results)
                         
-                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, table, primary_key, primary_key_val, "new"])
+                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, schema + "." + table, primary_key, primary_key_val, "new"])
             return cmds
         delta_copy_tasks += 1
 
@@ -684,8 +766,11 @@ try:
             connection = digital_twin
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in delta_copies:
-                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM " + table + " WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
+                    for t in delta_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+
+                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
                         last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
                         cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
             return cmds
@@ -699,13 +784,16 @@ try:
             public_schema = MetaData(schema="public")
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in delta_copies:
+                    for t in delta_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+
                         awk_print = []
                         # get primary key
                         data = Table(table, public_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         # get schema info
-                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name = '" + table + "' AND table_schema = 'public' ORDER BY ordinal_position ASC").fetchall()
+                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \"" + table + "\" AND table_schema = \"" + schema + "\" ORDER BY ordinal_position ASC").fetchall()
                         # find primary key index
                         primary_key_idx = 0
                         for idx, c in enumerate(cols):
@@ -862,6 +950,10 @@ try:
                 )
             schema_restore.set_upstream(table_resets)
 
+            trigger_drop_fk_contraints = drop_fk_constraints(input["id"])
+            totalTasks += 1
+            trigger_drop_fk_contraints.set_upstream(schema_restore)
+
             data_dump = KubernetesPodOperator.partial(
                 task_id="data-dump-" + str(input_idx),
                 namespace=NAMESPACE,
@@ -883,7 +975,7 @@ try:
                 ).expand(
                     cmds=data_dump_cmds(input["id"])
                 )
-            data_dump.set_upstream(schema_restore)
+            data_dump.set_upstream(trigger_drop_fk_contraints)
 
             restore_data = KubernetesPodOperator.partial(
                 task_id="restore-data-" + str(input_idx),
@@ -1015,9 +1107,9 @@ try:
                 hostnetwork=False,
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
-                trigger_rule='all_done'
+                #trigger_rule='all_done'
                 ).expand(
-                    cmds=table_dump_cmds(outputs)
+                    cmds=table_dump_cmds(outputs, input["id"])
                 )
             table_dumps.set_upstream([record_table_status, apply_security_labels])
 

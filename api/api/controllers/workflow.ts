@@ -257,17 +257,13 @@ export async function getWorkflow(req: Request, res: Response) {
         }
       });
 
-      if (workflow.dataValues.workflowType === 'ERL' && i.dataValues.tables && i.dataValues.tables.length) {
+      if ((workflow.dataValues.workflowType === 'ERL' && i.dataValues.tables && i.dataValues.tables.length) || 
+        workflow.dataValues.workflowType !== 'ERL') {
         // skip inputs with no tables to export
         inputs.push({
           id: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,
-          fullcopies: fullCopies,
-        });
-      } else if (workflow.dataValues.workflowType !== 'ERL') {
-        inputs.push({
-          id: i.dataValues.Input.dataValues.uuid,
-          tables: i.dataValues.tables,
+          tableSelection : i.dataValues.tableSelection,
           fullcopies: fullCopies,
         });
       }
@@ -543,6 +539,7 @@ async function saveInputs(workflow:any, req: Request) {
           workflowId: workflow.dataValues.id,
           inputId: input.dataValues.id,
           tables: uniqueTables.sort(),
+          tableSelection: findInput.tableSelection,
           enabled: findInput.enabled,
         };
         inputrulePromises.push(WorkflowInput.create(inputRecord));

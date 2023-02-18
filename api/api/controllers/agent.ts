@@ -611,7 +611,7 @@ export async function helmConfig(req: Request, res: Response) {
 
     if (process.env.NODE_ENV === 'development') {
       helmArgs.redactics.env = 'development';
-      helmArgs.redactics.apiURL = 'http://host.docker.internal:3000';
+      helmArgs.redactics.apiUrl = 'http://host.docker.internal:3000';
 
       // enable access to logs via web GUI
       helmArgs.workers = {
