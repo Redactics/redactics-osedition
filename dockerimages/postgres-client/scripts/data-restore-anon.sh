@@ -10,7 +10,8 @@ AWK_PRINT=$5
 PRIMARY_KEY=$6
 SOURCE_PRIMARY_KEY=$7
 # tables are limited to 63 characters
-TEMP_TABLE=redactics_${TABLE:0:53}
+TABLE_NOSCHEMA=$(echo $TABLE | cut -d "." -f 2)
+TEMP_TABLE=redactics_${TABLE_NOSCHEMA:0:53}
 
 if [ -z $SOURCE_PRIMARY_KEY ]
 then
