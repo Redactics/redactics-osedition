@@ -468,8 +468,6 @@ class Workflow extends React.Component<IProps, IState> {
       exportTableDataConfig[config.table] = config;
     });
 
-    console.log("EXPORT", exportTableDataConfig);
-
     const payload:WorkflowUpdate = {
       name: this.props.workflow.name,
       agentId: this.props.workflow.agentId,
