@@ -47,7 +47,8 @@ k8s_pg_tmp_envvars = {
     "PGHOST": BaseHook.get_connection("redacticsDB").host,
     "PGUSER": BaseHook.get_connection("redacticsDB").login,
     "PGPASSWORD": BaseHook.get_connection("redacticsDB").password,
-    "PGDATABASE": BaseHook.get_connection("redacticsDB").schema
+    "PGDATABASE": BaseHook.get_connection("redacticsDB").schema,
+    "API_URL": API_URL
 }
 
 if NODESELECTOR != "<nil>":
@@ -237,8 +238,8 @@ def set_input_tables(input):
         
         print("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql)
         tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql).fetchall()
-        if len(tables):
-            for idx, t in enumerate(tables):
+    if len(tables):
+        for idx, t in enumerate(tables):
                 found_tables.append(t["table_schema"] + "." + t["table_name"])
     print("FOUND TABLES")
     print(list(dict.fromkeys(found_tables)))
@@ -369,7 +370,7 @@ try:
                 apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postException'
                 payload = {
                     'exception': 'an error occurred, cannot retrieve log output',
-                    'stackTrace': ''
+                    'stackTrace': json.dumps(context)
                 }
                 payloadJSON = json.dumps(payload)
                 request = requests.put(apiUrl, data=payloadJSON, headers=headers)
@@ -436,23 +437,6 @@ try:
             apiUrl = NAS_HOST + "/file/" + dag_name
             request = requests.delete(apiUrl)
             response = request.text
-            try:
-                if request.status_code != 200:
-                    raise AirflowException(response)
-            except AirflowException as err:
-                raise AirflowException(err)
-       
-        @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
-        def update_table_status(input_id, table_name, **context):
-            headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
-            apiUrl = API_URL + '/workflow/markFullCopy'
-            payload = {
-                'inputId': input_id,
-                'tableName': table_name
-            }
-            payloadJSON = json.dumps(payload)
-            request = requests.put(apiUrl, data=payloadJSON, headers=headers)
-            response = request.json()
             try:
                 if request.status_code != 200:
                     raise AirflowException(response)
@@ -602,7 +586,7 @@ try:
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in initial_copies:
-                        cmds.append(["/scripts/data-restore.sh", dag_name, "{}".format(BaseHook.get_connection("redacticsDB").schema), table])
+                        cmds.append(["/scripts/data-restore.sh", dag_name, "{}".format(BaseHook.get_connection("redacticsDB").schema), table, input_id])
             return cmds
         initial_copy_tasks += 1
 
@@ -1008,13 +992,6 @@ try:
                 )
             restore_data.set_upstream(data_dump)
 
-            record_table_status = update_table_status.partial(
-                input_id=input["id"]
-            ).expand(
-                table_name=gen_table_listing(input["id"])
-            )
-            record_table_status.set_upstream(restore_data)
-
             ### delta copy tasks
 
             delta_dump_newrow = KubernetesPodOperator.partial(
@@ -1120,7 +1097,7 @@ try:
                 ).expand(
                     cmds=table_dump_cmds(outputs, input["id"])
                 )
-            table_dumps.set_upstream([record_table_status, apply_security_labels])
+            table_dumps.set_upstream(apply_security_labels)
 
             if digitalTwinEnabled:
                 input_idx = 0

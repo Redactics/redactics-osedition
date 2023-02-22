@@ -9,10 +9,6 @@ import {
   FormControl as MuiFormControl,
   Button as MuiButton,
   Box,
-  FormControlLabel,
-  Radio,
-  RadioGroup,
-  Chip,
   Select,
   MenuItem,
   Tooltip,
@@ -26,15 +22,17 @@ import {
   TableRow,
   TableCell,
   TableBody,
+  Grid as MuiGrid,
 } from '@material-ui/core';
 
 import {
   Add as AddIcon,
   HelpOutline as HelpIcon,
   Edit as EditIcon,
+  DeleteOutline as DeleteIcon,
 } from '@material-ui/icons';
 
-import { WorkflowRecord } from '../../types/redactics';
+const Grid = styled(MuiGrid)(spacing);
 
 const TextFieldSpacing = styled(MuiTextField)(spacing);
 
@@ -55,15 +53,16 @@ const Button = styled(MuiButton)(spacing);
 /* eslint-disable @typescript-eslint/no-empty-interface */
 
 interface IProps {
-  workflow: WorkflowRecord;
-  deleteExportTableColumn: any;
-  addExportTableColumn: any;
+  exportTableDataConfig: any;
   tableOutputOptions: any;
+  constraintSchema: string;
+  constraintTable: string;
   handleTableOutputChanges: any;
   allDatabaseTables: string[];
   showOutputOptions: any;
   currentDatabaseTable: string;
   triggerOutputOptions: any;
+  deleteConstraint: any;
   hideOutputOptions: any;
 }
 
@@ -75,70 +74,45 @@ class WorkflowExport extends React.Component<IProps, IState> {
   constructor(props:IProps) {
     super(props);
 
-    this.displayColumnData = this.displayColumnData.bind(this);
-    this.displayRowsData = this.displayRowsData.bind(this);
+    this.displayConstraintOptions = this.displayConstraintOptions.bind(this);
     this.genName = this.genName.bind(this);
   }
 
-  displayColumnData() {
+  displayConstraintOptions() {
     const table = this.props.currentDatabaseTable;
-    if (!this.props.tableOutputOptions[table]) { return; }
-
-    return (
-      <Box>
-         <RadioGroup aria-label="exportColumns" name="exportColumns" value={this.props.tableOutputOptions[table].exportColumns} onChange={(event) => this.props.handleTableOutputChanges(event, table)}>
-          <FormControlLabel value="all" control={<Radio />} label="Export All Columns" />
-          <FormControlLabel value="specific" control={<Radio />} label="Export Specific Columns" />
-        </RadioGroup>
-
-        <Box mt={4} display={(this.props.tableOutputOptions[table].exportColumns === "specific") ? 'block' : 'none'}>
-          {this.props.tableOutputOptions[table].fields.map((field: string) => (
-            <Box key={field} display="inline" pr={1}>
-              <Chip
-                key={field}
-                label={field}
-                onDelete={(event) => this.props.deleteExportTableColumn(event, table, field)}
-              />
-            </Box>
-          ))}
-
-          <Box mt={2}>
-            <FormControl fullWidth>
-              <TextField
-                error={this.props.tableOutputOptions[table].errors.addColumn}
-                name="addColumn"
-                label="Add Column"
-                value={this.props.tableOutputOptions[table].addColumn}
-                onChange={(event) => this.props.handleTableOutputChanges(event, table)}
-              />
-            </FormControl>
-            <Box mt={2}>
-              <Button color="secondary" variant="outlined" onClick={(event) => this.props.addExportTableColumn(event, table)}>
-                <AddIcon />&nbsp;Add
-              </Button>
-            </Box>
-          </Box>
-        </Box>
-      </Box>
-    )
-  }
-
-  displayRowsData() {
-    const table = this.props.currentDatabaseTable;
-    if (!this.props.tableOutputOptions[table]) { return; }
+    if (!this.props.tableOutputOptions.errors) {
+      this.props.tableOutputOptions.errors = {};
+    }
 
     return (
       <Box mt={4}>
-         <RadioGroup aria-label="exportRows" name="exportRows" value={this.props.tableOutputOptions[table].exportRows} onChange={(event) => this.props.handleTableOutputChanges(event, table)}>
-          <FormControlLabel value="all" control={<Radio />} label="All Rows" />
-          <FormControlLabel disabled={!(this.props.workflow.workflowType === "ERL")} value="specific" control={<Radio />} label="Rows From a Specific Time Period" />
-        </RadioGroup>
+        <FormControl fullWidth variant="outlined">
+          <TextField
+            error={this.props.tableOutputOptions.errors.schema}
+            name="schema"
+            label="Schema"
+            value={this.props.constraintSchema}
+            onChange={(event) => this.props.handleTableOutputChanges(event)}
+          />
+        </FormControl>
 
-        <Box mt={4} display={(this.props.tableOutputOptions[table].exportRows === "specific") ? 'block' : 'none'}>
+        <Box mt={4}>
+          <FormControl fullWidth variant="outlined">
+            <TextField
+              error={this.props.tableOutputOptions.errors.table}
+              name="table"
+              label="Table"
+              value={this.props.constraintTable}
+              onChange={(event) => this.props.handleTableOutputChanges(event)}
+            />
+          </FormControl>
+        </Box>
+
+        <Box mt={4} display={(this.props.constraintSchema && this.props.constraintTable) ? 'block' : 'none'}>
           <FormControl>
             <Select
               name="sampleFields"
-              value={this.props.tableOutputOptions[table].sampleFields}
+              value={this.props.tableOutputOptions.sampleFields}
               onChange={(event) => this.props.handleTableOutputChanges(event, table)}
             >
               <MenuItem key="created" value="created">Created</MenuItem>
@@ -147,7 +121,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             </Select>&nbsp;&nbsp;in the last&nbsp;&nbsp;
             <Select
               name="numDays"
-              value={this.props.tableOutputOptions[table].numDays}
+              value={this.props.tableOutputOptions.numDays}
               onChange={(event) => this.props.handleTableOutputChanges(event, table)}
             >
               <MenuItem key="1" value="1">day</MenuItem>
@@ -166,10 +140,10 @@ class WorkflowExport extends React.Component<IProps, IState> {
           <Box mt={4}>
             <FormControl fullWidth variant="outlined">
               <TextField
-                error={this.props.tableOutputOptions[table].errors.createdAtField}
+                error={this.props.tableOutputOptions.errors.createdAtField}
                 name="createdAtField"
                 label="Created At Field Name"
-                value={this.props.tableOutputOptions[table].createdAtField}
+                value={this.props.tableOutputOptions.createdAtField}
                 onChange={(event) => this.props.handleTableOutputChanges(event, table)}
                 InputProps={{
                   endAdornment: <Tooltip title="(Required) field name in this table used for tracking created at timestamp" placement="right-start"><HelpIcon /></Tooltip>,
@@ -181,10 +155,10 @@ class WorkflowExport extends React.Component<IProps, IState> {
           <Box mt={4}>
             <FormControl fullWidth variant="outlined">
               <TextField
-                error={this.props.tableOutputOptions[table].errors.updatedAtField}
+                error={this.props.tableOutputOptions.errors.updatedAtField}
                 name="updatedAtField"
                 label="Updated At Field Name"
-                value={this.props.tableOutputOptions[table].updatedAtField}
+                value={this.props.tableOutputOptions.updatedAtField}
                 onChange={(event) => this.props.handleTableOutputChanges(event, table)}
                 InputProps={{
                   endAdornment: <Tooltip title="(Required) field name in this table used for tracking updated at timestamp" placement="right-start"><HelpIcon /></Tooltip>,
@@ -197,26 +171,99 @@ class WorkflowExport extends React.Component<IProps, IState> {
     )
   }
 
-  genName(dt:string) {
-    const display:string[] = [];
-    const tableArr:string[] = dt.split(': ');
-    const table:string = tableArr[(tableArr.length - 1)];
-    // let column:string = "columns";
-    // if (this.props.tableOutputOptions[table] && 
-    //   this.props.tableOutputOptions[table].fields && 
-    //   this.props.tableOutputOptions[table].fields.length === 1 &&
-    //   this.props.tableOutputOptions[table].exportColumns !== "all") {
-    //     column = "column";
+  displayConstraintsTable() {
+    // let constraints:any = [];
+    let constraints:any = this.props.exportTableDataConfig.filter((config:any) => {
+      return config.numDays
+    });
+    // for (const config in this.props.exportTableDataConfig) {
+    //   if (this.props.exportTableDataConfig[config] && this.props.exportTableDataConfig[config].numDays) {
+    //     this.props.exportTableDataConfig[config].table = config; // attach table name for convenience
+    //     constraints.push(this.props.exportTableDataConfig[config])
+    //   }
     // }
-    // display.push((this.props.tableOutputOptions[table] && 
-    //   this.props.tableOutputOptions[table].fields && 
-    //   this.props.tableOutputOptions[table].exportColumns !== "all") ? 
-    //     this.props.tableOutputOptions[table].fields.length + " " + column + "," : "all columns,");
-    display.push((this.props.tableOutputOptions[table] && 
-      this.props.tableOutputOptions[table].numDays && 
-      this.props.tableOutputOptions[table].exportRows !== "all") ? 
-        "rows for the last " + this.props.tableOutputOptions[table].numDays + " days" : "all table rows");
-    return display.join(' ');
+
+    if (!constraints.length) {
+      return (
+        <Box>
+          <Button variant="contained" color="secondary" size="small" onClick={(event) => this.props.triggerOutputOptions(event, null)}>
+            <AddIcon />&nbsp;&nbsp;Add Data Sampling Constraint
+          </Button>
+        </Box>
+      )
+    }
+    else {
+      return (
+        <Box>
+          <Grid
+            justify="space-between"
+            container
+            spacing={10}
+          >
+            <Grid item></Grid>
+            <Grid item mb={6}>
+              <Button variant="contained" color="secondary" size="small" onClick={(event) => this.props.triggerOutputOptions(event, null)}>
+                <AddIcon />&nbsp;&nbsp;Add Data Sampling Constraint
+              </Button>
+            </Grid>
+          </Grid>
+
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Table</TableCell>
+                <TableCell>Constraint</TableCell>
+                <TableCell></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+            {constraints.map((c:any) => {
+              let tableName = c.table;
+              return (
+                <TableRow key={tableName}>
+                  <TableCell>{tableName}</TableCell>
+                  <TableCell>{this.genName(tableName)}</TableCell>
+                  <TableCell>
+                    <Button color="secondary" size="small" variant="contained" onClick={(event) => this.props.triggerOutputOptions(event, tableName)}>
+                      <EditIcon />&nbsp;Edit
+                    </Button>&nbsp;
+                    <Button variant="contained" color="default" size="small" onClick={(event) => this.props.deleteConstraint(event, tableName)}>
+                      <DeleteIcon />&nbsp;Delete
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+            </TableBody>
+          </Table>
+        </Box>
+      )
+    }
+  }
+
+  genName(table:string) {
+    let display:string = "";
+    let scheme:string = "";
+    let findConfig = this.props.exportTableDataConfig.find((config:any) => {
+      return config.table === table;
+    });
+    if (findConfig) {
+      switch (findConfig.sampleFields) {
+        case 'createdAndUpdated':
+        scheme = "rows created and updated";
+        break;
+
+        case 'created':
+        scheme = "rows created";
+        break;
+
+        case 'updated':
+        scheme = "rows updated";
+        break;
+      }
+      display = scheme + " in the last " + findConfig.numDays + " days";
+    }
+    return display;
   }
 
   render() {
@@ -230,6 +277,14 @@ class WorkflowExport extends React.Component<IProps, IState> {
             Table Data Options
           </Typography>
 
+          <Grid container>
+            <Grid item xs={8}>
+              <Typography variant="body1" gutterBottom>
+                If you want to constrain your outputs to a selected time range (creating smaller tables in the process) you can do so by adding your table constraints below. Note that if other tables depend on omitted data these relationships will be broken.
+              </Typography>
+            </Grid>
+          </Grid>
+  
           <Dialog
             fullWidth
             open={this.props.showOutputOptions}
@@ -241,21 +296,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             <DialogTitle id="dialog-title">Table Options: {this.props.currentDatabaseTable}</DialogTitle>
             <DialogContent>
               <DialogContentText id="dialog-description">
-                {/* <Box>
-                  <b>Columns</b>
-                </Box>
-
-                {this.displayColumnData()}
-
-                <Box mt={4}>
-                  <b>Rows</b>
-                </Box> */}
-
-                <Box>
-                  To limit the initial copy of your data to a specific time range, specify this time range below. This may be useful if older data is not particularly relevant to you and/or your output table is large.
-                </Box>
-
-                {this.displayRowsData()}
+                {this.displayConstraintOptions()}
               </DialogContentText>
 
               <DialogActions>
@@ -267,32 +308,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
           </Dialog>
 
           <Box mt={8}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Tables</TableCell>
-                  <TableCell>Summary</TableCell>
-                  <TableCell></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-              {this.props.allDatabaseTables.map((dt:string) => {
-                const tableArr:string[] = dt.split(': ');
-                const table:string = tableArr[(tableArr.length - 1)];
-                return (
-                  <TableRow key={table}>
-                    <TableCell>{table}</TableCell>
-                    <TableCell>{this.genName(dt)}</TableCell>
-                    <TableCell>
-                      <Button color="secondary" size="small" variant="contained" onClick={(event) => this.props.triggerOutputOptions(event, table)}>
-                        <EditIcon />&nbsp;Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-              </TableBody>
-            </Table>
+            {this.displayConstraintsTable()}
           </Box>
         </Box>
       </React.Fragment>
