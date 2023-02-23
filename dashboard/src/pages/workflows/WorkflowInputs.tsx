@@ -25,6 +25,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Grid as MuiGrid,
 } from '@material-ui/core';
 
 import {
@@ -34,6 +35,8 @@ import {
 } from '@material-ui/icons';
 
 import { AgentRecord, WorkflowRecord, AgentInputRecord, WorkflowInputRecord } from '../../types/redactics';
+
+const Grid = styled(MuiGrid)(spacing);
 
 const Button = styled(MuiButton)(spacing);
 
@@ -180,7 +183,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
         {this.props.errors.JSX}
 
         <Box mt={8}>
-          <Box>
+          <Box display={(this.props.workflow.workflowType === "mockDatabaseMigration") ? "none" : "block"}>
             <WideFormControl margin="dense" fullWidth>
               <InputLabel>
                 Table Selection
@@ -209,15 +212,62 @@ class WorkflowInputs extends React.Component<IProps, IState> {
     ) 
   }
 
+  outputMockConstraints() {
+    let foundConstraints:boolean = false;
+    let tables:string = "";
+    let workflowInput:any = {
+      uuid: ""
+    };
+    this.props.agentInputs.forEach((input:AgentInputRecord) => {
+      workflowInput = this.props.inputs.find((i:WorkflowInputRecord) => {
+        return (i.uuid === input.uuid)
+      });
+      if (workflowInput && workflowInput.tables && workflowInput.tables.length) {
+        foundConstraints = true;
+        tables = "all tables except " + workflowInput.tables.join(', ');
+      }
+    });
+    if (!foundConstraints) {
+      return (
+        <Box>
+          <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditInputDialog({
+            inputName: workflowInput.inputName,
+            uuid: workflowInput.uuid,
+            enabled: workflowInput.enabled,
+            tableSelection: "allExclude",
+            tables: ["public"]
+          })}>
+            <AddIcon />&nbsp;&nbsp;Add Database Cloning Constraint
+          </Button>
+        </Box>
+      )
+    }
+    return (
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Tables</TableCell>
+            <TableCell></TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          <TableRow key={workflowInput.uuid}>
+            <TableCell>{tables}</TableCell>
+            <NWTableCell>
+              <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditInputDialog(workflowInput)}>
+                <EditIcon/>&nbsp;Edit Table Selection
+              </Button>
+            </NWTableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    )
+  }
+
   outputDataSources() {
     if (this.props.agentInputs.length) {
-      // constrain web ERL to redactics generated inputs and filter redactics generated from other workflows
-      const agentInputs = this.props.agentInputs.filter((ai:AgentInputRecord) => {
-        return (!ai.redacticsGenerated)
-      });
-
       if (this.props.workflow.workflowType === "mockDatabaseMigration") {
-        const selectedInput = (this.props.inputs && this.props.inputs.length && this.props.inputs[0]) ? this.props.inputs[0].uuid : "";
+        const selectedInput:string = (this.props.inputs && this.props.inputs.length && this.props.inputs[0]) ? this.props.inputs[0].uuid : "";
         return (
           <Box>
             <FormControl margin="dense" fullWidth>
@@ -229,11 +279,29 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 name="inputSource"
                 onChange={(event) => this.props.selectInputSource(event)}
               >
-                {agentInputs.map((input:AgentInputRecord) => (
+                {this.props.agentInputs.map((input:AgentInputRecord) => (
                   <MenuItem key={input.uuid} value={input.uuid}>{input.inputName}</MenuItem>
                 ))}
               </Select>
             </FormControl>
+              
+            <Box mt={8}>
+              <Typography variant="h6" gutterBottom>
+                Database Cloning Constraints
+              </Typography>
+
+              <Grid container>
+                <Grid item xs={8}>
+                  <Typography variant="body1" gutterBottom>
+                    If you want to clone your database faster you can do so by excluding certain tables which are irrelevant to testing your migration. This can be changed at any time to support your specific database migration.
+                  </Typography>
+                </Grid>
+              </Grid>
+
+              <Box mt={8}>
+                {this.outputMockConstraints()}
+              </Box>
+            </Box>
           </Box>
         )
       }
@@ -250,7 +318,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {agentInputs.map((input:AgentInputRecord) => {
+                {this.props.agentInputs.map((input:AgentInputRecord) => {
                   let workflowInput:any = this.props.inputs.find((i:WorkflowInputRecord) => {
                     return (i.uuid === input.uuid)
                   });

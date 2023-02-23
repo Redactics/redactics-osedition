@@ -64,6 +64,7 @@ interface IProps {
   triggerOutputOptions: any;
   deleteConstraint: any;
   hideOutputOptions: any;
+  genConstraintSummary: any;
 }
 
 interface IState {
@@ -75,7 +76,6 @@ class WorkflowExport extends React.Component<IProps, IState> {
     super(props);
 
     this.displayConstraintOptions = this.displayConstraintOptions.bind(this);
-    this.genName = this.genName.bind(this);
   }
 
   displayConstraintOptions() {
@@ -172,16 +172,9 @@ class WorkflowExport extends React.Component<IProps, IState> {
   }
 
   displayConstraintsTable() {
-    // let constraints:any = [];
     let constraints:any = this.props.exportTableDataConfig.filter((config:any) => {
       return config.numDays
     });
-    // for (const config in this.props.exportTableDataConfig) {
-    //   if (this.props.exportTableDataConfig[config] && this.props.exportTableDataConfig[config].numDays) {
-    //     this.props.exportTableDataConfig[config].table = config; // attach table name for convenience
-    //     constraints.push(this.props.exportTableDataConfig[config])
-    //   }
-    // }
 
     if (!constraints.length) {
       return (
@@ -222,7 +215,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
               return (
                 <TableRow key={tableName}>
                   <TableCell>{tableName}</TableCell>
-                  <TableCell>{this.genName(tableName)}</TableCell>
+                  <TableCell>{this.props.genConstraintSummary(tableName)}</TableCell>
                   <TableCell>
                     <Button color="secondary" size="small" variant="contained" onClick={(event) => this.props.triggerOutputOptions(event, tableName)}>
                       <EditIcon />&nbsp;Edit
@@ -239,31 +232,6 @@ class WorkflowExport extends React.Component<IProps, IState> {
         </Box>
       )
     }
-  }
-
-  genName(table:string) {
-    let display:string = "";
-    let scheme:string = "";
-    let findConfig = this.props.exportTableDataConfig.find((config:any) => {
-      return config.table === table;
-    });
-    if (findConfig) {
-      switch (findConfig.sampleFields) {
-        case 'createdAndUpdated':
-        scheme = "rows created and updated";
-        break;
-
-        case 'created':
-        scheme = "rows created";
-        break;
-
-        case 'updated':
-        scheme = "rows updated";
-        break;
-      }
-      display = scheme + " in the last " + findConfig.numDays + " days";
-    }
-    return display;
   }
 
   render() {
@@ -293,7 +261,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             aria-labelledby="dialog-title"
             aria-describedby="dialog-description"
           >
-            <DialogTitle id="dialog-title">Table Options: {this.props.currentDatabaseTable}</DialogTitle>
+            <DialogTitle id="dialog-title">Data Sampling Constraint</DialogTitle>
             <DialogContent>
               <DialogContentText id="dialog-description">
                 {this.displayConstraintOptions()}
