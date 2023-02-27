@@ -23,6 +23,6 @@ services:
       DOCKER_REGISTRY_URL: http://localhost:5000
       CHARTMUSEUM_URL: http://localhost:8090
       WEB_URL: http://localhost:8000
-      LATEST_CHART_VERSION: 3.0.0
+      LATEST_CHART_VERSION: 3.1.0
     links:
       - postgres_test

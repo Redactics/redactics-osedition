@@ -132,6 +132,7 @@ export interface WorkflowRecord extends WorkflowUpdate {
   datafeeds: DataFeed[];
   allDatabaseTables: string[];
   agentName: string;
+  exportTableDataConfig: any;
 }
 
 export interface InputRecord {
@@ -158,6 +159,7 @@ export interface WorkflowInputRecord {
   inputName: string;
   enabled: boolean;
   tables: string[];
+  tableSelection: string;
 }
 
 export interface DataFeed {

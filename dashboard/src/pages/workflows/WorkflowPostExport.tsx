@@ -221,37 +221,56 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
   outputTable() {
     if (this.props.dataFeeds && this.props.dataFeeds.length) {
       return (
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Data Feed</TableCell>
-              <TableCell>Summary</TableCell>
-              <TableCell></TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {this.props.dataFeeds.map((df:DataFeed) => (
-              <TableRow key={df.uuid}>
-                <TableCell>{this.dataFeedName(df.dataFeed)}</TableCell>
-                <TableCell>{this.dataFeedSummary(df)}</TableCell>
-                <NWTableCell>
-                  <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditDataFeed(df)}>
-                    <EditIcon/>&nbsp;Edit
-                  </Button>&nbsp;
-                  <Button variant="contained" color="default" size="small" onClick={() => this.props.deleteDataFeed(df)}>
-                    <DeleteIcon />&nbsp;Delete
-                  </Button>
-                </NWTableCell>
+        <Box>
+          <Grid
+            justify="space-between"
+            container
+            spacing={10}
+          >
+            <Grid item></Grid>
+            <Grid item mb={6}>
+              <Button variant="contained" color="secondary" size="small" onClick={this.props.addDataFeed}>
+                <AddIcon />&nbsp;
+                Add Data Feed
+              </Button>
+            </Grid>
+          </Grid>
+
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Data Feed</TableCell>
+                <TableCell>Summary</TableCell>
+                <TableCell></TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {this.props.dataFeeds.map((df:DataFeed) => (
+                <TableRow key={df.uuid}>
+                  <TableCell>{this.dataFeedName(df.dataFeed)}</TableCell>
+                  <TableCell>{this.dataFeedSummary(df)}</TableCell>
+                  <NWTableCell>
+                    <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditDataFeed(df)}>
+                      <EditIcon/>&nbsp;Edit
+                    </Button>&nbsp;
+                    <Button variant="contained" color="default" size="small" onClick={() => this.props.deleteDataFeed(df)}>
+                      <DeleteIcon />&nbsp;Delete
+                    </Button>
+                  </NWTableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Box>
       )
     }
     else {
       return (
         <Box>
-          Click on <b>Add Data Feed</b> to define your first data feed.
+          <Button variant="contained" color="secondary" size="small" onClick={this.props.addDataFeed}>
+            <AddIcon />&nbsp;
+            Add Data Feed
+          </Button>
         </Box>
       )
     }
@@ -795,22 +814,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
           </Grid>
 
           <Box mt={8}>
-            <Grid
-              justify="space-between"
-              container
-              spacing={10}
-            >
-              <Grid item></Grid>
-              <Grid item mb={6}>
-                <div>
-                  <Button variant="contained" color="secondary" size="small" onClick={this.props.addDataFeed}>
-                    <AddIcon />&nbsp;
-                    Add Data Feed
-                  </Button>
-                </div>
-              </Grid>
-            </Grid>
-
             {this.outputTable()}
           </Box>
         </Box>
