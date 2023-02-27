@@ -1158,7 +1158,9 @@ class Workflow extends React.Component<IProps, IState> {
 
       // update listing of tables
       input.tables.forEach((table:string) => {
-        state.allDatabaseTables.push(state.input.inputName + ": " + table);
+        if (!table.includes('*')) {
+          state.allDatabaseTables.push(state.input.inputName + ": " + table);
+        }
       });
 
       if (input.uuid === this.state.input.uuid) {
@@ -1169,7 +1171,7 @@ class Workflow extends React.Component<IProps, IState> {
       return input;
     });
 
-    // remove maskingrules that contain rules for tables that no longer exist
+    // remove maskingrules that contain rules for tables that no longer exist and wildcards
     state.maskingRuleValues = state.maskingRuleValues.filter((rule:RedactRule) => {
       return (state.allDatabaseTables.includes(rule.databaseTable)) ? true : false;
     })
