@@ -313,7 +313,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 <TableRow>
                   <TableCell>Enabled</TableCell>
                   <TableCell>Name</TableCell>
-                  <TableCell>Tables</TableCell>
+                  <TableCell>Tables to Extract</TableCell>
                   <TableCell></TableCell>
                 </TableRow>
               </TableHead>
