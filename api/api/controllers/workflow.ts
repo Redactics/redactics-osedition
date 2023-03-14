@@ -258,13 +258,13 @@ export async function getWorkflow(req: Request, res: Response) {
       });
 
       if ((workflow.dataValues.workflowType === 'ERL' && i.dataValues.tables && i.dataValues.tables.length
-        && i.dataValues.Input && !i.dataValues.Input.dataValues.disabled) || 
-        workflow.dataValues.workflowType !== 'ERL') {
+        && i.dataValues.Input && !i.dataValues.Input.dataValues.disabled)
+        || workflow.dataValues.workflowType !== 'ERL') {
         // skip inputs with no tables to export
         inputs.push({
           id: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,
-          tableSelection : i.dataValues.tableSelection,
+          tableSelection: i.dataValues.tableSelection,
           fullcopies: fullCopies,
         });
       }
