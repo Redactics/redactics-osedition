@@ -107,6 +107,7 @@ export async function getWorkflows(req: Request, res: Response) {
       return p.dataValues;
     });
 
+    const allDatabaseTables:string[] = [];
     workflows = workflows.map((db: any) => {
       const d = db;
       const { agentId } = d.dataValues;
@@ -126,12 +127,16 @@ export async function getWorkflows(req: Request, res: Response) {
         } else {
           r.dataValues.rule = redactrules[r.dataValues.ruleId];
         }
+
+        if (!allDatabaseTables.includes(r.dataValues.databaseTable)) {
+          allDatabaseTables.push(r.dataValues.databaseTable);
+        }
+
         delete r.dataValues.ruleId;
         delete r.dataValues.presetId;
 
         return r.dataValues;
       });
-      const allDatabaseTables:string[] = [];
       d.dataValues.inputs = d.dataValues.inputs.filter((input:any) => {
         const findInput = allInputs.find((ai:any) => (
           ai.dataValues.id === input.dataValues.inputId
@@ -144,11 +149,7 @@ export async function getWorkflows(req: Request, res: Response) {
           wi.dataValues.inputName = inputData.dataValues.inputName;
           wi.dataValues.uuid = inputData.dataValues.uuid;
         }
-        if (wi.dataValues.tables && wi.dataValues.tables.length) {
-          wi.dataValues.tables.forEach((t:string) => {
-            allDatabaseTables.push(`${wi.dataValues.inputName}: ${t}`);
-          });
-        } else {
+        if (!wi.dataValues.tables || !wi.dataValues.tables.length) {
           wi.dataValues.tables = [];
         }
         delete wi.dataValues.id;
@@ -372,6 +373,23 @@ export async function getWorkflow(req: Request, res: Response) {
       };
     });
 
+    const exportTableDataConfig:any = [];
+    if (Object.keys(workflow.dataValues.exportTableDataConfig).length) {
+      Object.keys(workflow.dataValues.exportTableDataConfig).forEach((idx:any) => {
+        const table:string = Object.keys(workflow.dataValues.exportTableDataConfig[idx])[0];
+        const config:any = workflow.dataValues.exportTableDataConfig[idx][table];
+        const configObj:any = {};
+        configObj[table] = {
+          table,
+          numDays: config.numDays,
+          sampleFields: config.sampleFields,
+          createdAtField: config.createdAtField,
+          updatedAtField: config.updatedAtField,
+        };
+        exportTableDataConfig.push(configObj);
+      });
+    }
+
     const wkConfig:any = {
       id: workflow.dataValues.uuid,
       schedule: workflow.dataValues.schedule,
@@ -380,7 +398,7 @@ export async function getWorkflow(req: Request, res: Response) {
       redactRules,
       userSearchEmailField: workflow.dataValues.userSearchEmailField,
       userSearchEmailRelations: workflow.dataValues.userSearchEmailRelations,
-      export: workflow.dataValues.exportTableDataConfig,
+      export: exportTableDataConfig,
       dataFeeds: [dataFeeds],
       inputs,
     };
@@ -489,13 +507,10 @@ async function saveRedactRules(workflow:any, req: Request) {
       presetId = null;
     }
 
-    // determine table based on databaseTable, table record is for forget user feature
-    const databaseTableArr = r.databaseTable.split(': ');
-    const table = databaseTableArr[(databaseTableArr.length - 1)];
     const redactRule:RedactRuleRecord = {
       workflowId: workflow.dataValues.id,
       databaseTable: r.databaseTable,
-      table,
+      table: (`${r.schema}.${r.table}`),
       column: r.column,
       ruleId,
       presetId,
@@ -674,11 +689,10 @@ async function saveERL(req: Request, res: Response) {
             // ensure bucket URL is prefaced with s3 protocol
             df.dataFeedConfig.S3UploadBucket = `s3://${df.dataFeedConfig.S3UploadBucket}`;
           }
-          const uploadFiles = df.dataFeedConfig.uploadFileChecked.join(',');
           df.dataFeedConfig.image = 'redactics/postexport-s3upload';
-          df.dataFeedConfig.tag = '1.0.1';
+          df.dataFeedConfig.tag = '1.1.0';
           df.dataFeedConfig.shell = '/bin/bash';
-          df.dataFeedConfig.command = `/bin/upload-to-s3 ${workflow.dataValues.uuid} ${uploadFiles} ${df.dataFeedConfig.S3UploadBucket}`;
+          df.dataFeedConfig.command = `/bin/upload-to-s3 ${workflow.dataValues.uuid} ${df.dataFeedConfig.S3UploadBucket}`;
           df.dataFeedConfig.args = '';
           df.feedSecrets = [{
             secretKey: 'credentials', secretName: 'aws', secretPath: '/root/.aws', secretType: 'volume',
