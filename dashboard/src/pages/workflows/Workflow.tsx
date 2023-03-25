@@ -193,8 +193,6 @@ class Workflow extends React.Component<IProps, IState> {
     this.cancelWorkflowConfirmation = this.cancelWorkflowConfirmation.bind(this);
     this.clipboardCopy = this.clipboardCopy.bind(this);
     this.handleSnackbarClose = this.handleSnackbarClose.bind(this);
-    this.markAddToS3UploadList = this.markAddToS3UploadList.bind(this);
-    this.addAllToS3UploadList = this.addAllToS3UploadList.bind(this);
     this.getExportFileNames = this.getExportFileNames.bind(this);
     this.saveInputChanges = this.saveInputChanges.bind(this);
     this.triggerEditInputDialog = this.triggerEditInputDialog.bind(this);
@@ -218,7 +216,6 @@ class Workflow extends React.Component<IProps, IState> {
     this.deleteParameterValue = this.deleteParameterValue.bind(this);
     this.handleDataFeedBack = this.handleDataFeedBack.bind(this);
     this.handleDataFeedCancel = this.handleDataFeedCancel.bind(this);
-    this.getS3UploadFileNames = this.getS3UploadFileNames.bind(this);
     this.handleDataFeedOptions = this.handleDataFeedOptions.bind(this);
     this.saveDataFeedChanges = this.saveDataFeedChanges.bind(this);
     this.triggerEditDataFeed = this.triggerEditDataFeed.bind(this);
@@ -231,9 +228,13 @@ class Workflow extends React.Component<IProps, IState> {
     const maskingRuleValues:RedactRule[] = [];
     if (this.props.workflow.redactrules && this.props.workflow.redactrules.length) {
       this.props.workflow.redactrules.forEach((rule:RedactRule) => {
+        let t = rule.table.split('.');
+        let schema = t.length ? t[0] : 'public';
+        let table = t.length ? t[1] : '';
         maskingRuleValues.push({
           key: rule.uuid,
-          table: rule.table,
+          schema,
+          table,
           databaseTable: rule.databaseTable,
           column: rule.column,
           rule: rule.rule,
@@ -310,9 +311,6 @@ class Workflow extends React.Component<IProps, IState> {
         uuid: "",
         dataFeed: "",
         dataFeedConfig: {
-          uploadFileChecked: [],
-          addAllS3Uploads: false,
-          s3Bucket: "",
           postUpdateKeyValues: []
         },
         feedSecrets: [],
@@ -343,19 +341,21 @@ class Workflow extends React.Component<IProps, IState> {
     };
 
     if (Object.keys(this.props.workflow.exportTableDataConfig).length) {
-      for (const config in this.props.workflow.exportTableDataConfig) {
+      for (const idx in this.props.workflow.exportTableDataConfig) {
+        let config:any = Object.values(this.props.workflow.exportTableDataConfig[idx])[0];
         state.exportTableDataConfig.push({
           table: config,
-          numDays: this.props.workflow.exportTableDataConfig[config].numDays,
-          sampleFields: this.props.workflow.exportTableDataConfig[config].sampleFields,
-          createdAtField: this.props.workflow.exportTableDataConfig[config].createdAtField,
-          updatedAtField: this.props.workflow.exportTableDataConfig[config].updatedAtField,
+          numDays: config.numDays,
+          sampleFields: config.sampleFields,
+          createdAtField: config.createdAtField,
+          updatedAtField: config.updatedAtField,
         })
       }
     }
 
     this.props.redactrulesets.forEach((rule:RedactRuleSet) => {
       state.maskingRules.push({
+        schema: '',
         table: '',
         databaseTable: '',
         column: '',
@@ -369,6 +369,7 @@ class Workflow extends React.Component<IProps, IState> {
       this.props.presets.forEach((preset:RedactRulePreset) => {
         if (!preset.isDefault) {
           state.maskingRules.push({
+            schema: '',
             table: '',
             databaseTable: '',
             column: '',
@@ -425,6 +426,10 @@ class Workflow extends React.Component<IProps, IState> {
     maskingRuleValues.map((row:RedactRule) => {
       if (row.key === key && event.target.name === 'databaseTable') {
         values[0].databaseTable = event.target.value;
+      } else if (row.key === key && event.target.name === 'schema') {
+        values[0].schema = event.target.value;
+      } else if (row.key === key && event.target.name === 'table') {
+        values[0].table = event.target.value;
       } else if (row.key === key && event.target.name === 'column') {
         values[0].column = event.target.value;
       } else if (row.key === key && event.target.name === 'rule') {
@@ -462,11 +467,13 @@ class Workflow extends React.Component<IProps, IState> {
     });
 
     // prep exportTableDataConfig
-    let exportTableDataConfig:any = {};
+    let exportTableDataConfig:any = [];
     this.state.exportTableDataConfig.forEach((c:any) => {
       const config = c;
       delete config.errors;
-      exportTableDataConfig[config.table] = config;
+      let exportTableDataConfigObj:any = {};
+      exportTableDataConfigObj[config.table] = config;
+      exportTableDataConfig.push(exportTableDataConfigObj)
     });
 
     const payload:WorkflowUpdate = {
@@ -621,10 +628,10 @@ class Workflow extends React.Component<IProps, IState> {
     const validFields = this.state.maskingRuleValues.filter((rule:RedactRule) => {
       let missingFields:number = 0;
 
-      if (rules.includes(`${rule.databaseTable}.${rule.column}`)) {
+      if (rules.includes(`${rule.databaseTable}.${rule.table}.${rule.column}`)) {
         dupeRedactRuleFound = true;
       } else {
-        rules.push(`${rule.databaseTable}.${rule.column}`);
+        rules.push(`${rule.databaseTable}.${rule.table}.${rule.column}`);
       }
 
       if (!rule.databaseTable) { missingFields++; }
@@ -701,6 +708,7 @@ class Workflow extends React.Component<IProps, IState> {
     maskingRuleValues.push({
       key: `new${newRuleKey}`,
       databaseTable: '',
+      schema: '',
       table: '',
       column: '',
       rule: '',
@@ -894,26 +902,6 @@ class Workflow extends React.Component<IProps, IState> {
     );
   }
 
-  markAddToS3UploadList(event:any, fileName:string) {
-    const state:IState = this.state;
-
-    if (event.target.checked) {
-      // add to list
-      state.dataFeed.dataFeedConfig.uploadFileChecked.push(fileName);
-
-      if (state.dataFeed.dataFeedConfig.uploadFileChecked.length === this.getS3UploadFileNames().length) {
-        state.dataFeed.dataFeedConfig.addAllS3Uploads = true;
-      }
-    } else {
-      state.dataFeed.dataFeedConfig.uploadFileChecked = state.dataFeed.dataFeedConfig.uploadFileChecked.filter(
-        (f:string) => ((f !== fileName)),
-      );
-      state.dataFeed.dataFeedConfig.addAllS3Uploads = false;
-    }
-
-    this.setState(state);
-  }
-
   getExportFileNames() {
     const filenames:string[] = [];
     this.state.exportTableDataConfig.forEach((t:string) => {
@@ -921,37 +909,6 @@ class Workflow extends React.Component<IProps, IState> {
     });
 
     return filenames;
-  }
-
-  getS3UploadFileNames() {
-    const filenames:string[] = [];
-    if (!this.state.allDatabaseTables) { return []; }
-    this.state.allDatabaseTables.forEach((dt:string) => {
-      const tableArr = dt.split(": ");
-      const table = tableArr[(tableArr.length - 1)];
-      filenames.push(`table-${table}.csv`);
-    });
-
-    return filenames;
-  }
-
-  addAllToS3UploadList(event:any) {
-    const state:IState = this.state;
-
-    if (event.target.checked) {
-      // check all
-      state.dataFeed.dataFeedConfig.uploadFileChecked = [];
-      this.getS3UploadFileNames().forEach((f) => {
-        state.dataFeed.dataFeedConfig.uploadFileChecked.push(f);
-      });
-
-      state.dataFeed.dataFeedConfig.addAllS3Uploads = true;
-    } else {
-      state.dataFeed.dataFeedConfig.uploadFileChecked = [];
-      state.dataFeed.dataFeedConfig.addAllS3Uploads = false;
-    }
-
-    this.setState(state);
   }
 
   handleTableOutputChanges(event:any, table:string) {
@@ -1093,23 +1050,11 @@ class Workflow extends React.Component<IProps, IState> {
       return (i.uuid === input.uuid) ? false : true
     });
 
-     // update listing of tables
-    state.allDatabaseTables = [];
-    state.inputs.forEach((input:WorkflowInputRecord) => {
-      if (!input.tables) {
-        input.tables = [];
-      }
-      input.tables.forEach((table:string) => {
-        state.allDatabaseTables.push(state.input.inputName + ": " + table);
-      });
-    })
-
     const missingInput = this.missingInput();
 
     this.setState({
       transformExpanded: (missingInput) ? false : true,
       outputExpanded: (missingInput) ? false : true,
-      allDatabaseTables: state.allDatabaseTables,
       inputs: state.inputs
     });
   }
@@ -1150,18 +1095,10 @@ class Workflow extends React.Component<IProps, IState> {
     }
 
     // find and update existing input in inputs listing
-    state.allDatabaseTables = [];
     inputs = inputs.map((input) => {
       if (!input.tables) {
         input.tables = [];
       }
-
-      // update listing of tables
-      input.tables.forEach((table:string) => {
-        if (!table.includes('*')) {
-          state.allDatabaseTables.push(state.input.inputName + ": " + table);
-        }
-      });
 
       if (input.uuid === this.state.input.uuid) {
         // transfer current input into inputs array
@@ -1171,10 +1108,6 @@ class Workflow extends React.Component<IProps, IState> {
       return input;
     });
 
-    // remove maskingrules that contain rules for tables that no longer exist and wildcards
-    state.maskingRuleValues = state.maskingRuleValues.filter((rule:RedactRule) => {
-      return (state.allDatabaseTables.includes(rule.databaseTable)) ? true : false;
-    })
     state.numMaskingRules = state.maskingRuleValues.length;
 
     state.errors.JSX = null;
@@ -1184,7 +1117,6 @@ class Workflow extends React.Component<IProps, IState> {
     if (this.state.input.uuid.match(/^new/)) {
       this.setState({
         tableOutputOptions: state.tableOutputOptions,
-        allDatabaseTables: state.allDatabaseTables,
         errors: state.errors,
         inputs: inputs,
         editInputDialog: false,
@@ -1196,7 +1128,6 @@ class Workflow extends React.Component<IProps, IState> {
       this.setState({
         maskingRuleValues: state.maskingRuleValues,
         numMaskingRules: state.numMaskingRules,
-        allDatabaseTables: state.allDatabaseTables,
         errors: state.errors,
         inputs: inputs,
         editInputDialog: false,
@@ -1528,8 +1459,6 @@ class Workflow extends React.Component<IProps, IState> {
 
       case 's3upload':
       state.dataFeed.dataFeedConfig = {
-        uploadFileChecked: [],
-        addAllS3Uploads: false,
         postUpdateKeyValues: [],
       }
       break;
@@ -1801,7 +1730,6 @@ class Workflow extends React.Component<IProps, IState> {
                     handleDataFeed={this.handleDataFeed}
                     handleDataFeedBack={this.handleDataFeedBack}
                     handleDataFeedCancel={this.handleDataFeedCancel}
-                    getS3UploadFileNames={this.getS3UploadFileNames}
                     handleDataFeedOptions={this.handleDataFeedOptions}
                     saveDataFeedChanges={this.saveDataFeedChanges}
                     triggerEditDataFeed={this.triggerEditDataFeed}
@@ -1810,9 +1738,6 @@ class Workflow extends React.Component<IProps, IState> {
                     handleCustomSecret={this.handleCustomSecret}
                     addSecret={this.addSecret}
                     handleDeleteSecret={this.handleDeleteSecret}
-                    markAddToS3UploadList={this.markAddToS3UploadList}
-                    addAllToS3UploadList={this.addAllToS3UploadList}
-                    addAllS3Uploads={this.state.addAllS3Uploads}
                     agentNamespace={this.state.agentNamespace}
                   />
                 </ExpansionPanelDetails>

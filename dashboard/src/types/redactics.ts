@@ -30,6 +30,7 @@ export interface RedactRuleSet {
 
 export interface RedactRule {
   uuid?: string;
+  schema: string;
   table: string;
   databaseTable: string;
   column: string;

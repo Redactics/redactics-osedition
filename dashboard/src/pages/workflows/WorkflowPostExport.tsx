@@ -106,9 +106,6 @@ interface IProps {
   inputs: WorkflowInputRecord[];
   allInputs: InputRecord[];
   handleDeleteSecret: any;
-  markAddToS3UploadList: any;
-  addAllToS3UploadList: any;
-  addAllS3Uploads: boolean;
   agentNamespace?: string;
   dataFeeds: DataFeed[];
   dataFeed: DataFeed;
@@ -121,7 +118,6 @@ interface IProps {
   handleDataFeed: any;
   handleDataFeedBack: any;
   handleDataFeedCancel: any;
-  getS3UploadFileNames: any;
   handleDataFeedOptions: any;
   saveDataFeedChanges: any;
   triggerEditDataFeed: any;
@@ -200,11 +196,7 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
       break;
       
       case 's3upload':
-      dataFeedSummary = "Upload ";
-      dataFeedSummary += (df.dataFeedConfig.uploadFileChecked.length === this.props.getS3UploadFileNames().length)
-        ? "all" : df.dataFeedConfig.uploadFileChecked.length;
-      dataFeedSummary += (df.dataFeedConfig.uploadFileChecked.length === 1) ? " table" : " tables";
-      dataFeedSummary += " to " + uploadBucket;
+      dataFeedSummary = "Upload tables to " + uploadBucket;
       break;
 
       case 'custom':
@@ -512,42 +504,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                   </Typography>
 
                   <Box mt={8}>
-                    <Typography variant="h6" gutterBottom>
-                      Data Files to Upload
-                    </Typography>
-
-                    <Grid container>
-                      <Grid item xs={8}>
-                        <Box mt={8}>
-                          <Paper variant="outlined">
-                            <Box mt={4}>
-                              <Table>
-                                <TableHead>
-                                  <TableRow>
-                                    <TableCell><Checkbox onClick={this.props.addAllToS3UploadList} checked={this.props.dataFeed.dataFeedConfig.addAllS3Uploads} /> Add All Files</TableCell>
-                                    <TableCell align="left">File</TableCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                {this.props.getS3UploadFileNames().map((f:string) => (
-                                  <TableRow key={f}>
-                                    <TableCell component="th" scope="row">
-                                      <Checkbox onClick={(event) => this.props.markAddToS3UploadList(event, f)} checked={!!(this.props.dataFeed.dataFeedConfig.uploadFileChecked && 
-                                        this.props.dataFeed.dataFeedConfig.uploadFileChecked.includes(f))} />
-                                    </TableCell>
-                                    <TableCell align="left">{f}</TableCell>
-                                  </TableRow>
-                                ))}
-                                </TableBody>
-                              </Table>
-                            </Box>
-                          </Paper>
-                        </Box>
-                      </Grid>
-                    </Grid>
-                  </Box>
-
-                  <Box mt={8}>
                     <FormControl fullWidth variant="outlined">
                       <MedTextField
                         name="S3UploadBucket"
@@ -590,7 +546,7 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                       Custom Container/Plugin Configuration
                     </Typography>
 
-                    <p>The filenames that will be exported are as follows: <b>{this.props.getS3UploadFileNames().join(', ')}</b>. Some documentation for developing your own custom container/plugin can be found on the <Link href="/developers" target="_blank">developers page</Link>.
+                    <p>Some documentation for developing your own custom container/plugin can be found on the <Link href="/developers" target="_blank">developers page</Link>.
                     </p>
                   </Box>
 

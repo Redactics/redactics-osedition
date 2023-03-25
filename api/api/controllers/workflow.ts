@@ -128,10 +128,6 @@ export async function getWorkflows(req: Request, res: Response) {
           r.dataValues.rule = redactrules[r.dataValues.ruleId];
         }
 
-        if (!allDatabaseTables.includes(r.dataValues.databaseTable)) {
-          allDatabaseTables.push(r.dataValues.databaseTable);
-        }
-
         delete r.dataValues.ruleId;
         delete r.dataValues.presetId;
 
@@ -148,6 +144,9 @@ export async function getWorkflows(req: Request, res: Response) {
         if (inputData) {
           wi.dataValues.inputName = inputData.dataValues.inputName;
           wi.dataValues.uuid = inputData.dataValues.uuid;
+          if (!allDatabaseTables.includes(inputData.dataValues.inputName)) {
+            allDatabaseTables.push(inputData.dataValues.inputName);
+          }
         }
         if (!wi.dataValues.tables || !wi.dataValues.tables.length) {
           wi.dataValues.tables = [];

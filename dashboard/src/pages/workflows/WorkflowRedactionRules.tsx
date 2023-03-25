@@ -34,12 +34,12 @@ const TextFieldSpacing = styled(MuiTextField)(spacing);
 const FormControlSpacing = styled(MuiFormControl)(spacing);
 
 const FormControl = styled(FormControlSpacing)`
-  min-width: 200px;
-  max-width: 200px;
+  min-width: 100px;
+  max-width: 100px;
 `;
 
 const TextField = styled(TextFieldSpacing)`
-  width: 200px;
+  width: 100px;
 `;
 
 const Select = styled(MuiSelect)(spacing);
@@ -106,7 +106,7 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                   <TableCell style={{ paddingLeft: 0 }}>
                     <FormControl variant="outlined" margin="dense">
                       <InputLabel>
-                        Input and Table Name
+                        Input
                       </InputLabel>
                       <Select
                         value={row.databaseTable}
@@ -126,7 +126,13 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                     </FormControl>
                   </TableCell>
                   <TableCell>
-                    <TextField name="column" defaultValue={row.column} label="Column Name" variant="outlined" onChange={(event) => this.props.handleRuleChange(row.key, event)} margin="dense" />
+                    <TextField name="schema" defaultValue={row.schema} label="Schema" variant="outlined" onChange={(event) => this.props.handleRuleChange(row.key, event)} margin="dense" />
+                  </TableCell>
+                  <TableCell>
+                    <TextField name="table" defaultValue={row.table} label="Table" variant="outlined" onChange={(event) => this.props.handleRuleChange(row.key, event)} margin="dense" />
+                  </TableCell>
+                  <TableCell>
+                    <TextField name="column" defaultValue={row.column} label="Column" variant="outlined" onChange={(event) => this.props.handleRuleChange(row.key, event)} margin="dense" />
                   </TableCell>
                   <TableCell>
                     <FormControl variant="outlined" margin="dense">
