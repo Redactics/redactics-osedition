@@ -72,8 +72,8 @@ else:
 
 default_args = {
     #'depends_on_past': False,
-    'retries': 0 if ENV == "development" else 3,
-    'retry_delay': timedelta(minutes=2),
+    'retries': 0 if ENV == "development" else 30,
+    'retry_delay': timedelta(seconds=15),
     'email_on_failure': False
     # 'queue': 'bash_queue',
     # 'pool': 'backfill',
@@ -104,17 +104,20 @@ outputs = {}
 dataFeeds = {}
 
 for rules in wf_config["redactRules"]:
-    for table, fields in rules.items():
+    for t, fields in rules.items():
+        schema = t.split('.')[0]
+        table = t.split('.')[1]
+
         for field in fields:
             for fieldName, params in field.items():
                 if params["rule"] == "redact_email":
-                    security_labels.append(redact_email(table, fieldName, params=params))
+                    security_labels.append(redact_email("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
                 elif params["rule"] == "destruction":
-                    security_labels.append(destruction(table, fieldName))
+                    security_labels.append(destruction("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\""))
                 elif params["rule"] == "replacement":
-                    security_labels.append(replacement(table, fieldName, params=params))
+                    security_labels.append(replacement("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
                 elif params["rule"] == "random_string":
-                    security_labels.append(random_string(table, fieldName, params=params))
+                    security_labels.append(random_string("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
 if not security_labels:
     # no-op
     security_labels.append('SELECT 1')
@@ -185,36 +188,26 @@ def get_digital_twin():
                                     host=host, schema=schema), connect_args=extra, echo=False)
     return connection
 
-redactics_tmp = get_redactics_tmp()
-if digitalTwinEnabled:
-    digital_twin = get_digital_twin()
-
 def db_init():
     # check that extension has been inited
-    connection = redactics_tmp
+    connection = get_redactics_tmp()
     results = connection.execute("SELECT oid FROM pg_extension WHERE extname='anon'").scalar()
     return False if results is None else True
 
-source_dbs = {}
-initial_copies = []
 initial_copy_tasks = 0
-delta_copies = []
 delta_copy_tasks = 0
-copy_status = {}
 redactics_db_init = db_init()
 totalTasks = 0
-input_tables = {}
 
-def set_input_tables(input):
+def set_input_tables(input, source_db, context):
     # collect tables from workflow config, supporting wildcards
     found_tables = []
     append_sql = []
     schema_sql = "table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'"
     table_sql = ""
-    if input["tableSelection"] == "none":
-        tables = []
-    elif input["tableSelection"] == "all":
-        tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'").fetchall()
+    tables = []        
+    if input["tableSelection"] == "all":
+        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'").fetchall()
     elif input["tableSelection"] == "specific" or input["tableSelection"] == "allExclude":
         for t in input["tables"]:
             schema = t.split('.')[0]
@@ -235,92 +228,129 @@ def set_input_tables(input):
             else:
                 table_sql += append_sql[idx]
             idx+=1
-        
+
         print("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql)
-        tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql).fetchall()
+        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql).fetchall()
     if len(tables):
         for idx, t in enumerate(tables):
                 found_tables.append(t["table_schema"] + "." + t["table_name"])
     print("FOUND TABLES")
     print(list(dict.fromkeys(found_tables)))
-    input_tables[input["id"]] = list(dict.fromkeys(found_tables))
+    Variable.set(dag_name + "-erl-input-tables-" + input["id"] + "-" + context["run_id"], json.dumps(list(dict.fromkeys(found_tables))))
+    return list(dict.fromkeys(found_tables))
 
-for input in wf_config["inputs"]:
-    source_dbs[input["id"]] = get_source_db(input["id"])
-    set_input_tables(input)
-    for t in input_tables[input["id"]]:
-        schema = t.split('.')[0]
-        table = t.split('.')[1]
-        schema_diff = False
+def set_run_plan(**context):
+    delta_copies = []
+    initial_copies = []
+    copy_status = {}
+    for input in wf_config["inputs"]:
+        source_db = get_source_db(input["id"])
+        #Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
+        input_tables = set_input_tables(input, source_db, context)
+        for t in input_tables:
+            schema = t.split('.')[0]
+            table = t.split('.')[1]
+            schema_diff = False
 
-        source_tables = source_dbs[input["id"]].execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
-        tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
-        if digitalTwinEnabled:
-            public_schema = MetaData(schema=schema)
-            digital_twin = get_digital_twin()
-            twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
-            if len(twin_tables):
-                data = Table(table, public_schema, autoload=True, autoload_with=digital_twin)
-                twin_primary_key = data.primary_key.columns.values()[0].name
-
-        if len(source_tables) != len(tmp_tables):
-            # column has been added or removed
-            schema_diff = True
-        elif digitalTwinEnabled and len(tmp_tables) != len(twin_tables):
-            # column has been added or removed
-            schema_diff = True
-        else:
-            for idx, st in enumerate(source_tables):
-                if len(tmp_tables) > 0 and idx <= len(tmp_tables):
-                    if (st["column_name"] != tmp_tables[idx]["column_name"] or
-                        st["ordinal_position"] != tmp_tables[idx]["ordinal_position"] or
-                        st["column_default"] != tmp_tables[idx]["column_default"] or
-                        st["is_nullable"] != tmp_tables[idx]["is_nullable"] or
-                        st["data_type"] != tmp_tables[idx]["data_type"] or
-                        st["udt_name"] != tmp_tables[idx]["udt_name"]):
-                        schema_diff = True    
-                else:
-                    # destination tables haven't been created yet
-                    schema_diff = True
-
+            source_tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
+            tmp_tables = get_redactics_tmp().execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
             if digitalTwinEnabled:
-                # mismatching digital twin schema should prompt table regeneration 
-                for idx, st in enumerate(tmp_tables):
-                    if len(twin_tables) > 0 and idx <= len(twin_tables):
-                        if (st["column_name"] != twin_tables[idx]["column_name"] or
-                            st["ordinal_position"] != twin_tables[idx]["ordinal_position"] or
-                            st["column_default"] != twin_tables[idx]["column_default"] or
-                            st["is_nullable"] != twin_tables[idx]["is_nullable"] or
-                            st["data_type"] != twin_tables[idx]["data_type"] or
-                            st["udt_name"] != twin_tables[idx]["udt_name"]) and (twin_tables[idx]["column_name"] != twin_primary_key):
+                public_schema = MetaData(schema=schema)
+                digital_twin = get_digital_twin()
+                twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
+                if len(twin_tables):
+                    data = Table(table, public_schema, autoload=True, autoload_with=digital_twin)
+                    twin_primary_key = data.primary_key.columns.values()[0].name
+
+            if len(source_tables) != len(tmp_tables):
+                # column has been added or removed
+                schema_diff = True
+            elif digitalTwinEnabled and len(tmp_tables) != len(twin_tables):
+                # column has been added or removed
+                schema_diff = True
+            else:
+                for idx, st in enumerate(source_tables):
+                    if len(tmp_tables) > 0 and idx <= len(tmp_tables):
+                        if (st["column_name"] != tmp_tables[idx]["column_name"] or
+                            st["column_default"] != tmp_tables[idx]["column_default"] or
+                            st["is_nullable"] != tmp_tables[idx]["is_nullable"] or
+                            st["data_type"] != tmp_tables[idx]["data_type"] or
+                            st["udt_name"] != tmp_tables[idx]["udt_name"]):
                             schema_diff = True    
                     else:
                         # destination tables haven't been created yet
                         schema_diff = True
 
-        if not redactics_db_init:
-            # Redactics DB not inited - first time usage
-            copy_status[(schema + "." + table)] = "init"
-            initial_copies.append(schema + "." + table)
-        elif (schema + "." + table) in input["fullcopies"] and schema_diff:
-            # table copied but schema has changed - re-copy entire table
-            copy_status[(schema + "." + table)] = "schema-change-detected"
-            initial_copies.append(schema + "." + table)
-        elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
-            # table copied but schema has not changed - eligible for delta update
-            copy_status[(schema + "." + table)] = "delta"
-            delta_copies.append(schema + "." + table)
-        else:
-            # table not copied yet, or missing delta update field
-            copy_status[(schema + "." + table)] = "missing-delta-update-field" if digitalTwinEnabled and not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
-            initial_copies.append(schema + "." + table)
+                if digitalTwinEnabled:
+                    # mismatching digital twin schema should prompt table regeneration 
+                    for idx, st in enumerate(tmp_tables):
+                        if len(twin_tables) > 0 and idx <= len(twin_tables):
+                            if (st["column_name"] != twin_tables[idx]["column_name"] or
+                                st["ordinal_position"] != twin_tables[idx]["ordinal_position"] or
+                                st["column_default"] != twin_tables[idx]["column_default"] or
+                                st["is_nullable"] != twin_tables[idx]["is_nullable"] or
+                                st["data_type"] != twin_tables[idx]["data_type"] or
+                                st["udt_name"] != twin_tables[idx]["udt_name"]) and (twin_tables[idx]["column_name"] != twin_primary_key):
+                                schema_diff = True    
+                        else:
+                            # destination tables haven't been created yet
+                            schema_diff = True
+
+            if not redactics_db_init:
+                # Redactics DB not inited - first time usage
+                copy_status[(schema + "." + table)] = "init"
+                initial_copies.append(schema + "." + table)
+            elif (schema + "." + table) in input["fullcopies"] and schema_diff:
+                # table copied but schema has changed - re-copy entire table
+                copy_status[(schema + "." + table)] = "schema-change-detected"
+                initial_copies.append(schema + "." + table)
+            elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
+                # table copied but schema has not changed - eligible for delta update
+                copy_status[(schema + "." + table)] = "delta"
+                delta_copies.append(schema + "." + table)
+            else:
+                # table not copied yet, or missing delta update field
+                copy_status[(schema + "." + table)] = "missing-delta-update-field" if digitalTwinEnabled and not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
+                initial_copies.append(schema + "." + table)
+    
+    print("COPY STATUS")
+    print(copy_status)
+    print("INITIAL")
+    print(initial_copies)
+    print("DELTA")
+    print(delta_copies)
+    print("INPUT")
+    print(input["fullcopies"])
+    return {
+        "copy_status": copy_status,
+        "initial_copies": initial_copies,
+        "delta_copies": delta_copies
+    } 
+
+def tally_dynamic_tasks(initial_copies, delta_copies):
+    global totalTasks
+    global initial_copy_tasks
+    global delta_copy_tasks
+    if not db_init():
+        totalTasks += 1
+    # dynamic tasks based on the number of initial copies
+    totalTasks += len(initial_copies) * initial_copy_tasks
+    totalTasks += len(delta_copies) * delta_copy_tasks
+    totalTasks += len(security_labels)
+
+    # sequences
+    for input in wf_config["inputs"]:
+        if len(initial_copies):
+            connection = get_source_db(input["id"])
+        for t in initial_copies:
+            schema = t.split('.')[0]
+            table = t.split('.')[1]
+
+            cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
+            # sequence dump and restore
+            totalTasks += len(cols) * 2
         
-print("COPY STATUS")
-print(copy_status)
-print("INITIAL")
-print(initial_copies)
-print("DELTA")
-print(delta_copies)
+    return totalTasks
 
 try:
     if request.status_code != 200:
@@ -333,7 +363,7 @@ try:
         schedule_interval=wf_config["schedule"] if wf_config["schedule"] != 'None' else None,
         catchup=False,
         max_active_runs=1,
-        max_active_tasks=6
+        max_active_tasks=5
     )
     def redactics_workflow():
         global totalTasks
@@ -387,7 +417,7 @@ try:
             apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postTaskEnd'
             payload = {
                 'task': context["task_instance"].task_id,
-                'totalTaskNum': Variable.get(dag_name + "-erl-totalTasks"),
+                'totalTaskNum': Variable.get(dag_name + "-erl-totalTasks-" + context["run_id"])
             }
             payloadJSON = json.dumps(payload)
             request = requests.put(apiUrl, data=payloadJSON, headers=headers)
@@ -412,11 +442,13 @@ try:
             try:
                 if request.status_code != 200:
                     raise AirflowException(response)
+                runPlan = set_run_plan(**context)
+                Variable.set(dag_name + "-erl-initialCopies-" + context["run_id"], json.dumps(runPlan["initial_copies"]))
+                Variable.set(dag_name + "-erl-deltaCopies-" + context["run_id"], json.dumps(runPlan["delta_copies"]))
+                Variable.set(dag_name + "-erl-copyStatus-" + context["run_id"], json.dumps(runPlan["copy_status"]))
+                totalTasks = tally_dynamic_tasks(runPlan["initial_copies"], runPlan["delta_copies"])
+                Variable.set(dag_name + "-erl-totalTasks-" + context["run_id"], totalTasks)
                 Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
-                Variable.set(dag_name + "-erl-initialCopies", json.dumps(initial_copies))
-                Variable.set(dag_name + "-erl-deltaCopies", json.dumps(delta_copies))
-                Variable.set(dag_name + "-erl-copyStatus", json.dumps(copy_status))
-                Variable.set(dag_name + "-erl-totalTasks", totalTasks)
             except AirflowException as err:
                 raise AirflowException(err)
 
@@ -445,9 +477,10 @@ try:
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
         def conditional_primary_key_init(**context):
-            connection = digital_twin
+            connection = get_digital_twin()
             for input in wf_config["inputs"]:
-                for t in input_tables[input["id"]]:
+                input_tables = json.loads(Variable.get(dag_name + "-erl-input-tables-" + input["id"] + "-" + context["run_id"], default_var=[]))
+                for t in input_tables:
                     schema = t.split('.')[0]
                     table = t.split('.')[1]
                     public_schema = MetaData(schema=schema)
@@ -467,7 +500,8 @@ try:
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
         def drop_fk_constraints(input_id, connection, **context):
-            for t in input_tables[input_id]:
+            input_tables = json.loads(Variable.get(dag_name + "-erl-input-tables-" + input_id + "-" + context["run_id"], default_var=[]))
+            for t in input_tables:
                 schema = t.split('.')[0]
                 table = t.split('.')[1]
 
@@ -477,34 +511,6 @@ try:
                         connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
 
         # dynamic task mapping functions
-
-        def tally_dynamic_tasks():
-            global totalTasks
-            global initial_copy_tasks
-            global delta_copy_tasks
-            if not db_init():
-                totalTasks += 1
-            # dynamic tasks based on the number of initial copies
-            totalTasks += len(initial_copies) * initial_copy_tasks
-            totalTasks += len(delta_copies) * delta_copy_tasks
-
-            # sequences
-            for input in wf_config["inputs"]:
-                connection = source_dbs[input["id"]]
-                for t in initial_copies:
-                    schema = t.split('.')[0]
-                    table = t.split('.')[1]
-
-                    cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
-                    # sequence dump and restore
-                    totalTasks += len(cols) * 2
-
-            # anon table dumps and schema dumps
-            if wf_config.get("export") and len(outputs):
-                for table, options in outputs.items():
-                    totalTasks += 2
-                
-            return totalTasks
 
         @task(on_failure_callback=post_logs)
         def conditional_extension_init(**context):
@@ -518,6 +524,7 @@ try:
         @task(on_failure_callback=post_logs)
         def gen_table_resets(input_id, schema, **context):
             tables = []
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in initial_copies:
@@ -533,31 +540,31 @@ try:
         def schema_dump_cmds(input_id, **context):
             # initial copy schema dump
             cmds = []
+            input_tables = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    connection = source_dbs[input["id"]]
-                    # always dump table schema
-                    for t in wf_config["export"]:
-                        for t in input_tables[input_id]:
-                            schema = t.split('.')[0]
-                            table = t.split('.')[1]
+                    if len(input_tables):
+                        connection = get_source_db(input["id"])
+                    for t in input_tables:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
 
-                            cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
-                            sequence_tables = []
-                            if len(cols):
-                                for col in cols:
-                                    # add schema for dependent sequences
-                                    sequence_arr = col["column_default"].split("'")
-                                    sequence_table = sequence_arr[1]
-                                    sequence_tables.append(schema + "." + table + ":" + sequence_table)
-                            cmds.append(["/scripts/schema-dump.sh", dag_name, schema + "." + table, ",".join(sequence_tables)])
-                                
+                        cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
+                        sequence_tables = []
+                        if len(cols):
+                            for col in cols:
+                                # add schema for dependent sequences
+                                sequence_arr = col["column_default"].split("'")
+                                sequence_table = sequence_arr[1]
+                                sequence_tables.append(schema + "." + table + ":" + sequence_table)
+                        cmds.append(["/scripts/schema-dump.sh", dag_name, schema + "." + table, ",".join(sequence_tables)])
             return cmds
 
         @task(on_failure_callback=post_logs)
         def schema_restore_cmds(input_id, schema, **context):
             # initial copy schema restore
             cmds = []
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in initial_copies:
@@ -571,6 +578,7 @@ try:
         def data_dump_cmds(input_id, **context):
             # initial copy data dump
             cmds = []
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in initial_copies:
@@ -583,6 +591,7 @@ try:
         def restore_data_cmds(input_id, **context):
             # initial copy data restore
             cmds = []
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in initial_copies:
@@ -593,36 +602,20 @@ try:
         @task(on_failure_callback=post_logs)
         def table_dump_cmds(outputs, input_id, **context):
             cmds = []
-            constraint_found = False
-            if wf_config.get("export") and len(outputs):
-                for table in input_tables[input_id]:
-                    if len(outputs):
-                        for outputtable, options in outputs.items():
-                            # look for table output constraints
-                            if outputtable == table:
-                                if options["fields"]:
-                                    constraint_found = True
-                                    cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, table, ",".join(options["fields"])]
-                                    
-                    if not constraint_found:
-                        cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, table, "all"]
-                    if options["numDays"] is not None:
-                        # calculate date
-                        startDate = (datetime.now() + relativedelta(days=-options["numDays"])).isoformat()
-                        cmd.extend([startDate, options["sampleFields"], options["createdAtField"], options["updatedAtField"]])
-                    cmds.append(cmd)
-            return cmds
-
-        @task(on_failure_callback=post_logs)
-        def gen_table_listing(input_id, **context):
-            # mark tables as being full copied
-            tables = []
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in initial_copies:
-                        tables.append(table)
-            return tables
-        initial_copy_tasks += 1
+                        cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, table, "all"]
+
+                        if table in outputs:
+                            options = outputs[table]
+                            if options["numDays"] is not None:
+                                # calculate date
+                                startDate = (datetime.now() + relativedelta(days=-int(options["numDays"]))).isoformat()
+                                cmd.extend([startDate, options["sampleFields"], options["createdAtField"], options["updatedAtField"]])
+                        cmds.append(cmd)
+            return cmds
 
         ### delta updates
 
@@ -630,9 +623,11 @@ try:
         def delta_dump_newrow_cmds(input_id, **context):
             # delta data dump - new rows
             cmds = []
-            connection = redactics_tmp
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
+                    if len(delta_copies):
+                        connection = get_redactics_tmp()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -642,7 +637,7 @@ try:
                         # requires a single primary key
                         primary_key = data.primary_key.columns.values()[0].name
                         results = connection.execute("SELECT \"" + str(primary_key) + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + str(primary_key) + "\" IS NOT NULL ORDER BY \"" + str(primary_key) + "\" DESC LIMIT 1").scalar()
-                        primary_key_val = str(results)
+                        primary_key_val = str(results) if results else ""
                         cmds.append(["/scripts/delta-data-dump.sh", dag_name, schema + "." + table, primary_key, primary_key_val, "new"])
             return cmds
         delta_copy_tasks += 1
@@ -651,9 +646,11 @@ try:
         def delta_dump_updatedrow_cmds(input_id, **context):
             # delta data dump - updated rows
             cmds = []
-            connection = redactics_tmp
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
+                    if len(delta_copies):
+                        connection = get_redactics_tmp()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -668,9 +665,11 @@ try:
         def delta_restore_cmds(input_id, **context):
             # delta data restore to RedacticsDB
             cmds = []
-            connection = redactics_tmp
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[])) 
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
+                    if len(delta_copies):
+                        connection = get_redactics_tmp()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -690,15 +689,22 @@ try:
             return cmds
         delta_copy_tasks += 1
 
+        @task(on_failure_callback=post_logs)
+        def set_security_label_cmds(**context):
+            return security_labels
+
         ### data feeds
 
         @task(on_failure_callback=post_logs)
         def gen_dt_table_restore(input_id, **context):
             # full digital twin restore to digital twin DB
+            # full digital twin restore to digital twin DB
             cmds = []
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    connection = source_dbs[input_id]
+                    if len(initial_copies):
+                        connection = get_source_db(input_id)
                     for t in initial_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -734,9 +740,11 @@ try:
         def delta_anon_dump_newrow_cmds(input_id, **context):
             # digital twin delta dump
             cmds=[]
-            connection = digital_twin
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
+                    if len(delta_copies):
+                        connection = get_digital_twin()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -746,8 +754,7 @@ try:
                         data = Table(table, public_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         results = connection.execute("SELECT source_primary_key FROM \"" + schema + "\".\"" + table + "\" ORDER BY source_primary_key DESC LIMIT 1").scalar()
-                        primary_key_val = str(results)
-                        
+                        primary_key_val = str(results) if results else ""
                         cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, schema + "." + table, primary_key, primary_key_val, "new"])
             return cmds
         delta_copy_tasks += 1
@@ -756,26 +763,30 @@ try:
         def delta_anon_dump_updatedrow_cmds(input_id, **context):
             # digital twin delta dump
             cmds=[]
-            connection = digital_twin
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
+                    if len(delta_copies):
+                        connection = get_digital_twin()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
 
                         results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
                         last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
-                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
-            return cmds
+                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, schema + "." + table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
+            return 
         delta_copy_tasks += 1
         
         @task(on_failure_callback=post_logs)
         def delta_anon_restore_cmds(input_id, **context):
             # digital twin delta restore to digital twin DB
             cmds=[]
-            connection = digital_twin
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
+                    if len(delta_copies):
+                        connection = get_digital_twin()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -943,7 +954,7 @@ try:
                 )
             schema_restore.set_upstream(table_resets)
 
-            trigger_drop_fk_contraints = drop_fk_constraints(input["id"], redactics_tmp)
+            trigger_drop_fk_contraints = drop_fk_constraints(input["id"], get_redactics_tmp())
             totalTasks += 1
             trigger_drop_fk_contraints.set_upstream(schema_restore)
 
@@ -1064,7 +1075,7 @@ try:
                 )
             delta_restore.set_upstream([delta_dump_newrow, delta_dump_updatedrow])
 
-            apply_security_labels = PostgresOperator(
+            apply_security_labels = PostgresOperator.partial(
                 task_id='apply-security-labels',
                 postgres_conn_id='redacticsDB',
                 database='redactics_tmp',
@@ -1072,8 +1083,9 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 trigger_rule='none_failed'
+                ).expand(
+                    sql=set_security_label_cmds()
                 )
-            totalTasks += 1
             apply_security_labels.set_upstream([restore_data, delta_restore])
 
             table_dumps = KubernetesPodOperator.partial(
@@ -1144,7 +1156,7 @@ try:
                         ).expand(
                             cmds=delta_anon_dump_newrow_cmds(input["id"])
                         )
-                    dt_delta_dump_newrow.set_upstream(delta_restore)
+                    dt_delta_dump_newrow.set_upstream([delta_restore, apply_security_labels])
 
                     dt_delta_dump_updatedrow = KubernetesPodOperator.partial(
                         task_id="delta-data-dump-digitaltwin-updated-" + str(input_idx),
@@ -1166,7 +1178,7 @@ try:
                         ).expand(
                             cmds=delta_anon_dump_updatedrow_cmds(input["id"])
                         )
-                    dt_delta_dump_updatedrow.set_upstream(delta_restore)
+                    dt_delta_dump_updatedrow.set_upstream([delta_restore, apply_security_labels])
 
                     dt_delta_restore = KubernetesPodOperator.partial(
                         task_id="delta-data-restore-digitaltwin-" + str(input_idx),
@@ -1329,7 +1341,7 @@ try:
                     )
                 dt_schema_restore.set_upstream(dt_table_resets)
 
-                trigger_drop_fk_contraints_dt = drop_fk_constraints(input["id"], digital_twin)
+                trigger_drop_fk_contraints_dt = drop_fk_constraints(input["id"], get_digital_twin())
                 totalTasks += 1
                 trigger_drop_fk_contraints_dt.set_upstream(dt_schema_restore)
 
@@ -1387,9 +1399,6 @@ try:
 
         terminate_workflow = terminate_wf()
         terminate_workflow.set_upstream(apply_prepared_statements)
-
-        tally_dynamic_tasks()
-        print("TOTAL TASKS " + str(totalTasks))
     
     init_redactics_workflow = redactics_workflow()
 

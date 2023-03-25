@@ -293,6 +293,7 @@ extraConfigMaps:
       HELM_CMD: {{ .Values.helmCmd | toString | quote }}
       AGENT_VERSION: {{ $.Chart.Version }}
       AIRFLOW_VAR_AIRFLOW_LOG_CLEANUP__MAX_LOG_AGE_IN_DAYS: "1"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "120"
 
 # eg:
 # extraConfigMaps:

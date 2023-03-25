@@ -11,9 +11,9 @@ INPUT_ID=$4
 
 if [ -z $TABLE ]
 then
-    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fpgdump | pg_restore -O -d ${TMP_DATABASE}
+    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fpgdump | pg_restore -c --if-exists -O -d ${TMP_DATABASE}
 else
-    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fpgdump-${TABLE} | pg_restore -O -d ${TMP_DATABASE}
+    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fpgdump-${TABLE} | pg_restore -c --if-exists -O -d ${TMP_DATABASE}
 fi
 
 curl -X PUT -d "{\"inputId\": \"${INPUT_ID}\", \"tableName\": \"${TABLE}\"}" -H "Content-Type: application/json" -s ${API_URL}/workflow/markFullCopy

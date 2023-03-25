@@ -14,7 +14,7 @@ UPDATED_AT_FIELD=$7
 
 /scripts/prep-certs.sh
 
-if [ -z $START_DATE ]
+if [ -z "$START_DATE" ]
 then
   /scripts/dump-csv-anon.sh -t $TABLE -c $COLUMNS | curl -X POST -H "Transfer-Encoding: chunked" -s -T - http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE}.csv
 else
