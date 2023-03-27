@@ -260,6 +260,7 @@ def set_run_plan(**context):
                 twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
                 if len(twin_tables):
                     data = Table(table, public_schema, autoload=True, autoload_with=digital_twin)
+                    print("FIND PRIMARY KEY " + table)
                     twin_primary_key = data.primary_key.columns.values()[0].name
 
             if len(source_tables) != len(tmp_tables):
