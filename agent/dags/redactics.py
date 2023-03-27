@@ -1079,7 +1079,6 @@ try:
                 task_id='apply-security-labels',
                 postgres_conn_id='redacticsDB',
                 database='redactics_tmp',
-                sql=security_labels,
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 trigger_rule='none_failed'
