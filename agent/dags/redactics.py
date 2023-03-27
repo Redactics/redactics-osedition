@@ -484,6 +484,7 @@ try:
                     schema = t.split('.')[0]
                     table = t.split('.')[1]
                     public_schema = MetaData(schema=schema)
+                    print("CREATE SOURCE PRIMARY KEY " + table)
 
                     data = Table(table, public_schema, autoload=True, autoload_with=connection)
                     primary_key = data.primary_key.columns.values()[0].name
@@ -709,6 +710,7 @@ try:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
                         public_schema = MetaData(schema=schema)
+                        print("GET PRIMARY KEY " + table)
 
                         awk_print = []
                         # get primary key
