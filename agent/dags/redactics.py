@@ -260,8 +260,7 @@ def set_run_plan(**context):
                 twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
                 if len(twin_tables):
                     data = Table(table, public_schema, autoload=True, autoload_with=digital_twin)
-                    print("FIND PRIMARY KEY " + table)
-                    twin_primary_key = data.primary_key.columns.values()[0].name
+                    twin_primary_key = data.primary_key.columns.values()[0].name if len(data.primary_key.columns.values()) else ""
 
             if len(source_tables) != len(tmp_tables):
                 # column has been added or removed
@@ -283,8 +282,13 @@ def set_run_plan(**context):
                         schema_diff = True
 
                 if digitalTwinEnabled:
+                    # assure table includes deltaUpdateField to support delta updates
+                    deltaUpdateFieldFound = False
+
                     # mismatching digital twin schema should prompt table regeneration 
                     for idx, st in enumerate(tmp_tables):
+                        if st["column_name"] == digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
+                            deltaUpdateFieldFound = True
                         if len(twin_tables) > 0 and idx <= len(twin_tables):
                             if (st["column_name"] != twin_tables[idx]["column_name"] or
                                 st["ordinal_position"] != twin_tables[idx]["ordinal_position"] or
@@ -292,7 +296,7 @@ def set_run_plan(**context):
                                 st["is_nullable"] != twin_tables[idx]["is_nullable"] or
                                 st["data_type"] != twin_tables[idx]["data_type"] or
                                 st["udt_name"] != twin_tables[idx]["udt_name"]) and (twin_tables[idx]["column_name"] != twin_primary_key):
-                                schema_diff = True    
+                                schema_diff = True   
                         else:
                             # destination tables haven't been created yet
                             schema_diff = True
@@ -305,12 +309,12 @@ def set_run_plan(**context):
                 # table copied but schema has changed - re-copy entire table
                 copy_status[(schema + "." + table)] = "schema-change-detected"
                 initial_copies.append(schema + "." + table)
-            elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
+            elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] and deltaUpdateFieldFound:
                 # table copied but schema has not changed - eligible for delta update
                 copy_status[(schema + "." + table)] = "delta"
                 delta_copies.append(schema + "." + table)
             else:
-                # table not copied yet, or missing delta update field
+                # table not copied yet, or missing delta update field definition or value
                 copy_status[(schema + "." + table)] = "missing-delta-update-field" if digitalTwinEnabled and not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
                 initial_copies.append(schema + "." + table)
     
