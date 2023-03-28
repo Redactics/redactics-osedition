@@ -127,7 +127,7 @@ if wf_config.get("export") and len(wf_config["export"]):
         for table, options in output.items():
             outputs[table] = options
 
-if wf_config.get("export") and len(wf_config["dataFeeds"]):
+if len(wf_config["dataFeeds"]):
     for dataFeed in wf_config["dataFeeds"]:
         for feed, options in dataFeed.items():
             dataFeeds[feed] = options
