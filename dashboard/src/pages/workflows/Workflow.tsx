@@ -708,7 +708,7 @@ class Workflow extends React.Component<IProps, IState> {
     maskingRuleValues.push({
       key: `new${newRuleKey}`,
       databaseTable: '',
-      schema: '',
+      schema: 'public',
       table: '',
       column: '',
       rule: '',
