@@ -152,7 +152,7 @@ if wf_config.get("dataFeeds") and len(dataFeeds):
             customEnabled = True
             customConfig = options
 
-print("DIGITAL TWIN ENABLED " + digitalTwinEnabled)
+print("DIGITAL TWIN ENABLED " + str(digitalTwinEnabled))
 
 def get_source_db(input_id):
     host = BaseHook.get_connection(input_id).host
