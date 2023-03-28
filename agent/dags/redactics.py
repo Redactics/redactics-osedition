@@ -140,8 +140,14 @@ customEnabled = False
 customConfig = {}
 
 # init data feed vars
+print("DATA FEEDS")
+print(dataFeeds)
 if wf_config.get("dataFeeds") and len(dataFeeds):
     for feed, options in dataFeeds.items():
+        print("FEED")
+        print(feed)
+        print("OPTIONS")
+        print(options)
         if feed == "digitalTwin":
             digitalTwinEnabled = True
             digitalTwinConfig = options
