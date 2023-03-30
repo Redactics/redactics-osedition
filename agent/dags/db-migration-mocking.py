@@ -74,7 +74,7 @@ def set_exclude_tables(input):
     # collect tables from workflow config, supporting wildcards
     found_tables = []
     append_sql = []
-    schema_sql = "table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'"
+    schema_sql = "table_schema LIKE 'pg_%%' OR table_schema = 'information_schema'"
     table_sql = ""
     for t in input["tables"]:
         schema = t.split('.')[0]
@@ -91,7 +91,7 @@ def set_exclude_tables(input):
     idx=0
     for sql in append_sql:
         if (idx + 1) < len(append_sql):
-            table_sql += append_sql[idx] + " AND "
+            table_sql += append_sql[idx] + " OR "
         else:
             table_sql += append_sql[idx]
         idx+=1
