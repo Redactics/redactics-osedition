@@ -239,6 +239,9 @@ def set_input_tables(input, source_db, context):
     Variable.set(dag_name + "-erl-input-tables-" + input["id"] + "-" + context["run_id"], json.dumps(list(dict.fromkeys(found_tables))))
     return list(dict.fromkeys(found_tables))
 
+def is_numeric_pk(data_type):
+    return True if data_type == "smallint" or data_type == "integer" or data_type == "bigint" or data_type == "smallserial" or data_type == "serial" or data_type == "bigserial" else False
+
 def set_run_plan(**context):
     delta_copies = []
     initial_copies = []
@@ -255,12 +258,16 @@ def set_run_plan(**context):
             source_tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
             tmp_tables = get_redactics_tmp().execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
             if digitalTwinEnabled:
-                public_schema = MetaData(schema=schema)
                 digital_twin = get_digital_twin()
                 twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
+                twin_primary_key = ""
+                twin_primary_key_type = ""
                 if len(twin_tables):
-                    data = Table(table, public_schema, autoload=True, autoload_with=digital_twin)
-                    twin_primary_key = data.primary_key.columns.values()[0].name if len(data.primary_key.columns.values()) else ""
+                    pk_query = digital_twin.execute("SELECT a.attname, format_type(a.atttypid, a.atttypmod) AS data_type FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '" + table + "'::regclass AND i.indisprimary").fetchall()
+                    if len(pk_query):
+                        pk_result = pk_query[0]
+                        twin_primary_key = pk_result["attname"]
+                        twin_primary_key_type = pk_result["data_type"]
 
             if len(source_tables) != len(tmp_tables):
                 # column has been added or removed
@@ -289,7 +296,7 @@ def set_run_plan(**context):
                     for idx, st in enumerate(tmp_tables):
                         if st["column_name"] == digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
                             deltaUpdateFieldFound = True
-                        if len(twin_tables) > 0 and idx <= len(twin_tables):
+                        if twin_primary_key and is_numeric_pk(twin_primary_key_type) and len(twin_tables) > 0 and idx <= len(twin_tables):
                             if (st["column_name"] != twin_tables[idx]["column_name"] or
                                 st["ordinal_position"] != twin_tables[idx]["ordinal_position"] or
                                 st["column_default"] != twin_tables[idx]["column_default"] or
@@ -488,21 +495,25 @@ try:
                 for t in input_tables:
                     schema = t.split('.')[0]
                     table = t.split('.')[1]
-                    public_schema = MetaData(schema=schema)
                     print("CREATE SOURCE PRIMARY KEY " + table)
 
-                    data = Table(table, public_schema, autoload=True, autoload_with=connection)
-                    primary_key = data.primary_key.columns.values()[0].name
+                    # get primary key(s)
+                    pk_query = connection.execute("SELECT a.attname, format_type(a.atttypid, a.atttypmod) AS data_type FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '" + table + "'::regclass AND i.indisprimary").fetchall()
+                    if len(pk_query):
+                        pk_result = pk_query[0]
 
-                    result = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name = 'source_primary_key'").fetchall()
-                    if len(result) == 0:
-                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key int4")
-                        connection.execute("CREATE INDEX \"" + table + "_source_primary_key\" ON \"" + schema + "\".\"" + table + "\"(source_primary_key)")
-                    result = connection.execute("SELECT * FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + primary_key + "'").fetchone()
-                    # create default sequence for primary key column, if necessary
-                    if result["column_default"] is None:
-                        connection.execute("CREATE SEQUENCE IF NOT EXISTS \"" + schema + "\".\"" + table + "_pkey_seq\"")
-                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + primary_key + "\" SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
+                        result = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name = 'source_primary_key'").fetchall()
+                        if len(result) == 0:
+                            connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key " + pk_result["data_type"])
+                            connection.execute("CREATE INDEX \"" + table + "_source_primary_key\" ON \"" + schema + "\".\"" + table + "\"(source_primary_key)")
+                        result = connection.execute("SELECT * FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + pk_result["attname"] + "'").fetchone()
+                        # create default sequence for primary key column, if necessary
+                        if result["column_default"] is None:
+                            if pk_result["data_type"] == "uuid":
+                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + pk_result["attname"] + "\" SET DEFAULT uuid_generate_v4()")
+                            else:
+                                connection.execute("CREATE SEQUENCE IF NOT EXISTS \"" + schema + "\".\"" + table + "_pkey_seq\"")
+                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + pk_result["attname"] + "\" SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
         def drop_fk_constraints(input_id, connection, **context):
@@ -704,7 +715,6 @@ try:
         @task(on_failure_callback=post_logs)
         def gen_dt_table_restore(input_id, **context):
             # full digital twin restore to digital twin DB
-            # full digital twin restore to digital twin DB
             cmds = []
             initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
@@ -720,7 +730,9 @@ try:
                         awk_print = []
                         # get primary key
                         data = Table(table, public_schema, autoload=True, autoload_with=connection)
-                        primary_key = data.primary_key.columns.values()[0].name
+                        primary_key = ""
+                        if len(data.primary_key.columns.values()):
+                            primary_key = data.primary_key.columns.values()[0].name
                         # get schema info
                         cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' ORDER BY ordinal_position ASC").fetchall()
                         # find primary key index
@@ -737,9 +749,10 @@ try:
                             if col != primary_key:
                                 awk_print.append("$" + str((idx + 1)))
                                 restore_columns.append('"' + col + '"')
-                        awk_print.append("$" + str(primary_key_idx))
+                        if primary_key_idx > 0:
+                            awk_print.append("$" + str(primary_key_idx))
                         restore_columns.append("source_primary_key")
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, schema + "." + table, "0", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key"])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, schema + "." + table, "0", ",".join(restore_columns), ",".join(awk_print), "", ""])
             return cmds
         initial_copy_tasks += 1
 
