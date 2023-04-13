@@ -13,4 +13,4 @@ POSTFIX=$5
 
 /scripts/prep-certs.sh
 
-/scripts/dump-csv-anon.sh -t $TABLE -c all --delta-field-name="$FIELD_NAME" --delta-field-val="$FIELD_VAL" | curl -X POST -H "Transfer-Encoding: chunked" -s -T - http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE}-${POSTFIX}.csv
+/scripts/dump-csv-anon.sh -t $TABLE --delta-field-name="$FIELD_NAME" --delta-field-val="$FIELD_VAL" | curl -X POST -H "Transfer-Encoding: chunked" -s -T - http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE}-${POSTFIX}.csv

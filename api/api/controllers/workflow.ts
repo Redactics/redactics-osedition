@@ -622,22 +622,7 @@ async function saveERL(req: Request, res: Response) {
       return res.status(404).json({ errors: 'workflow not found' });
     }
 
-    let columnExclusion:boolean = false;
     if (req.body.dataFeeds && req.body.dataFeeds.length) {
-      // verify no column output exclusion with data feeds that clone data
-      const cloneFeeds = req.body.dataFeeds.find((df:any) => ((df.dataFeed === 'dataRepository')));
-      if (cloneFeeds) {
-        if (req.body.exportTableDataConfig.find((cf:any) => (!!(Object.values(cf).find(
-          (c:any) => (!!((c.fields && c.fields.length))),
-        ))))
-        ) {
-          columnExclusion = true;
-        }
-      }
-      if (columnExclusion) {
-        return res.status(400).json({ errors: 'Data feed does not permit column exclusion' });
-      }
-
       // verify valid delta update digital twin settings
       const digitalTwin = req.body.dataFeeds.find((df:any) => ((df.dataFeed === 'digitalTwin')));
       if (digitalTwin) {

@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION redact_email(email text, id integer, prefix text, domain text) RETURNS text AS
+CREATE OR REPLACE FUNCTION redact_email(email text, id bigint, prefix text, domain text) RETURNS text AS
   $$
   SELECT CASE WHEN email IS NULL THEN ''
   ELSE

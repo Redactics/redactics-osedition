@@ -154,13 +154,6 @@ while [ $# -gt 0 ]; do
     --table=*)
         table=$1
         ;;
-    -c)
-        shift
-        columns=$1
-        ;;
-    --columns=*)
-        columns=$1
-        ;;
     --start-date=*)
         start_date="${1/--start-date=/}"
         ;;
@@ -217,12 +210,7 @@ then
   exit 1
 fi
 
-if [ "$columns" == "all" ]
-then
-  filters=$(get_mask_filters $table)
-else
-  filters=$(get_mask_extract_filters $table $columns)
-fi
+filters=$(get_mask_filters $table)
 
 if [ -z "$start_date" ] && [ -z "$delta_field_name" ]
 then

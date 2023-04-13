@@ -29,6 +29,8 @@ import {
   MenuItem,
 } from '@material-ui/core';
 
+import { Alert as MuiAlert } from '@material-ui/lab';
+
 import {
   ExpandMore as ExpandMoreIcon,
   DeleteOutline as DeleteIcon,
@@ -61,6 +63,8 @@ const Card = styled(MuiCard)(spacing);
 const Grid = styled(MuiGrid)(spacing);
 
 const Button = styled(MuiButton)(spacing);
+
+const Alert = styled(MuiAlert)(spacing);
 
 const styles = {
   selectAdornment: {
@@ -341,16 +345,17 @@ class Workflow extends React.Component<IProps, IState> {
     };
 
     if (Object.keys(this.props.workflow.exportTableDataConfig).length) {
-      for (const idx in this.props.workflow.exportTableDataConfig) {
-        let config:any = Object.values(this.props.workflow.exportTableDataConfig[idx])[0];
+      Object.keys(this.props.workflow.exportTableDataConfig).forEach((idx:any) => {
+        const table:string = Object.keys(this.props.workflow.exportTableDataConfig[idx])[0];
+        const config:any = this.props.workflow.exportTableDataConfig[idx][table];
         state.exportTableDataConfig.push({
-          table: config,
+          table,
           numDays: config.numDays,
           sampleFields: config.sampleFields,
           createdAtField: config.createdAtField,
           updatedAtField: config.updatedAtField,
-        })
-      }
+        });
+      });
     }
 
     this.props.redactrulesets.forEach((rule:RedactRuleSet) => {
@@ -610,12 +615,10 @@ class Workflow extends React.Component<IProps, IState> {
   }
 
   missingInput() {
-    let tablesProvided = false;
     const inputs = this.props.workflow.inputs.find((input:WorkflowInputRecord) => {
-      if (input.tables && input.tables.length) { tablesProvided = true; }
-      return (input.enabled === true)
+      return (input.enabled === true && input.tableSelection !== "none")
     });
-    return (inputs && tablesProvided) ? false : true;
+    return (inputs) ? false : true;
   }
 
   validateRedactionRules() {
@@ -1094,6 +1097,8 @@ class Workflow extends React.Component<IProps, IState> {
       state.input.tables = [];
     }
 
+    state.errors.JSX = null;
+
     // find and update existing input in inputs listing
     inputs = inputs.map((input) => {
       if (!input.tables) {
@@ -1101,6 +1106,23 @@ class Workflow extends React.Component<IProps, IState> {
       }
 
       if (input.uuid === this.state.input.uuid) {
+        // check for valid table selection
+        input.tables.forEach((t:string) => {
+          let tableArr = t.split('.');
+          let schema = tableArr[0];
+          let table = tableArr[1];
+          if (!schema) {
+            state.errors.JSX = (
+              <Alert mb={4} severity="error">A table selection is missing a schema</Alert>
+            )
+          }
+          else if (!table) {
+            state.errors.JSX = (
+              <Alert mb={4} severity="error">A table selection is missing a table</Alert>
+            )
+          }
+        });
+
         // transfer current input into inputs array
         return this.state.input;
       }
@@ -1110,11 +1132,17 @@ class Workflow extends React.Component<IProps, IState> {
 
     state.numMaskingRules = state.maskingRuleValues.length;
 
-    state.errors.JSX = null;
     //console.log("INPUTS", inputs);
     //console.log("STATE", state)
 
-    if (this.state.input.uuid.match(/^new/)) {
+    if (state.errors.JSX) {
+      this.setState({
+        errors: state.errors
+      })
+      return;
+    }
+
+    if (state.input.uuid.match(/^new/)) {
       this.setState({
         tableOutputOptions: state.tableOutputOptions,
         errors: state.errors,

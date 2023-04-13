@@ -106,7 +106,6 @@ class Settings extends React.Component<IProps, IState> {
       redactEmailDefault: {
         redactData: {
           prefix: 'redacted',
-          primaryKey: 'id',
           domain: 'redactics.com',
         },
         uuid: '',
@@ -228,7 +227,6 @@ class Settings extends React.Component<IProps, IState> {
             thisPreset.rule = 'redact_email';
             thisPreset.redactData = {
               prefix: 'redacted',
-              primaryKey: 'id',
               domain: 'redacted.com',
             };
             break;
@@ -253,7 +251,6 @@ class Settings extends React.Component<IProps, IState> {
 
       switch (event.target.name) {
         case 'prefix':
-        case 'primaryKey':
         case 'domain':
         case 'replacement':
         case 'chars':
@@ -278,8 +275,7 @@ class Settings extends React.Component<IProps, IState> {
 
   validateDefaultPreset(payload:any) {
     let incompletePreset = false;
-    if (!payload[0].redactData.prefix || !payload[0].redactData.primaryKey
-      || !payload[0].redactData.domain) {
+    if (!payload[0].redactData.prefix || !payload[0].redactData.domain) {
       incompletePreset = true;
     } else if (!payload[1].redactData.replacement) {
       incompletePreset = true;
@@ -297,7 +293,8 @@ class Settings extends React.Component<IProps, IState> {
     this.state.presets.forEach((p:RedactRulePreset) => {
       if (!p.presetName || !p.rule) {
         incompletePreset = true;
-      } else if (p.rule === 'redact_email' && (!p.redactData.prefix || !p.redactData.primaryKey || !p.redactData.domain)) {
+      } else if (p.rule === 'redact_email' && (!p.redactData.prefix || !p.redactData.domain)) {
+        console.log("INCOMPLETE", p.redactData)
         incompletePreset = true;
       } else if (p.rule === 'replacement' && !p.redactData.replacement) {
         incompletePreset = true;
@@ -433,6 +430,7 @@ class Settings extends React.Component<IProps, IState> {
           body: JSON.stringify(payload),
         });
 
+        console.log("PAYLOAD", this.state.redactEmailDefault.redactData);
         this.setState({
           showSnackbar: true,
           saveDefaultRulesButtonDisabled: false,

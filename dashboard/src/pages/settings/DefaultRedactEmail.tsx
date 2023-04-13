@@ -39,7 +39,7 @@ class DefaultRedactEmail extends React.Component<IProps, IState> {
       <React.Fragment>
 
         <Typography variant="body1" gutterBottom>
-          Transform emails to unique email address derived from the row&apos;s primary key, constructed based on provided prefix and domain - i.e. <code>[prefix][primarykey]@[domain]</code>
+          Transform emails to unique email address derived from a provided prefix, an automatically generated incrementing number, and domain - i.e. <code>[prefix][primarykey]@[domain]</code>
         </Typography>
 
         <form noValidate autoComplete="off">
@@ -48,15 +48,6 @@ class DefaultRedactEmail extends React.Component<IProps, IState> {
               name="prefix"
               label="Prefix"
               value={this.props.ruleDefaults.redactData.prefix}
-              onChange={this.props.handleRedactEmailChange}
-            />
-          </FormControl>
-
-          <FormControl fullWidth margin="normal" variant="outlined">
-            <TextField
-              name="primaryKey"
-              label="Primary Key"
-              value={this.props.ruleDefaults.redactData.primaryKey}
               onChange={this.props.handleRedactEmailChange}
             />
           </FormControl>

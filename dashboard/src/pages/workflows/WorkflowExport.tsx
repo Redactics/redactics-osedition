@@ -137,7 +137,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             </Select>
           </FormControl>
 
-          <Box mt={4}>
+          <Box mt={4} display={(this.props.tableOutputOptions.sampleFields.toLowerCase().includes("created")) ? "block" : "none"}>
             <FormControl fullWidth variant="outlined">
               <TextField
                 error={this.props.tableOutputOptions.errors.createdAtField}
@@ -152,7 +152,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             </FormControl>
           </Box>
 
-          <Box mt={4}>
+          <Box mt={4} display={(this.props.tableOutputOptions.sampleFields.toLowerCase().includes("updated")) ? "block" : "none"}>
             <FormControl fullWidth variant="outlined">
               <TextField
                 error={this.props.tableOutputOptions.errors.updatedAtField}

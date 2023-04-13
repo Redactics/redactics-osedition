@@ -133,7 +133,6 @@ class WorkflowInputs extends React.Component<IProps, IState> {
               <TableRow key={idx}>
                 <TableCell style={{ paddingLeft: 0 }}>
                   <TextField
-                    error={this.props.errors.addSchema}
                     name="addSchema"
                     label="Schema"
                     value={row.split('.')[0]}
@@ -144,7 +143,6 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 </TableCell>
                 <TableCell>
                   <TextField
-                    error={this.props.errors.addTable}
                     name="addTable"
                     label="Table"
                     value={row.split('.')[1]}
@@ -331,11 +329,11 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                       break;
   
                       case 'allExclude':
-                      tables = "all tables except " + workflowInput.tables.join(', ');
+                      tables = (!workflowInput.tables || !workflowInput.tables.length) ? "all tables" : "all tables except " + workflowInput.tables.join(', ');
                       break;
   
                       case 'specific':
-                      tables = workflowInput.tables.join(', ');
+                      tables = (!workflowInput.tables || !workflowInput.tables.length) ? "none" : workflowInput.tables.join(', ');
                       break;
                     }
                   }

@@ -48,7 +48,8 @@ k8s_pg_tmp_envvars = {
     "PGUSER": BaseHook.get_connection("redacticsDB").login,
     "PGPASSWORD": BaseHook.get_connection("redacticsDB").password,
     "PGDATABASE": BaseHook.get_connection("redacticsDB").schema,
-    "API_URL": API_URL
+    "API_URL": API_URL,
+    "CONNECTION": "redactics-tmp"
 }
 
 if NODESELECTOR != "<nil>":
@@ -88,7 +89,7 @@ wf_config = request.json()
 print(wf_config)
 
 def redact_email(table, fieldName, **params):
-    return "SECURITY LABEL FOR anon ON COLUMN " + table + "." + fieldName + " IS 'MASKED WITH FUNCTION redact_email(" + table + "." + fieldName + ", " + table + "." + params["params"]["primaryKey"] + ", ''" + params["params"]["prefix"] + "'', ''" + params["params"]["domain"] + "'')';"
+    return "SECURITY LABEL FOR anon ON COLUMN " + table + "." + fieldName + " IS 'MASKED WITH FUNCTION redact_email(" + table + "." + fieldName + ", " + table + ".redacted_email_counter, ''" + params["params"]["prefix"] + "'', ''" + params["params"]["domain"] + "'')';"
 
 def destruction(table, fieldName):
     return "SECURITY LABEL FOR anon ON COLUMN " + table + "." + fieldName + " IS 'MASKED WITH VALUE NULL';"
@@ -102,25 +103,6 @@ def random_string(table, fieldName, **params):
 security_labels = []
 outputs = {}
 dataFeeds = {}
-
-for rules in wf_config["redactRules"]:
-    for t, fields in rules.items():
-        schema = t.split('.')[0]
-        table = t.split('.')[1]
-
-        for field in fields:
-            for fieldName, params in field.items():
-                if params["rule"] == "redact_email":
-                    security_labels.append(redact_email("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
-                elif params["rule"] == "destruction":
-                    security_labels.append(destruction("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\""))
-                elif params["rule"] == "replacement":
-                    security_labels.append(replacement("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
-                elif params["rule"] == "random_string":
-                    security_labels.append(random_string("\"" + schema + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
-if not security_labels:
-    # no-op
-    security_labels.append('SELECT 1')
 
 if wf_config.get("export") and len(wf_config["export"]):
     for output in wf_config["export"]:
@@ -246,6 +228,8 @@ def set_run_plan(**context):
     delta_copies = []
     initial_copies = []
     copy_status = {}
+    digital_twin = get_digital_twin()
+    redactics_tmp = get_redactics_tmp()
     for input in wf_config["inputs"]:
         source_db = get_source_db(input["id"])
         #Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
@@ -256,9 +240,8 @@ def set_run_plan(**context):
             schema_diff = False
 
             source_tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
-            tmp_tables = get_redactics_tmp().execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
+            tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
             if digitalTwinEnabled:
-                digital_twin = get_digital_twin()
                 twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
                 twin_primary_key = ""
                 twin_primary_key_type = ""
@@ -279,13 +262,18 @@ def set_run_plan(**context):
                 for idx, st in enumerate(source_tables):
                     if len(tmp_tables) > 0 and idx <= len(tmp_tables):
                         if (st["column_name"] != tmp_tables[idx]["column_name"] or
-                            st["column_default"] != tmp_tables[idx]["column_default"] or
                             st["is_nullable"] != tmp_tables[idx]["is_nullable"] or
                             st["data_type"] != tmp_tables[idx]["data_type"] or
                             st["udt_name"] != tmp_tables[idx]["udt_name"]):
+                            print("TMP DIFF")
+                            print(table)
+                            print(st)
+                            print(tmp_tables[idx])
                             schema_diff = True    
                     else:
                         # destination tables haven't been created yet
+                        print("NO DEST TMP")
+                        print(table)
                         schema_diff = True
 
                 if digitalTwinEnabled:
@@ -303,9 +291,17 @@ def set_run_plan(**context):
                                 st["is_nullable"] != twin_tables[idx]["is_nullable"] or
                                 st["data_type"] != twin_tables[idx]["data_type"] or
                                 st["udt_name"] != twin_tables[idx]["udt_name"]) and (twin_tables[idx]["column_name"] != twin_primary_key):
+                                print("DT DIFF")
+                                print(table)
+                                print(st)
+                                print(twin_tables[idx])
                                 schema_diff = True   
                         else:
                             # destination tables haven't been created yet
+                            print("NO DEST DT")
+                            print(table)
+                            print(twin_primary_key)
+                            print(twin_primary_key_type)
                             schema_diff = True
 
             if not redactics_db_init:
@@ -514,12 +510,15 @@ try:
                             else:
                                 connection.execute("CREATE SEQUENCE IF NOT EXISTS \"" + schema + "\".\"" + table + "_pkey_seq\"")
                                 connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + pk_result["attname"] + "\" SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
+                    else:
+                        # create unused source_primary_key column of type int4
+                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key int4")
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
-        def drop_fk_constraints(input_id, connection, **context):
+        def drop_fk_constraints(input_id, connection, tmp_schema, **context):
             input_tables = json.loads(Variable.get(dag_name + "-erl-input-tables-" + input_id + "-" + context["run_id"], default_var=[]))
             for t in input_tables:
-                schema = t.split('.')[0]
+                schema = tmp_schema if tmp_schema else t.split('.')[0]
                 table = t.split('.')[1]
 
                 results = connection.execute("SELECT DISTINCT(tc.constraint_name) FROM information_schema.table_constraints AS tc JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema WHERE tc.constraint_type = 'FOREIGN KEY' AND ccu.table_schema ILIKE '" + schema + "' AND tc.table_name ILIKE '" + table + "'").fetchall()
@@ -539,7 +538,7 @@ try:
             return sql
 
         @task(on_failure_callback=post_logs)
-        def gen_table_resets(input_id, schema, **context):
+        def gen_table_resets(input_id, schema, connection, override_schema, **context):
             tables = []
             initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
@@ -547,7 +546,14 @@ try:
                     for table in initial_copies:
                         tables.append(table)
             if len(tables):
-                return [["/scripts/table-resets.sh", dag_name, schema, ",".join(tables)]]
+                # fetch extensions to enable
+                results = connection.execute("SELECT extname FROM pg_extension").fetchall()
+                extensions = []
+                if len(results):
+                    for extension in results:
+                        extensions.append(extension["extname"])
+
+                return [["/scripts/table-resets.sh", dag_name, schema, ",".join(tables), ",".join(extensions), override_schema]]
             else:
                 return []
         if digitalTwinEnabled:
@@ -578,14 +584,14 @@ try:
             return cmds
 
         @task(on_failure_callback=post_logs)
-        def schema_restore_cmds(input_id, schema, **context):
+        def schema_restore_cmds(input_id, schema, tmp_schema, **context):
             # initial copy schema restore
             cmds = []
             initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for table in initial_copies:
-                        cmds.append(["/scripts/schema-restore.sh", dag_name, schema, table])
+                        cmds.append(["/scripts/schema-restore.sh", dag_name, schema, table, tmp_schema])
             return cmds
         initial_copy_tasks += 1
         if digitalTwinEnabled:
@@ -600,7 +606,15 @@ try:
                 if input["id"] == input_id:
                     for table in initial_copies:
                         # only append if table is in full copy list
-                        cmds.append(["/scripts/data-dump.sh", dag_name, table])
+                        cmd=["/scripts/data-dump.sh", dag_name, table]
+
+                        if table in outputs:
+                            options = outputs[table]
+                            if options["numDays"] is not None:
+                                # calculate date
+                                startDate = (datetime.now() + relativedelta(days=-int(options["numDays"]))).isoformat()
+                                cmd.extend([startDate, options["sampleFields"], options["createdAtField"], options["updatedAtField"]])
+                        cmds.append(cmd)
             return cmds
         initial_copy_tasks += 1        
 
@@ -611,8 +625,9 @@ try:
             initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in initial_copies:
-                        cmds.append(["/scripts/data-restore.sh", dag_name, "{}".format(BaseHook.get_connection("redacticsDB").schema), table, input_id])
+                    for t in initial_copies:
+                        table = t.split('.')[1]
+                        cmds.append(["/scripts/data-restore.sh", dag_name, table, input_id])
             return cmds
         initial_copy_tasks += 1
 
@@ -622,8 +637,9 @@ try:
             initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in initial_copies:
-                        cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, table, "all"]
+                    for t in initial_copies:
+                        table = t.split('.')[1]
+                        cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\""]
 
                         if table in outputs:
                             options = outputs[table]
@@ -633,6 +649,7 @@ try:
                                 cmd.extend([startDate, options["sampleFields"], options["createdAtField"], options["updatedAtField"]])
                         cmds.append(cmd)
             return cmds
+        initial_copy_tasks += 1
 
         ### delta updates
 
@@ -641,19 +658,19 @@ try:
             # delta data dump - new rows
             cmds = []
             delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            if len(delta_copies):
+                connection = get_redactics_tmp()
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    if len(delta_copies):
-                        connection = get_redactics_tmp()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
-                        public_schema = MetaData(schema=schema)
+                        tmp_schema = MetaData(schema=dag_name)
 
-                        data = Table(table, public_schema, autoload=True, autoload_with=connection)
+                        data = Table(table, tmp_schema, autoload=True, autoload_with=connection)
                         # requires a single primary key
                         primary_key = data.primary_key.columns.values()[0].name
-                        results = connection.execute("SELECT \"" + str(primary_key) + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + str(primary_key) + "\" IS NOT NULL ORDER BY \"" + str(primary_key) + "\" DESC LIMIT 1").scalar()
+                        results = connection.execute("SELECT \"" + str(primary_key) + "\" FROM \"" + dag_name + "\".\"" + table + "\" WHERE \"" + str(primary_key) + "\" IS NOT NULL ORDER BY \"" + str(primary_key) + "\" DESC LIMIT 1").scalar()
                         primary_key_val = str(results) if results else ""
                         cmds.append(["/scripts/delta-data-dump.sh", dag_name, schema + "." + table, primary_key, primary_key_val, "new"])
             return cmds
@@ -664,15 +681,15 @@ try:
             # delta data dump - updated rows
             cmds = []
             delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            if len(delta_copies):
+                connection = get_redactics_tmp()
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    if len(delta_copies):
-                        connection = get_redactics_tmp()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
 
-                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
+                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + dag_name + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
                         last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
                         cmds.append(["/scripts/delta-data-dump.sh", dag_name, schema + "." + table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
             return cmds
@@ -683,31 +700,50 @@ try:
             # delta data restore to RedacticsDB
             cmds = []
             delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[])) 
+            if len(delta_copies):
+                connection = get_redactics_tmp()
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    if len(delta_copies):
-                        connection = get_redactics_tmp()
                     for t in delta_copies:
-                        schema = t.split('.')[0]
+                        #schema = t.split('.')[0]
                         table = t.split('.')[1]
-                        public_schema = MetaData(schema=schema)
+                        schema = MetaData(schema=dag_name)
 
                         # get primary key
-                        data = Table(table, public_schema, autoload=True, autoload_with=connection)
+                        data = Table(table, schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         # get schema info
-                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' ORDER BY ordinal_position ASC").fetchall()
+                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + dag_name + "' ORDER BY ordinal_position ASC").fetchall()
                         
                         restore_columns = []
                         for c in cols:
                             col = "".join(c)
                             restore_columns.append('"' + col + '"')
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, schema + "." + table, "1", ",".join(restore_columns), "", primary_key])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), "", primary_key])
             return cmds
         delta_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
         def set_security_label_cmds(**context):
+            global security_labels
+            for rules in wf_config["redactRules"]:
+                for t, fields in rules.items():
+                    table = t.split('.')[1]
+
+                    for field in fields:
+                        for fieldName, params in field.items():
+                            if params["rule"] == "redact_email":
+                                security_labels.append("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" DROP COLUMN IF EXISTS redacted_email_counter;ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial;CREATE UNIQUE INDEX \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)") 
+                                security_labels.append(redact_email("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
+                            elif params["rule"] == "destruction":
+                                security_labels.append(destruction("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\""))
+                            elif params["rule"] == "replacement":
+                                security_labels.append(replacement("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
+                            elif params["rule"] == "random_string":
+                                security_labels.append(random_string("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
+            if not security_labels:
+                # no-op
+                security_labels.append('SELECT 1')
             return security_labels
 
         ### data feeds
@@ -751,8 +787,10 @@ try:
                                 restore_columns.append('"' + col + '"')
                         if primary_key_idx > 0:
                             awk_print.append("$" + str(primary_key_idx))
+                        else:
+                            awk_print.append("\"\"")
                         restore_columns.append("source_primary_key")
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, schema + "." + table, "0", ",".join(restore_columns), ",".join(awk_print), "", ""])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "0", ",".join(restore_columns), ",".join(awk_print), "", ""])
             return cmds
         initial_copy_tasks += 1
 
@@ -761,21 +799,21 @@ try:
             # digital twin delta dump
             cmds=[]
             delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            if len(delta_copies):
+                connection = get_digital_twin()
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    if len(delta_copies):
-                        connection = get_digital_twin()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
-                        public_schema = MetaData(schema=schema)
+                        dt_schema = MetaData(schema=schema)
 
                         # get primary key
-                        data = Table(table, public_schema, autoload=True, autoload_with=connection)
+                        data = Table(table, dt_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         results = connection.execute("SELECT source_primary_key FROM \"" + schema + "\".\"" + table + "\" ORDER BY source_primary_key DESC LIMIT 1").scalar()
                         primary_key_val = str(results) if results else ""
-                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, schema + "." + table, primary_key, primary_key_val, "new"])
+                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", primary_key, primary_key_val, "new"])
             return cmds
         delta_copy_tasks += 1
 
@@ -784,17 +822,17 @@ try:
             # digital twin delta dump
             cmds=[]
             delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            if len(delta_copies):
+                connection = get_digital_twin()
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    if len(delta_copies):
-                        connection = get_digital_twin()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
 
                         results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
                         last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
-                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, schema + "." + table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
+                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
             return cmds
         delta_copy_tasks += 1
         
@@ -803,18 +841,18 @@ try:
             # digital twin delta restore to digital twin DB
             cmds=[]
             delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            if len(delta_copies):
+                connection = get_digital_twin()
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    if len(delta_copies):
-                        connection = get_digital_twin()
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
-                        public_schema = MetaData(schema=schema)
+                        dt_schema = MetaData(schema=schema)
 
                         awk_print = []
                         # get primary key
-                        data = Table(table, public_schema, autoload=True, autoload_with=connection)
+                        data = Table(table, dt_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         # get schema info
                         cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' ORDER BY ordinal_position ASC").fetchall()
@@ -835,7 +873,7 @@ try:
                             elif col != primary_key:
                                 awk_print.append("$" + str((idx + 1)))
                                 restore_columns.append('"' + col + '"')
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, schema + "." + table, "1", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key"])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key"])
             return cmds
         delta_copy_tasks += 1
 
@@ -889,7 +927,8 @@ try:
                 "PGHOST": BaseHook.get_connection(input["id"]).host,
                 "PGUSER": BaseHook.get_connection(input["id"]).login,
                 "PGPASSWORD": BaseHook.get_connection(input["id"]).password,
-                "PGDATABASE": BaseHook.get_connection(input["id"]).schema
+                "PGDATABASE": BaseHook.get_connection(input["id"]).schema,
+                "CONNECTION": "source"
             }
             if extra:
                 if "sslmode" in extra:
@@ -910,7 +949,6 @@ try:
                 task_id="schema-dump-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                # ensure latest PG image is cached
                 image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_source_envvars,
@@ -934,6 +972,7 @@ try:
                 task_id="table-resets-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -948,7 +987,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema))
+                    cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema), get_source_db(input["id"]), dag_name)
                 )
             table_resets.set_upstream(schema_dump)
 
@@ -956,6 +995,7 @@ try:
                 task_id="schema-restore-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -970,11 +1010,11 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema))
+                    cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema), "1")
                 )
             schema_restore.set_upstream(table_resets)
 
-            trigger_drop_fk_contraints = drop_fk_constraints(input["id"], get_redactics_tmp())
+            trigger_drop_fk_contraints = drop_fk_constraints(input["id"], get_redactics_tmp(), dag_name)
             totalTasks += 1
             trigger_drop_fk_contraints.set_upstream(schema_restore)
 
@@ -982,6 +1022,7 @@ try:
                 task_id="data-dump-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_source_envvars,
                 secrets=secrets,
@@ -1005,6 +1046,7 @@ try:
                 task_id="restore-data-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -1029,7 +1071,6 @@ try:
                 task_id="delta-dump-new-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                # ensure latest PG image is cached
                 image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_source_envvars,
@@ -1053,7 +1094,6 @@ try:
                 task_id="delta-dump-updated-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                # ensure latest PG image is cached
                 image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_source_envvars,
@@ -1077,6 +1117,7 @@ try:
                 task_id="delta-restore-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -1111,6 +1152,7 @@ try:
                 task_id="dump-tables",
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -1139,7 +1181,8 @@ try:
                         "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host,
                         "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
                         "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
-                        "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema
+                        "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
+                        "CONNECTION": "digital-twin"
                     }
                     twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
                     if twin_extra:
@@ -1159,6 +1202,7 @@ try:
                         task_id="delta-data-dump-digitaltwin-new-" + str(input_idx),
                         namespace=NAMESPACE,
                         image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
                         get_logs=True,
                         env_vars=k8s_pg_tmp_envvars,
                         secrets=dfSecrets,
@@ -1181,6 +1225,7 @@ try:
                         task_id="delta-data-dump-digitaltwin-updated-" + str(input_idx),
                         namespace=NAMESPACE,
                         image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
                         get_logs=True,
                         env_vars=k8s_pg_tmp_envvars,
                         secrets=dfSecrets,
@@ -1203,6 +1248,7 @@ try:
                         task_id="delta-data-restore-digitaltwin-" + str(input_idx),
                         namespace=NAMESPACE,
                         image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
                         get_logs=True,
                         env_vars=k8s_pg_twin_envvars,
                         secrets=dfSecrets,
@@ -1241,9 +1287,9 @@ try:
                 task_id="data-feed-s3upload",
                 namespace=NAMESPACE,
                 image=s3UploadConfig["dataFeedConfig"]["image"] + ":" + s3UploadConfig["dataFeedConfig"]["tag"],
+                image_pull_policy="Always",
                 cmds=[s3UploadConfig["dataFeedConfig"]["shell"], "-c"] + [s3UploadConfig["dataFeedConfig"]["command"]] if s3UploadConfig["dataFeedConfig"]["command"] else None,
                 arguments=[s3UploadConfig["dataFeedConfig"]["args"]] if s3UploadConfig["dataFeedConfig"]["args"] else None,
-                image_pull_policy="Always",
                 secrets=dfSecrets,
                 get_logs=True,
                 affinity=affinity,
@@ -1272,6 +1318,7 @@ try:
                 task_id="data-feed-custom",
                 namespace=NAMESPACE,
                 image=customConfig["dataFeedConfig"]["image"] + ":" + customConfig["dataFeedConfig"]["tag"],
+                image_pull_policy="Always",
                 cmds=[customConfig["dataFeedConfig"]["shell"], "-c"] + [customConfig["dataFeedConfig"]["command"]] if customConfig["dataFeedConfig"]["command"] else None,
                 arguments=[customConfig["dataFeedConfig"]["args"]] if customConfig["dataFeedConfig"]["args"] else None,
                 secrets=dfSecrets,
@@ -1300,7 +1347,8 @@ try:
                     "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host,
                     "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
                     "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
-                    "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema
+                    "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
+                    "CONNECTION": "digital-twin"
                 }
                 twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
                 if twin_extra:
@@ -1320,6 +1368,7 @@ try:
                     task_id="table-resets-dt-" + str(input_idx),
                     namespace=NAMESPACE,
                     image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
                     get_logs=True,
                     env_vars=k8s_pg_twin_envvars,
                     secrets=dfSecrets,
@@ -1334,7 +1383,7 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend,
                     ).expand(
-                        cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
+                        cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema), get_source_db(input["id"]), "")
                     )
                 dt_table_resets.set_upstream(table_dumps)
 
@@ -1342,6 +1391,7 @@ try:
                     task_id="schema-restore-digitaltwin-" + str(input_idx),
                     namespace=NAMESPACE,
                     image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
                     get_logs=True,
                     env_vars=k8s_pg_twin_envvars,
                     secrets=dfSecrets,
@@ -1356,11 +1406,11 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend
                     ).expand(
-                        cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
+                        cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema), "")
                     )
                 dt_schema_restore.set_upstream(dt_table_resets)
 
-                trigger_drop_fk_contraints_dt = drop_fk_constraints(input["id"], get_digital_twin())
+                trigger_drop_fk_contraints_dt = drop_fk_constraints(input["id"], get_digital_twin(), "")
                 totalTasks += 1
                 trigger_drop_fk_contraints_dt.set_upstream(dt_schema_restore)
 
@@ -1372,6 +1422,7 @@ try:
                     task_id="restore-data-digitaltwin-" + str(input_idx),
                     namespace=NAMESPACE,
                     image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
                     get_logs=True,
                     env_vars=k8s_pg_twin_envvars,
                     secrets=dfSecrets,
