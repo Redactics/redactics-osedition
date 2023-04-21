@@ -174,7 +174,7 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.latestChartVersion).toEqual(process.env.LATEST_CHART_VERSION);
     expect(res.body.helmArgs.agentUpgradeAvailable).toEqual(false);
     expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(true);
-    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(5);
+    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(6); // 1 GB + 5 GB buffer for Airflow data
     expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(true);
     expect(res.body.helmArgs.httpNas.persistence.size).toEqual(3);
   });
