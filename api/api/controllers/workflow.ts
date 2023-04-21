@@ -812,6 +812,10 @@ async function saveMockMigration(req: Request, res: Response) {
       return res.status(404).json({ errors: 'workflow not found' });
     }
 
+    if (req.body.migrationDatabase === req.body.migrationDatabaseClone) {
+      return res.status(400).json({ errors: 'your input and target database cannot be identical' });
+    }
+
     // show UI feedback about updating helm config file if namespace has changed
     const oldMigrationNamespace = workflow.dataValues.migrationNamespace;
 

@@ -571,6 +571,23 @@ describe('Workflow endpoints', () => {
     workflowMMUuid = res.body.uuid;
   });
 
+  it('assure mockDatabaseMigration valid database clone name', async() => {
+    // database and database clone names match
+    const res = await agent.put('/workflow/' + workflowMMUuid)
+    .send({
+      agentId: agentUuid,
+      name: "Test Migration",
+      workflowType: "mockDatabaseMigration",
+      inputs: workflowInputs,
+      migrationNamespace: "redactics",
+      migrationDatabase: "redactics",
+      migrationDatabaseClone: "redactics",
+      migrationConfiguration: "helmhook",
+      migrationHelmHookWeight: -10,
+    })
+    .expect(400);
+  });
+
   it('update mockDatabaseMigration workflow', async() => {
     const res = await agent.put('/workflow/' + workflowMMUuid)
     .send({

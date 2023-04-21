@@ -163,6 +163,7 @@ interface IState {
   editDataFeed: boolean;
   invalidDeltaUpdate: boolean;
   invalidPreparedStatement: boolean;
+  mockMigrationDatabase: boolean;
   invalidForgetUserFields: boolean;
   invalidMigrationFields: boolean;
   digitalTwinAdded: boolean;
@@ -336,6 +337,7 @@ class Workflow extends React.Component<IProps, IState> {
       editDataFeed: false,
       invalidDeltaUpdate: false,
       invalidPreparedStatement: false,
+      mockMigrationDatabase: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
       digitalTwinAdded: false,
@@ -522,10 +524,12 @@ class Workflow extends React.Component<IProps, IState> {
           let orphanedWorkflow:boolean = false;
           let invalidDeltaUpdate:boolean = false;
           let invalidPreparedStatement:boolean = false;
+          let mockMigrationDatabase:boolean = false;
           const invalidScheduleError = "Invalid schedule";
           const orphanedWorkflowError = "Invalid agent ID";
           const invalidDeltaUpdateError = "You must provide your delta update field to enable delta updates";
           const invalidPreparedStatementError = "You must provide some key/value pairs for your prepared statements";
+          const mockMigrationDatabaseError = "your input and target database cannot be identical";
           
           if (Array.isArray(data.errors)) {
             // multiple errors found
@@ -533,12 +537,14 @@ class Workflow extends React.Component<IProps, IState> {
             orphanedWorkflow = data.errors.find((e:any) => ((e.msg === orphanedWorkflowError) && e.param === 'agentId'));
             invalidDeltaUpdate = data.errors.find((e:any) => ((e.msg === invalidDeltaUpdateError)));
             invalidPreparedStatement = data.errors.find((e:any) => ((e.msg === invalidPreparedStatementError)));
+            mockMigrationDatabase = data.errors.find((e:any) => ((e.msg === mockMigrationDatabaseError)));
           }
           else {
             // single error returned as string
             invalidSchedule = (data.errors === invalidScheduleError) ? true : false;
             orphanedWorkflow = (data.errors === orphanedWorkflowError) ? true : false;
             invalidPreparedStatement = (data.errors === invalidPreparedStatementError) ? true : false;
+            mockMigrationDatabase = (data.errors === mockMigrationDatabaseError) ? true : false;
           }
           if (invalidSchedule) {
             this.setState({
@@ -561,6 +567,10 @@ class Workflow extends React.Component<IProps, IState> {
           } else if (invalidPreparedStatement) {
             this.setState({
               invalidPreparedStatement: true,
+            });
+          } else if (mockMigrationDatabase) {
+            this.setState({
+              mockMigrationDatabase: true,
             });
           }
           return;
@@ -695,6 +705,7 @@ class Workflow extends React.Component<IProps, IState> {
       orphanedWorkflow: false,
       invalidDeltaUpdate: false,
       invalidPreparedStatement: false,
+      mockMigrationDatabase: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
     });
@@ -2047,6 +2058,27 @@ class Workflow extends React.Component<IProps, IState> {
                       [month](1-12)
                       [day of the week](0-6)
                     </b>
+                  </p>
+                </DialogContentText>
+
+                <DialogActions>
+                  <Button color="primary" onClick={this.hideErrorDialog}>
+                    Okay
+                  </Button>
+                </DialogActions>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={this.state.mockMigrationDatabase}
+              aria-labelledby="dialog-title"
+              aria-describedby="dialog-description"
+            >
+              <DialogTitle id="dialog-title">Error</DialogTitle>
+              <DialogContent>
+                <DialogContentText id="dialog-description">
+                  <p>
+                    Your database and cloned database name cannot be identical.
                   </p>
                 </DialogContentText>
 
