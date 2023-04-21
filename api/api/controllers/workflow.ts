@@ -116,6 +116,7 @@ export async function getWorkflows(req: Request, res: Response) {
       d.dataValues.agentId = agentIds[agentId];
       // attach agent name for display purposes
       d.dataValues.agentName = agentNames[agentId];
+      d.dataValues.allOutputs = [];
       d.dataValues.redactrules.map((rr: any) => {
         const r = rr;
         delete r.dataValues.id;
@@ -155,6 +156,15 @@ export async function getWorkflows(req: Request, res: Response) {
         delete wi.dataValues.inputId;
         delete wi.dataValues.workflowId;
         return wi.dataValues;
+      });
+      allInputs.forEach((input:any) => {
+        // find data sources that are not being used as inputs
+        if (!d.dataValues.inputs.find((wi:any) => (wi.uuid === input.dataValues.uuid))) {
+          d.dataValues.allOutputs.push({
+            uuid: input.dataValues.uuid,
+            inputName: input.dataValues.inputName,
+          });
+        }
       });
       d.dataValues.allDatabaseTables = allDatabaseTables;
 
@@ -198,7 +208,6 @@ export async function getWorkflows(req: Request, res: Response) {
       redactrulesets,
       agents,
       agentInputs,
-      allInputs,
     });
   } catch (e) {
     logger.error(e.stack);
@@ -628,18 +637,29 @@ async function saveERL(req: Request, res: Response) {
       if (digitalTwin) {
         if (digitalTwin.dataFeedConfig.enableDeltaUpdates
           && !digitalTwin.dataFeedConfig.deltaUpdateField) {
-          return res.status(400).json({ error: 'You must provide your data update field to enable delta updates' });
+          return res.status(400).json({ errors: 'You must provide your delta update field to enable delta updates' });
         }
         if (digitalTwin.dataFeedConfig.enablePostUpdatePreparedStatements
           && (!digitalTwin.dataFeedConfig.postUpdateKeyValues
             || !digitalTwin.dataFeedConfig.postUpdateKeyValues.length
           )) {
-          return res.status(400).json({ error: 'You must provide some key/value pairs for your prepared statements' });
+          return res.status(400).json({ errors: 'You must provide some key/value pairs for your prepared statements' });
+        }
+        if (digitalTwin.dataFeedConfig.inputSource && req.body.inputs && req.body.inputs.length) {
+          let validTwinDestination:boolean = true;
+          req.body.inputs.forEach((input:any) => {
+            if (input.uuid === digitalTwin.dataFeedConfig.inputSource) {
+              validTwinDestination = false;
+            }
+          });
+          if (!validTwinDestination) {
+            return res.status(400).json({ errors: 'Your digital twin output cannot be the same as your input' });
+          }
         }
       }
     }
 
-    // save redact rules
+    // save react rules
     const redactRuleUuids = await saveRedactRules(workflow, req);
     // save inputs
     const validInputs = await saveInputs(workflow, req);

@@ -97,8 +97,8 @@ def set_exclude_tables(input):
         idx+=1
     
     if table_sql:
-        print("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql)
-        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql).fetchall()
+        print("SELECT * FROM information_schema.columns WHERE " + schema_sql + " OR " + table_sql)
+        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " OR " + table_sql).fetchall()
     else:
         print("SELECT * FROM information_schema.columns WHERE " + schema_sql)
         tables = source_db.execute("SELECT * FROM information_schema.columns WHERE " + schema_sql).fetchall()

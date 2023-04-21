@@ -213,13 +213,13 @@ class WorkflowInputs extends React.Component<IProps, IState> {
   outputMockConstraints() {
     let foundConstraints:boolean = false;
     let tables:string = "";
-    let workflowInput:any = {
-      uuid: ""
-    };
+    let workflowInput:any = null;
     this.props.agentInputs.forEach((input:AgentInputRecord) => {
-      workflowInput = this.props.inputs.find((i:WorkflowInputRecord) => {
-        return (i.uuid === input.uuid)
-      });
+      if (!workflowInput) {
+        workflowInput = this.props.inputs.find((i:WorkflowInputRecord) => {
+          return (i.uuid === input.uuid)
+        });
+      }
       if (workflowInput && workflowInput.tables && workflowInput.tables.length) {
         foundConstraints = true;
         tables = "all tables except " + workflowInput.tables.join(', ');
@@ -229,7 +229,6 @@ class WorkflowInputs extends React.Component<IProps, IState> {
       return (
         <Box>
           <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditInputDialog({
-            inputName: workflowInput.inputName,
             uuid: workflowInput.uuid,
             enabled: workflowInput.enabled,
             tableSelection: "allExclude",

@@ -54,7 +54,7 @@ import DatabaseMigrationSetup from './DatabaseMigrationSetup';
 
 import {
   RedactRule, CustomSecret, WorkflowRecord, WorkflowUpdate, PostUpdateParam,
-  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, InputRecord, AgentInputRecord, 
+  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, AgentInputRecord, 
   WorkflowInputRecord,
 } from '../../types/redactics';
 
@@ -92,7 +92,6 @@ interface IProps {
   handleWFChanges: any;
   workflow: WorkflowRecord;
   agentInputs: AgentInputRecord[];
-  allInputs: InputRecord[];
   agents: AgentRecord[];
   presets?: RedactRulePreset[];
   redactrulesets: RedactRuleSet[];
@@ -162,7 +161,8 @@ interface IState {
   showSnackbarEdit: boolean;
   showOutputOptions: boolean;
   editDataFeed: boolean;
-  columnExclusionProhibited: boolean;
+  invalidDeltaUpdate: boolean;
+  invalidPreparedStatement: boolean;
   invalidForgetUserFields: boolean;
   invalidMigrationFields: boolean;
   digitalTwinAdded: boolean;
@@ -304,7 +304,6 @@ class Workflow extends React.Component<IProps, IState> {
       },
       input: {
         uuid: "",
-        inputName: "",
         enabled: true,
         tables: [],
         tableSelection: "all"
@@ -335,7 +334,8 @@ class Workflow extends React.Component<IProps, IState> {
       currentDatabaseTable: "",
       showOutputOptions: false,
       editDataFeed: false,
-      columnExclusionProhibited: false,
+      invalidDeltaUpdate: false,
+      invalidPreparedStatement: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
       digitalTwinAdded: false,
@@ -520,22 +520,25 @@ class Workflow extends React.Component<IProps, IState> {
         if (data.errors) {
           let invalidSchedule:boolean = false;
           let orphanedWorkflow:boolean = false;
-          let columnExclusion:boolean = false;
+          let invalidDeltaUpdate:boolean = false;
+          let invalidPreparedStatement:boolean = false;
           const invalidScheduleError = "Invalid schedule";
           const orphanedWorkflowError = "Invalid agent ID";
-          const columnExclusionError = "Data feed does not permit column exclusion";
+          const invalidDeltaUpdateError = "You must provide your delta update field to enable delta updates";
+          const invalidPreparedStatementError = "You must provide some key/value pairs for your prepared statements";
           
           if (Array.isArray(data.errors)) {
             // multiple errors found
             invalidSchedule = data.errors.find((e:any) => ((e.msg === invalidScheduleError)));
             orphanedWorkflow = data.errors.find((e:any) => ((e.msg === orphanedWorkflowError) && e.param === 'agentId'));
-            columnExclusion = data.errors.find((e:any) => ((e.msg === columnExclusionError)));
+            invalidDeltaUpdate = data.errors.find((e:any) => ((e.msg === invalidDeltaUpdateError)));
+            invalidPreparedStatement = data.errors.find((e:any) => ((e.msg === invalidPreparedStatementError)));
           }
           else {
             // single error returned as string
             invalidSchedule = (data.errors === invalidScheduleError) ? true : false;
             orphanedWorkflow = (data.errors === orphanedWorkflowError) ? true : false;
-            columnExclusion = (data.errors === columnExclusionError) ? true : false;
+            invalidPreparedStatement = (data.errors === invalidPreparedStatementError) ? true : false;
           }
           if (invalidSchedule) {
             this.setState({
@@ -551,9 +554,13 @@ class Workflow extends React.Component<IProps, IState> {
                 agentId: true,
               },
             });
-          } else if (columnExclusion) {
+          } else if (invalidDeltaUpdate) {
             this.setState({
-              columnExclusionProhibited: true,
+              invalidDeltaUpdate: true,
+            });
+          } else if (invalidPreparedStatement) {
+            this.setState({
+              invalidPreparedStatement: true,
             });
           }
           return;
@@ -686,7 +693,8 @@ class Workflow extends React.Component<IProps, IState> {
       missingSecretField: false,
       invalidOutputSettingField: false,
       orphanedWorkflow: false,
-      columnExclusionProhibited: false,
+      invalidDeltaUpdate: false,
+      invalidPreparedStatement: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
     });
@@ -955,7 +963,6 @@ class Workflow extends React.Component<IProps, IState> {
     // dereference
     //console.log("TRIGGER EDIT", input);
     let inputCopy:WorkflowInputRecord = {
-      inputName: input.inputName,
       uuid: input.uuid,
       enabled: input.enabled,
       tables: input.tables,
@@ -1744,7 +1751,6 @@ class Workflow extends React.Component<IProps, IState> {
 
                   <WorkflowPostExport
                     inputs={this.state.inputs}
-                    allInputs={this.props.allInputs}
                     dataFeeds={this.state.dataFeeds}
                     dataFeed={this.state.dataFeed}
                     addParameterValue={this.addParameterValue}

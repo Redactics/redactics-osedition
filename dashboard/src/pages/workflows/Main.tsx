@@ -87,7 +87,7 @@ interface IState {
   newWorkflowDialog: boolean;
   workflows: WorkflowRecord[];
   agentInputs: AgentInputRecord[];
-  allInputs: InputRecord[];
+  allOutputs: InputRecord[];
   presets: RedactRulePreset[];
   redactrulesets: RedactRuleSet[];
   agents: AgentRecord[];
@@ -111,7 +111,7 @@ class Workflows extends React.Component<IProps, IState> {
       newWorkflowDialog: false,
       workflows: [],
       agentInputs: [],
-      allInputs: [],
+      allOutputs: [],
       presets: [],
       redactrulesets: [],
       agents: [],
@@ -151,7 +151,7 @@ class Workflows extends React.Component<IProps, IState> {
       this.setState({
         workflows: data.workflows,
         agentInputs: data.agentInputs,
-        allInputs: data.allInputs,
+        allOutputs: data.allOutputs,
         presets: data.presets,
         redactrulesets: data.redactrulesets,
         agents: data.agents,
@@ -498,7 +498,6 @@ class Workflows extends React.Component<IProps, IState> {
           redactrulesets={this.state.redactrulesets}
           agents={this.state.agents}
           agentInputs={this.state.agentInputs}
-          allInputs={this.state.allInputs}
           key={workflow.uuid}
           handleWFChanges={this.handleWFChanges}
           deleteWorkflow={this.deleteWorkflow}

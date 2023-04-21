@@ -104,7 +104,6 @@ const Button = styled(MuiButton)(spacing);
 
 interface IProps {
   inputs: WorkflowInputRecord[];
-  allInputs: InputRecord[];
   handleDeleteSecret: any;
   agentNamespace?: string;
   dataFeeds: DataFeed[];
@@ -363,19 +362,19 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                     Digital Twin Options
                   </Typography>
 
-                  <p>Adding this data feed will require updating your Agent configuration file (provided within the <Link href="/agents" target="_blank">Agents</Link> page), replacing the "changeme"s for connection ID <code>{this.props.dataFeed.uuid}</code> with the specified connection info for this input source.</p>
+                  <p>Adding this data feed will require updating your Agent configuration file (provided within the <Link href="/agents" target="_blank">Agents</Link> page), replacing the "changeme"s for connection ID <code>{this.props.dataFeed.uuid}</code> with the specified connection info for this data source.</p>
 
                   <Box mt={4}>
                     <FormControl margin="dense" fullWidth>
                       <InputLabel>
-                        Input Source
+                        Output Destination
                       </InputLabel>
                       <Select
                         value={this.props.dataFeed.dataFeedConfig.inputSource}
                         name="inputSource"
                         onChange={(event) => this.props.handleDataFeedOptions(event)}
                       >
-                        {this.props.allInputs.map((input:InputRecord) => (
+                        {this.props.workflow.allOutputs.map((input:InputRecord) => (
                           <MenuItem key={input.uuid} value={input.uuid}>{input.inputName}</MenuItem>
                         ))}
                       </Select>

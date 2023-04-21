@@ -342,17 +342,18 @@ export async function helmCmd(req: Request, res: Response) {
 
     let largestDisk = 0;
     let largestDiskPadded = 0;
+    let totalDBSize = 0;
 
     agentInputs.forEach((i:any) => {
       const findInput = allInputs.find((input:any) => (
         input.dataValues.id === i.dataValues.inputId
       ));
       if (findInput) {
-        if (!helmArgs.postgresql.persistence.size
-          || (findInput.dataValues.exportData && findInput.dataValues.diskSize > largestDisk)) {
+        if (findInput.dataValues.exportData && findInput.dataValues.diskSize > largestDisk) {
           // add additional buffer for uncompressed, plain text files
           largestDisk = findInput.dataValues.diskSize;
           largestDiskPadded = Math.ceil(largestDisk * 3);
+          totalDBSize += findInput.dataValues.diskSize;
         }
       }
     });
@@ -366,6 +367,8 @@ export async function helmCmd(req: Request, res: Response) {
           size: largestDiskPadded,
         },
       };
+      // all tmp data plus 5 GB for Airflow data
+      helmArgs.postgresql.persistence.size = totalDBSize + 5;
     } else {
       helmArgs.httpNas = {
         persistence: {

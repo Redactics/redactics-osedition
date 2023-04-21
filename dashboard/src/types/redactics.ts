@@ -130,6 +130,7 @@ export interface WorkflowRecord extends WorkflowUpdate {
   lastStackTrace?: string;
   redactrules?: RedactRule[];
   inputs: WorkflowInputRecord[];
+  allOutputs: InputRecord[];
   datafeeds: DataFeed[];
   allDatabaseTables: string[];
   agentName: string;
@@ -157,7 +158,6 @@ export interface AgentInputRecord {
 
 export interface WorkflowInputRecord {
   uuid: string;
-  inputName: string;
   enabled: boolean;
   tables: string[];
   tableSelection: string;

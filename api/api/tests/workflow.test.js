@@ -9,7 +9,7 @@ const util = require('util');
 
 const { Op } = require('sequelize');
 
-var redactRuleSets, sampleInput, sampleAgent, workflowInputs, maskingRules, exportTableDataConfig, s3DataFeed, digitalTwinDataFeed, redactRulePresets, agentId, agentUuid, workflowId, workflowUuid, workflowWebUuid, workflowWebId, presetReplacement, redactEmailPreset, scan, scanTable, inputId, inputUuid, inputMMUuid, dataFeedUuid, workflowJobUuid, workflowJobId, workflowMMUuid;
+var redactRuleSets, sampleInput, sampleInput2, sampleAgent, workflowInputs, maskingRules, exportTableDataConfig, s3DataFeed, digitalTwinDataFeed, redactRulePresets, agentId, agentUuid, workflowId, workflowUuid, workflowWebUuid, workflowWebId, presetReplacement, redactEmailPreset, scan, scanTable, inputId, inputUuid, inputMMUuid, dataFeedUuid, workflowJobUuid, workflowJobId, workflowMMUuid;
 
 const { genSeedData } = require('./seed');
 const { genSampleInput } = require('./sample-input');
@@ -31,8 +31,9 @@ describe('Workflow endpoints', () => {
     redactEmailPreset = seedData.redactEmailPreset;
   })
 
-  it('create sample input', async () => {
+  it('create sample inputs', async () => {
     sampleInput = await genSampleInput('Test Input');
+    sampleInput2 = await genSampleInput('Test Input2');
   });
 
   it('create sample agent', async () => {
@@ -606,6 +607,9 @@ describe('Workflow endpoints', () => {
     expect(res.body.workflows[0].inputs[0].enabled).toEqual(true);
     expect(res.body.workflows[0].inputs[0].inputName).toEqual('Test Input');
     expect(res.body.workflows[0].inputs[0].tables).toEqual(['public.athletes', 'public.marketing_campaign']);
+    // assure output data source options exclude configured inputs
+    expect(res.body.workflows[0].allOutputs.length).toEqual(1);
+    expect(res.body.workflows[0].allOutputs[0].uuid).toEqual(sampleInput2.dataValues.uuid);
     expect(res.body.presets.length).toEqual(4);
     expect(res.body.redactrulesets.length).toEqual(4);
     expect(res.body.agents.length).toEqual(1);

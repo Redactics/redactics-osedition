@@ -626,8 +626,9 @@ try:
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for t in initial_copies:
+                        schema = t.split('.')[0]
                         table = t.split('.')[1]
-                        cmds.append(["/scripts/data-restore.sh", dag_name, table, input_id])
+                        cmds.append(["/scripts/data-restore.sh", dag_name, "\"" + schema + "\".\"" + table + "\"", input_id])
             return cmds
         initial_copy_tasks += 1
 
