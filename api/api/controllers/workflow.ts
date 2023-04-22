@@ -813,7 +813,7 @@ async function saveMockMigration(req: Request, res: Response) {
     }
 
     if (req.body.migrationDatabase === req.body.migrationDatabaseClone) {
-      return res.status(400).json({ errors: 'your input and target database cannot be identical' });
+      return res.status(400).json({ errors: 'Your input and target database cannot be identical' });
     }
 
     // show UI feedback about updating helm config file if namespace has changed

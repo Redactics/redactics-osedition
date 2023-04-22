@@ -164,6 +164,7 @@ interface IState {
   invalidDeltaUpdate: boolean;
   invalidPreparedStatement: boolean;
   mockMigrationDatabase: boolean;
+  invalidDigitalTwinOutput: boolean;
   invalidForgetUserFields: boolean;
   invalidMigrationFields: boolean;
   digitalTwinAdded: boolean;
@@ -338,6 +339,7 @@ class Workflow extends React.Component<IProps, IState> {
       invalidDeltaUpdate: false,
       invalidPreparedStatement: false,
       mockMigrationDatabase: false,
+      invalidDigitalTwinOutput: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
       digitalTwinAdded: false,
@@ -525,11 +527,13 @@ class Workflow extends React.Component<IProps, IState> {
           let invalidDeltaUpdate:boolean = false;
           let invalidPreparedStatement:boolean = false;
           let mockMigrationDatabase:boolean = false;
+          let invalidDigitalTwinOutput:boolean = false;
           const invalidScheduleError = "Invalid schedule";
           const orphanedWorkflowError = "Invalid agent ID";
           const invalidDeltaUpdateError = "You must provide your delta update field to enable delta updates";
           const invalidPreparedStatementError = "You must provide some key/value pairs for your prepared statements";
-          const mockMigrationDatabaseError = "your input and target database cannot be identical";
+          const mockMigrationDatabaseError = "Your input and target database cannot be identical";
+          const invalidDigitalTwinOutputError = "Your digital twin output cannot be the same as your input";
           
           if (Array.isArray(data.errors)) {
             // multiple errors found
@@ -538,6 +542,7 @@ class Workflow extends React.Component<IProps, IState> {
             invalidDeltaUpdate = data.errors.find((e:any) => ((e.msg === invalidDeltaUpdateError)));
             invalidPreparedStatement = data.errors.find((e:any) => ((e.msg === invalidPreparedStatementError)));
             mockMigrationDatabase = data.errors.find((e:any) => ((e.msg === mockMigrationDatabaseError)));
+            invalidDigitalTwinOutput = data.errors.find((e:any) => ((e.msg === invalidDigitalTwinOutputError)));
           }
           else {
             // single error returned as string
@@ -545,6 +550,7 @@ class Workflow extends React.Component<IProps, IState> {
             orphanedWorkflow = (data.errors === orphanedWorkflowError) ? true : false;
             invalidPreparedStatement = (data.errors === invalidPreparedStatementError) ? true : false;
             mockMigrationDatabase = (data.errors === mockMigrationDatabaseError) ? true : false;
+            invalidDigitalTwinOutput = (data.errors === invalidDigitalTwinOutputError) ? true : false;
           }
           if (invalidSchedule) {
             this.setState({
@@ -571,6 +577,10 @@ class Workflow extends React.Component<IProps, IState> {
           } else if (mockMigrationDatabase) {
             this.setState({
               mockMigrationDatabase: true,
+            });
+          } else if (invalidDigitalTwinOutput) {
+            this.setState({
+              invalidDigitalTwinOutput: true,
             });
           }
           return;
@@ -706,6 +716,7 @@ class Workflow extends React.Component<IProps, IState> {
       invalidDeltaUpdate: false,
       invalidPreparedStatement: false,
       mockMigrationDatabase: false,
+      invalidDigitalTwinOutput: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
     });
@@ -2078,6 +2089,27 @@ class Workflow extends React.Component<IProps, IState> {
                 <DialogContentText id="dialog-description">
                   <p>
                     Your database and cloned database name cannot be identical.
+                  </p>
+                </DialogContentText>
+
+                <DialogActions>
+                  <Button color="primary" onClick={this.hideErrorDialog}>
+                    Okay
+                  </Button>
+                </DialogActions>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={this.state.invalidDigitalTwinOutput}
+              aria-labelledby="dialog-title"
+              aria-describedby="dialog-description"
+            >
+              <DialogTitle id="dialog-title">Error</DialogTitle>
+              <DialogContent>
+                <DialogContentText id="dialog-description">
+                  <p>
+                    You cannot designate a Digital Twin output that is also configured as an input source.
                   </p>
                 </DialogContentText>
 
