@@ -307,7 +307,7 @@ class Workflow extends React.Component<IProps, IState> {
         uuid: "",
         enabled: true,
         tables: [],
-        tableSelection: "all"
+        tableSelection: ""
       },
       inputs: this.props.workflow.inputs,
       numInputs: this.props.workflow.inputs.length,
@@ -632,8 +632,8 @@ class Workflow extends React.Component<IProps, IState> {
   }
 
   missingInput() {
-    const inputs = this.props.workflow.inputs.find((input:WorkflowInputRecord) => {
-      return (input.enabled === true && input.tableSelection !== "none")
+    const inputs = this.state.inputs.find((input:WorkflowInputRecord) => {
+      return (input.enabled === true && input.tableSelection)
     });
     return (inputs) ? false : true;
   }
@@ -972,7 +972,6 @@ class Workflow extends React.Component<IProps, IState> {
 
   triggerEditInputDialog(input:WorkflowInputRecord) {
     // dereference
-    //console.log("TRIGGER EDIT", input);
     let inputCopy:WorkflowInputRecord = {
       uuid: input.uuid,
       enabled: input.enabled,
@@ -1707,7 +1706,7 @@ class Workflow extends React.Component<IProps, IState> {
 
           <Box mt={4} display={(this.props.workflow.workflowType.match(/^ERL/)) ? 'block' : 'none'}>
             <Paper variant="outlined">
-              <ExpansionPanel disabled={this.missingInput()} expanded={this.state.transformExpanded} onChange={(event, expanded) => this.transformExpansion(event, expanded)}>
+              <ExpansionPanel disabled={this.missingInput()} expanded={!this.missingInput() && this.state.transformExpanded} onChange={(event, expanded) => this.transformExpansion(event, expanded)}>
                 <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>Processing/Transformation Settings</Typography>
                 </ExpansionPanelSummary>

@@ -525,7 +525,7 @@ export async function helmConfig(req: Request, res: Response) {
     let enableWebserver:boolean = (process.env.NODE_ENV === 'development');
     const migrationNamespaces:string[] = [];
     workflows.forEach((workflow:any) => {
-      if (workflow.dataValues.workflowType === 'mockDatabaseMigration') {
+      if (workflow.dataValues.workflowType === 'mockDatabaseMigration' && workflow.dataValues.migrationNamespace) {
         enableWebserver = true;
         migrationNamespaces.push(workflow.dataValues.migrationNamespace);
       }

@@ -648,7 +648,7 @@ async function saveERL(req: Request, res: Response) {
         if (digitalTwin.dataFeedConfig.inputSource && req.body.inputs && req.body.inputs.length) {
           let validTwinDestination:boolean = true;
           req.body.inputs.forEach((input:any) => {
-            if (input.uuid === digitalTwin.dataFeedConfig.inputSource) {
+            if (input.uuid === digitalTwin.dataFeedConfig.inputSource && input.enabled) {
               validTwinDestination = false;
             }
           });

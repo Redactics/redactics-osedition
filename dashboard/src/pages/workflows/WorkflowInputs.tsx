@@ -191,7 +191,7 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                 name="tableSelection"
                 onChange={(event) => this.props.handleInputChanges(event, this.props.input)}
               >
-                <MenuItem key="none" value="none">None</MenuItem>
+                <MenuItem key="" value="">None</MenuItem>
                 <MenuItem key="all" value="all">Select all tables in all schema</MenuItem>
                 <MenuItem key="allExclude" value="allExclude">Select all tables in all schema with specified exclusions</MenuItem>
                 <MenuItem key="specific" value="specific">Select specific tables</MenuItem>
@@ -320,8 +320,8 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                     return (i.uuid === input.uuid)
                   });
                   let inputEnabled:boolean = (workflowInput) ? workflowInput.enabled : false;
-                  let tables:string = "";
-                  if (workflowInput && workflowInput.tableSelection) {
+                  let tables:string = "none selected";
+                  if (workflowInput) {
                     switch (workflowInput.tableSelection) {
                       case 'all':
                       tables = "all tables";
@@ -343,7 +343,6 @@ class WorkflowInputs extends React.Component<IProps, IState> {
                       tables: [],
                       tableSelection: "",
                     }
-                    tables = "none selected";
                   }
                   return (
                     <TableRow key={input.uuid}>
