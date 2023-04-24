@@ -352,7 +352,7 @@ export async function helmCmd(req: Request, res: Response) {
           // tally up size for redactics tmp database
           totalDBSize += findInput.dataValues.diskSize;
           // add additional 10% padding for uncompressed, plain text files for NAS storage
-          totalDBSizePadded += totalDBSize + Math.ceil(totalDBSize * 0.1);
+          totalDBSizePadded += findInput.dataValues.diskSize + Math.ceil(findInput.dataValues.diskSize * 0.1);
         }
       }
     });
