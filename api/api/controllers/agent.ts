@@ -340,31 +340,30 @@ export async function helmCmd(req: Request, res: Response) {
       },
     };
 
-    let largestDisk = 0;
-    let largestDiskPadded = 0;
     let totalDBSize = 0;
+    let totalDBSizePadded = 0;
 
     agentInputs.forEach((i:any) => {
       const findInput = allInputs.find((input:any) => (
         input.dataValues.id === i.dataValues.inputId
       ));
       if (findInput) {
-        if (findInput.dataValues.exportData && findInput.dataValues.diskSize > largestDisk) {
-          // add additional buffer for uncompressed, plain text files
-          largestDisk = findInput.dataValues.diskSize;
-          largestDiskPadded = Math.ceil(largestDisk * 3);
+        if (findInput.dataValues.exportData) {
+          // tally up size for redactics tmp database
           totalDBSize += findInput.dataValues.diskSize;
+          // add additional 10% padding for uncompressed, plain text files for NAS storage
+          totalDBSizePadded += totalDBSize + Math.ceil(totalDBSize * 0.1);
         }
       }
     });
 
     // console.log(helmArgs.workflows[0].inputs);
 
-    if (largestDiskPadded) {
+    if (totalDBSizePadded) {
       helmArgs.httpNas = {
         persistence: {
           enabled: true,
-          size: largestDiskPadded,
+          size: totalDBSizePadded,
         },
       };
       // all tmp data plus 5 GB for Airflow data
@@ -393,8 +392,8 @@ export async function helmCmd(req: Request, res: Response) {
       `--set "redactics.namespace=${agent.namespace}"`,
     ];
 
-    if (largestDiskPadded) {
-      helmCmdSet.push(`--set "http-nas.persistence.size=${largestDiskPadded}Gi"`);
+    if (totalDBSizePadded) {
+      helmCmdSet.push(`--set "http-nas.persistence.size=${totalDBSizePadded}Gi"`);
       helmCmdSet.push('--set "http-nas.persistence.enabled=true"');
     } else {
       helmCmdSet.push('--set "http-nas.persistence.enabled=false"');

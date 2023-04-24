@@ -176,7 +176,7 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(true);
     expect(res.body.helmArgs.postgresql.persistence.size).toEqual(6); // 1 GB + 5 GB buffer for Airflow data
     expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(true);
-    expect(res.body.helmArgs.httpNas.persistence.size).toEqual(3);
+    expect(res.body.helmArgs.httpNas.persistence.size).toEqual(2);
   });
 
   it('verify helmCmd creation', async() => {
