@@ -133,6 +133,7 @@ class Inputs extends React.Component<IProps, IState> {
         diskSize: 0,
         enableSSL: false,
         sslMode: "prefer",
+        extensionsSchema: "public",
       },
       editInputDialog: false,
       missingInput: false,
@@ -178,6 +179,7 @@ class Inputs extends React.Component<IProps, IState> {
           diskSize: input.diskSize,
           enableSSL: input.enableSSL,
           sslMode: input.sslMode,
+          extensionsSchema: input.extensionsSchema || "public",
         },
         editInputDialog: true,
       })
@@ -193,6 +195,7 @@ class Inputs extends React.Component<IProps, IState> {
           diskSize: 20,
           enableSSL: false,
           sslMode: "prefer",
+          extensionsSchema: "public",
         },
         editInputDialog:true,
       })
@@ -290,6 +293,19 @@ class Inputs extends React.Component<IProps, IState> {
               />
             </Box>
 
+            <Box mt={4} display={(this.state.input.inputType === "postgresql") ? 'block' : 'none'}>
+              <FormControl fullWidth variant="outlined">
+                <TextField
+                  error={this.state.errors.diskSize}
+                  name="extensionsSchema"
+                  label="Extensions Schema"
+                  onChange={(event) => this.handleInputChanges(event)}
+                  value={this.state.input.extensionsSchema}
+                  InputProps={{ endAdornment: <InputAdornment className={this.props.classes.selectAdornment} position="end"><Tooltip title="Schema hosting your extensions, if not the default &quot;public&quot; schema. Any enabled extensions in this input source will be enabled in this schema within your digital twins, where applicable." placement="right-start"><HelpIcon /></Tooltip></InputAdornment> }}
+                />
+              </FormControl>
+            </Box>
+
             <Box mt={4} display={(this.state.input.enableSSL) ? 'block' : 'none'}>
               Be sure to follow the "TLS/SSL Certificate Setup Instructions" included in the Agents page to facilitate connectivity using your certificates.
               <Box mt={4}>
@@ -336,6 +352,14 @@ class Inputs extends React.Component<IProps, IState> {
       state.errors.inputType = false;
     }
 
+    if (!state.input.extensionsSchema) {
+      state.errors.extensionsSchema = true;
+      errorsFound = true;
+    }
+    else {
+      state.errors.extensionsSchema = false;
+    }
+
     if (errorsFound) {
       this.setState({
         errors: state.errors
@@ -362,6 +386,7 @@ class Inputs extends React.Component<IProps, IState> {
         input.diskSize = state.input.diskSize;
         input.enableSSL = state.input.enableSSL;
         input.sslMode = state.input.sslMode;
+        input.extensionsSchema = state.input.extensionsSchema;
       }
 
       return input;

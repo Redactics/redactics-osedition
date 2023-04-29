@@ -273,6 +273,7 @@ export async function getWorkflow(req: Request, res: Response) {
           tables: i.dataValues.tables,
           tableSelection: i.dataValues.tableSelection,
           fullcopies: fullCopies,
+          extensionsSchema: i.dataValues.Input.dataValues.extensionsSchema,
         });
       }
     });

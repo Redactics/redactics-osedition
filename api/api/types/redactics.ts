@@ -111,6 +111,7 @@ export interface InputRecord {
   enableSSL?: boolean;
   sslMode?: string;
   exportData: boolean;
+  extensionsSchema?: string;
 }
 
 export interface AgentInputRecord {

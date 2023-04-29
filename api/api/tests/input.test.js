@@ -110,6 +110,7 @@ describe('Inputs endpoints', () => {
         exportData: true,
         redacticsGenerated: false,
         sslMode: "prefer",
+        extensionsSchema: "public",
       }, {
         inputName: "New Input",
         inputType: "postgresql",
@@ -118,6 +119,7 @@ describe('Inputs endpoints', () => {
         exportData: true,
         redacticsGenerated: false,
         sslMode: "verify-full",
+        extensionsSchema: "extensions",
       }]
     })
     expect(res.status).toBe(200);
