@@ -187,9 +187,18 @@ def set_input_tables(input, source_db, context):
     append_sql = []
     schema_sql = "table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'"
     table_sql = ""
-    tables = []        
+    views = []
+    tables = []
+    # build list of view definitions to exclude from table listings
+    views_query = source_db.execute("SELECT table_schema, table_name FROM information_schema.views WHERE table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema' AND view_definition IS NOT NULL").fetchall()
+    if len(views_query):
+        for idx, v in enumerate(views_query):
+            views.append(v["table_schema"] + "." + v["table_name"])
+    print("FOUND VIEWS")
+    print(list(dict.fromkeys(views)))
+
     if input["tableSelection"] == "all":
-        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'").fetchall()
+        tables = source_db.execute("SELECT table_schema, table_name FROM information_schema.columns WHERE table_schema NOT LIKE 'pg_%%' AND table_schema != 'information_schema'").fetchall()
     elif input["tableSelection"] == "specific" or input["tableSelection"] == "allExclude":
         for t in input["tables"]:
             schema = t.split('.')[0]
@@ -211,11 +220,12 @@ def set_input_tables(input, source_db, context):
                 table_sql += append_sql[idx]
             idx+=1
 
-        print("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql)
-        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql).fetchall()
+        print("SELECT table_schema, table_name FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql)
+        tables = source_db.execute("SELECT table_schema, table_name FROM information_schema.columns WHERE " + schema_sql + " AND " + table_sql).fetchall()
     if len(tables):
         for idx, t in enumerate(tables):
-                found_tables.append(t["table_schema"] + "." + t["table_name"])
+                if (t["table_schema"] + "." + t["table_name"]) not in views:
+                    found_tables.append(t["table_schema"] + "." + t["table_name"])
     print("FOUND TABLES")
     print(list(dict.fromkeys(found_tables)))
     Variable.set(dag_name + "-erl-input-tables-" + input["id"] + "-" + context["run_id"], json.dumps(list(dict.fromkeys(found_tables))))
@@ -246,11 +256,12 @@ def set_run_plan(**context):
                 twin_primary_key = ""
                 twin_primary_key_type = ""
                 if len(twin_tables):
-                    pk_query = digital_twin.execute("SELECT a.attname, format_type(a.atttypid, a.atttypmod) AS data_type FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '" + table + "'::regclass AND i.indisprimary").fetchall()
+                    pk_query = digital_twin.execute("SELECT c.column_name FROM information_schema.key_column_usage AS c LEFT JOIN information_schema.table_constraints AS t ON t.constraint_name = c.constraint_name WHERE c.constraint_schema = '" + schema + "' AND t.table_name = '" + table + "' AND t.constraint_type = 'PRIMARY KEY'").fetchall()
                     if len(pk_query):
                         pk_result = pk_query[0]
-                        twin_primary_key = pk_result["attname"]
-                        twin_primary_key_type = pk_result["data_type"]
+                        dt_result = digital_twin.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + pk_result["column_name"] + "'").fetchone()
+                        twin_primary_key = dt_result["column_name"]
+                        twin_primary_key_type = dt_result["data_type"]
 
             if len(source_tables) != len(tmp_tables):
                 # column has been added or removed
@@ -266,14 +277,14 @@ def set_run_plan(**context):
                             st["data_type"] != tmp_tables[idx]["data_type"] or
                             st["udt_name"] != tmp_tables[idx]["udt_name"]):
                             print("TMP DIFF")
-                            print(table)
-                            print(st)
-                            print(tmp_tables[idx])
+                            print(schema + "." + table)
+                            #print(st)
+                            #print(tmp_tables[idx])
                             schema_diff = True    
                     else:
                         # destination tables haven't been created yet
                         print("NO DEST TMP")
-                        print(table)
+                        print(schema + "." + table)
                         schema_diff = True
 
                 if digitalTwinEnabled:
@@ -292,16 +303,16 @@ def set_run_plan(**context):
                                 st["data_type"] != twin_tables[idx]["data_type"] or
                                 st["udt_name"] != twin_tables[idx]["udt_name"]) and (twin_tables[idx]["column_name"] != twin_primary_key):
                                 print("DT DIFF")
-                                print(table)
-                                print(st)
-                                print(twin_tables[idx])
+                                print(schema + "." + table)
+                                #print(st)
+                                #print(twin_tables[idx])
                                 schema_diff = True   
                         else:
                             # destination tables haven't been created yet
                             print("NO DEST DT")
-                            print(table)
-                            print(twin_primary_key)
-                            print(twin_primary_key_type)
+                            print(schema + "." + table)
+                            #print(twin_primary_key)
+                            #print(twin_primary_key_type)
                             schema_diff = True
 
             if not redactics_db_init:
@@ -491,52 +502,41 @@ try:
                 for t in input_tables:
                     schema = t.split('.')[0]
                     table = t.split('.')[1]
-                    print("CREATE SOURCE PRIMARY KEY " + table)
+                    print("CREATE SOURCE PRIMARY KEY " + schema + "." + table)
 
                     # get primary key(s)
-                    pk_query = connection.execute("SELECT a.attname, format_type(a.atttypid, a.atttypmod) AS data_type FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '" + table + "'::regclass AND i.indisprimary").fetchall()
+                    pk_query = connection.execute("SELECT c.column_name FROM information_schema.key_column_usage AS c LEFT JOIN information_schema.table_constraints AS t ON t.constraint_name = c.constraint_name WHERE c.constraint_schema = '" + schema + "' AND t.table_name = '" + table + "' AND t.constraint_type = 'PRIMARY KEY'").fetchall()
                     if len(pk_query):
                         pk_result = pk_query[0]
 
-                        result = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name = 'source_primary_key'").fetchall()
-                        if len(result) == 0:
-                            connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key " + pk_result["data_type"])
+                        result = connection.execute("SELECT column_name, column_default, data_type FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + pk_result["column_name"] + "'").fetchone()
+
+                        # check for presence of source primary key to create if necessary
+                        spk_query = connection.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name = 'source_primary_key'").fetchall()
+                        if len(spk_query) == 0:
+                            connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key " + result["data_type"])
                             connection.execute("CREATE INDEX \"" + table + "_source_primary_key\" ON \"" + schema + "\".\"" + table + "\"(source_primary_key)")
-                        result = connection.execute("SELECT * FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + pk_result["attname"] + "'").fetchone()
                         # create default sequence for primary key column, if necessary
                         if result["column_default"] is None:
-                            if pk_result["data_type"] == "uuid":
-                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + pk_result["attname"] + "\" SET DEFAULT uuid_generate_v4()")
+                            if result["data_type"] == "uuid":
+                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + result["column_name"] + "\" SET DEFAULT uuid_generate_v4()")
                             else:
                                 connection.execute("CREATE SEQUENCE IF NOT EXISTS \"" + schema + "\".\"" + table + "_pkey_seq\"")
-                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + pk_result["attname"] + "\" SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
+                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + result["column_name"] + "\" SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
                     else:
                         # create unused source_primary_key column of type int4
                         connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key int4")
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
-        def drop_fk_constraints(input_id, connection, tmp_schema, **context):
-            input_tables = json.loads(Variable.get(dag_name + "-erl-input-tables-" + input_id + "-" + context["run_id"], default_var=[]))
-            for t in input_tables:
-                schema = tmp_schema if tmp_schema else t.split('.')[0]
-                table = t.split('.')[1]
-
-                results = connection.execute("SELECT DISTINCT(tc.constraint_name) FROM information_schema.table_constraints AS tc JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema WHERE tc.constraint_type = 'FOREIGN KEY' AND ccu.table_schema ILIKE '" + schema + "' AND tc.table_name ILIKE '" + table + "'").fetchall()
-                if len(results):
-                    for constraint in results:
-                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
+        def drop_fk_constraints(connection, **context):
+            # destroy all foreign constraints
+            results = connection.execute("SELECT DISTINCT(constraint_name), table_schema, table_name FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY'").fetchall()
+            if len(results):
+                for constraint in results:
+                    print("ALTER TABLE \"" + constraint["table_schema"] + "\".\"" + constraint["table_name"] + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
+                    connection.execute("ALTER TABLE \"" + constraint["table_schema"] + "\".\"" + constraint["table_name"] + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
 
         # dynamic task mapping functions
-
-        @task(on_failure_callback=post_logs)
-        def conditional_extension_init(**context):
-            sql = []
-            redactics_db_init = db_init()
-            if not redactics_db_init:
-                # reset DB
-                sql = ["DROP EXTENSION IF EXISTS anon CASCADE;CREATE EXTENSION IF NOT EXISTS anon CASCADE;SELECT anon.init();"]
-            return sql
-
         @task(on_failure_callback=post_logs)
         def gen_table_resets(input_id, schema, connection, override_schema, **context):
             tables = []
@@ -552,6 +552,9 @@ try:
                 if len(results):
                     for extension in results:
                         extensions.append(extension["extname"])
+                    if "plpgsql" not in extensions:
+                        # add anon extension requirement
+                        extensions.append("plpgsql")
 
                 return [["/scripts/table-resets.sh", dag_name, schema, ",".join(tables), ",".join(extensions), override_schema]]
             else:
@@ -563,39 +566,51 @@ try:
         def schema_dump_cmds(input_id, **context):
             # initial copy schema dump
             cmds = []
+            unique_schema = []
             input_tables = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    if len(input_tables):
-                        connection = get_source_db(input["id"])
                     for t in input_tables:
                         schema = t.split('.')[0]
-                        table = t.split('.')[1]
-
-                        cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
-                        sequence_tables = []
-                        if len(cols):
-                            for col in cols:
-                                # add schema for dependent sequences
-                                sequence_arr = col["column_default"].split("'")
-                                sequence_table = sequence_arr[1]
-                                sequence_tables.append(schema + "." + table + ":" + sequence_table)
-                        cmds.append(["/scripts/schema-dump.sh", dag_name, schema + "." + table, ",".join(sequence_tables)])
+                        if schema not in unique_schema:
+                            unique_schema.append(schema)
+                            cmds.append(["/scripts/schema-dump.sh", dag_name, schema])                    
             return cmds
 
         @task(on_failure_callback=post_logs)
-        def schema_restore_cmds(input_id, schema, tmp_schema, **context):
+        def schema_restore_cmds(input_id, target_database, **context):
             # initial copy schema restore
             cmds = []
+            unique_schema = []
             initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
-                    for table in initial_copies:
-                        cmds.append(["/scripts/schema-restore.sh", dag_name, schema, table, tmp_schema])
+                    for t in initial_copies:
+                        schema = t.split('.')[0]
+                        if schema not in unique_schema:
+                            unique_schema.append(schema)
+                            cmds.append(["/scripts/schema-restore.sh", dag_name, target_database, schema])
             return cmds
         initial_copy_tasks += 1
         if digitalTwinEnabled:
             initial_copy_tasks += 1
+
+        @task(on_failure_callback=post_logs)
+        def stage_tmp_tables_cmds(input_id, **context):
+            # stage tmp tables into target schema
+            cmds = []
+            tables = []
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            for input in wf_config["inputs"]:
+                if input["id"] == input_id:
+                    for t in initial_copies:
+                        schema = t.split('.')[0]
+                        table = t.split('.')[1]
+                        tables.append(schema + "." + table)
+            if len(tables):
+                cmds.append(["/scripts/stage-tmp-tables.sh", dag_name, ",".join(tables)])
+            return cmds
+        initial_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
         def data_dump_cmds(input_id, **context):
@@ -706,12 +721,12 @@ try:
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
                     for t in delta_copies:
-                        #schema = t.split('.')[0]
+                        schema = t.split('.')[0]
                         table = t.split('.')[1]
-                        schema = MetaData(schema=dag_name)
+                        tmp_schema = MetaData(schema=dag_name)
 
                         # get primary key
-                        data = Table(table, schema, autoload=True, autoload_with=connection)
+                        data = Table(table, tmp_schema, autoload=True, autoload_with=connection)
                         primary_key = data.primary_key.columns.values()[0].name
                         # get schema info
                         cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + dag_name + "' ORDER BY ordinal_position ASC").fetchall()
@@ -720,7 +735,7 @@ try:
                         for c in cols:
                             col = "".join(c)
                             restore_columns.append('"' + col + '"')
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), "", primary_key])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + schema + "\".\"" + table + "\"", "1", ",".join(restore_columns), "", primary_key])
             return cmds
         delta_copy_tasks += 1
 
@@ -791,7 +806,7 @@ try:
                         else:
                             awk_print.append("\"\"")
                         restore_columns.append("source_primary_key")
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "0", ",".join(restore_columns), ",".join(awk_print), "", ""])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "0", ",".join(restore_columns), ",".join(awk_print), "", "", schema])
             return cmds
         initial_copy_tasks += 1
 
@@ -874,7 +889,7 @@ try:
                             elif col != primary_key:
                                 awk_print.append("$" + str((idx + 1)))
                                 restore_columns.append('"' + col + '"')
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key"])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key", schema])
             return cmds
         delta_copy_tasks += 1
 
@@ -891,16 +906,6 @@ try:
 
         init_workflow = init_wf()
         totalTasks += 1
-
-        init_pg_anon = PostgresOperator.partial(
-            task_id='init-pg-anonymizer-extension',
-            postgres_conn_id='redacticsDB',
-            database='redactics_tmp',
-            on_failure_callback=post_logs,
-            on_success_callback=post_taskend,
-            ).expand(
-                sql=conditional_extension_init()
-            )
         
         clean_dir = clean_dir_request()
         totalTasks += 1
@@ -918,8 +923,7 @@ try:
         totalTasks += 1
 
         clean_dir.set_upstream(init_workflow)
-        init_pg_anon.set_upstream(init_workflow)
-        init_custom_functions.set_upstream([clean_dir, init_pg_anon])
+        init_custom_functions.set_upstream(init_workflow)
 
         input_idx = 0
         for input in wf_config["inputs"]:
@@ -967,7 +971,7 @@ try:
                 ).expand(
                     cmds=schema_dump_cmds(input["id"])
                 )
-            schema_dump.set_upstream([init_custom_functions])
+            schema_dump.set_upstream([init_custom_functions, clean_dir])
 
             table_resets = KubernetesPodOperator.partial(
                 task_id="table-resets-" + str(input_idx),
@@ -1011,13 +1015,36 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema), "1")
+                    cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema))
                 )
             schema_restore.set_upstream(table_resets)
 
-            trigger_drop_fk_contraints = drop_fk_constraints(input["id"], get_redactics_tmp(), dag_name)
+            trigger_drop_fk_contraints = drop_fk_constraints(get_redactics_tmp())
             totalTasks += 1
             trigger_drop_fk_contraints.set_upstream(schema_restore)
+
+            stage_tmp_tables = KubernetesPodOperator.partial(
+                task_id="stage-tmp-tables-" + str(input_idx),
+                namespace=NAMESPACE,
+                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                image_pull_policy="Always",
+                get_logs=True,
+                env_vars=k8s_pg_tmp_envvars,
+                secrets=secrets,
+                affinity=affinity,
+                # resources = {
+                #     "request_memory": "256Mi"
+                # },
+                name="agent-stage-tmp-tables",
+                is_delete_operator_pod=is_delete_operator_pod,
+                in_cluster=True,
+                hostnetwork=False,
+                on_failure_callback=post_logs,
+                on_success_callback=post_taskend,
+                ).expand(
+                    cmds=stage_tmp_tables_cmds(input["id"])
+                )
+            stage_tmp_tables.set_upstream(trigger_drop_fk_contraints)
 
             data_dump = KubernetesPodOperator.partial(
                 task_id="data-dump-" + str(input_idx),
@@ -1041,7 +1068,7 @@ try:
                 ).expand(
                     cmds=data_dump_cmds(input["id"])
                 )
-            data_dump.set_upstream(trigger_drop_fk_contraints)
+            data_dump.set_upstream(stage_tmp_tables)
 
             restore_data = KubernetesPodOperator.partial(
                 task_id="restore-data-" + str(input_idx),
@@ -1089,7 +1116,7 @@ try:
                 ).expand(
                     cmds=delta_dump_newrow_cmds(input["id"])
                 )
-            delta_dump_newrow.set_upstream([init_custom_functions])
+            delta_dump_newrow.set_upstream([init_custom_functions, clean_dir])
 
             delta_dump_updatedrow = KubernetesPodOperator.partial(
                 task_id="delta-dump-updated-" + str(input_idx),
@@ -1112,7 +1139,7 @@ try:
                 ).expand(
                     cmds=delta_dump_updatedrow_cmds(input["id"])
                 )
-            delta_dump_updatedrow.set_upstream([init_custom_functions])
+            delta_dump_updatedrow.set_upstream([init_custom_functions, clean_dir])
 
             delta_restore = KubernetesPodOperator.partial(
                 task_id="delta-restore-" + str(input_idx),
@@ -1407,11 +1434,11 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend
                     ).expand(
-                        cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema), "")
+                        cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
                     )
                 dt_schema_restore.set_upstream(dt_table_resets)
 
-                trigger_drop_fk_contraints_dt = drop_fk_constraints(input["id"], get_digital_twin(), "")
+                trigger_drop_fk_contraints_dt = drop_fk_constraints(get_digital_twin())
                 totalTasks += 1
                 trigger_drop_fk_contraints_dt.set_upstream(dt_schema_restore)
 

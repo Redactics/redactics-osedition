@@ -6,6 +6,7 @@ set -exo pipefail
 
 WORKFLOW=$1
 TABLE=$2
+TABLE_NOQUOTES=${TABLE//"\""/}
 START_DATE=$3
 SAMPLE_FIELDS=$4
 CREATED_AT_FIELD=$5
@@ -15,7 +16,7 @@ UPDATED_AT_FIELD=$6
 
 if [ -z "$START_DATE" ]
 then
-  /scripts/dump-csv-anon.sh -t $TABLE | curl -X POST -H "Transfer-Encoding: chunked" -s -T - http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE}.csv
+  /scripts/dump-csv-anon.sh -t $TABLE | curl -X POST -H "Transfer-Encoding: chunked" -s -T - http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv
 else
-  /scripts/dump-csv-anon.sh -t $TABLE --start-date=$START_DATE --sample-fields=$SAMPLE_FIELDS --created-at=$CREATED_AT_FIELD --updated-at=$UPDATED_AT_FIELD | curl -X POST -H "Transfer-Encoding: chunked" -s -T - http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE}.csv
+  /scripts/dump-csv-anon.sh -t $TABLE --start-date=$START_DATE --sample-fields=$SAMPLE_FIELDS --created-at=$CREATED_AT_FIELD --updated-at=$UPDATED_AT_FIELD | curl -X POST -H "Transfer-Encoding: chunked" -s -T - http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv
 fi
