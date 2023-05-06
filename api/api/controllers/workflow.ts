@@ -1245,12 +1245,20 @@ export async function markFullCopy(req: Request, res: Response) {
         tableName: req.body.tableName,
       },
     });
-    const tableFullCopy = (!tableFullCopyCheck) ? await TableFullCopy.create({
-      inputId: input.dataValues.id,
-      tableName: req.body.tableName,
-    }) : tableFullCopyCheck.dataValues;
 
-    return res.send(tableFullCopy);
+    if (tableFullCopyCheck) {
+      tableFullCopyCheck.updatedAt = sequelize.literal('CURRENT_TIMESTAMP');
+      await tableFullCopyCheck.save();
+    } else {
+      await TableFullCopy.create({
+        inputId: input.dataValues.id,
+        tableName: req.body.tableName,
+      });
+    }
+
+    return res.send({
+      markFullCopy: true,
+    });
   } catch (e) {
     logger.error(e.stack);
     return res.status(500).send(e);

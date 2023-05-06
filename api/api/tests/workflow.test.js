@@ -1028,7 +1028,15 @@ describe('Workflow endpoints invoked by Agent', () => {
     expect(fullCopy.dataValues).toBeDefined();
   });
 
-  it('markFullCopy - prevent duplicate', async() => {
+  it('markFullCopy - prevent duplicate, track updated timestamp', async() => {
+    const fullCopy = await TableFullCopy.findOne({
+      where: {
+        inputId: sampleInput.dataValues.id,
+        tableName: "public.athletes"
+      }
+    });
+    const updatedAt = fullCopy.dataValues.updatedAt;
+
     const res = await agent
     .put('/workflow/markFullCopy')
     .send({
@@ -1037,13 +1045,14 @@ describe('Workflow endpoints invoked by Agent', () => {
     })
     .expect(200);
 
-    const fullCopy = await TableFullCopy.findAll({
+    const fullCopyCheck = await TableFullCopy.findAll({
       where: {
         inputId: sampleInput.dataValues.id,
         tableName: "public.athletes"
       }
     });
-    expect(fullCopy.length).toEqual(1);
+    expect(fullCopyCheck.length).toEqual(1);
+    expect(fullCopyCheck[0].dataValues.updatedAt).not.toEqual(updatedAt);
   });
 
   it('markFullCopy - second', async() => {

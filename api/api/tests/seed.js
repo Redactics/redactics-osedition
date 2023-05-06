@@ -3,7 +3,7 @@ import request from 'supertest';
 const agent = request.agent(app);
 
 import DB from '../db/sequelize';
-const { Agent, Workflow, RedactRules, RedactRuleset, RedactRulePresets, Input, Datafeed, HelmCmd, Notification } = DB.models;
+const { Agent, Workflow, RedactRules, RedactRuleset, RedactRulePresets, Input, Datafeed, HelmCmd, Notification, TableFullCopy } = DB.models;
 
 exports.genSeedData = async function() {
   await Agent.destroy({truncate: true});
@@ -15,6 +15,7 @@ exports.genSeedData = async function() {
   await Datafeed.destroy({truncate: true});
   await HelmCmd.destroy({truncate: true});
   await Notification.destroy({truncate: true});
+  await TableFullCopy.destroy({truncate: true});
 
   await RedactRuleset.create({
     redactKey: "redact_email",

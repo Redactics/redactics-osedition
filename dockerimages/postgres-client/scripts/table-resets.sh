@@ -53,7 +53,7 @@ done
 IFS=', ' read -r -a extensions <<< "$EXTENSIONS"
 for e in "${extensions[@]}"
 do
-    printf "DROP EXTENSION IF EXISTS \"${e}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+    printf "DROP EXTENSION IF EXISTS \"${e}\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
     printf "CREATE EXTENSION IF NOT EXISTS \"${e}\" schema \"${EXTENSIONS_SCHEMA}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
 done
 

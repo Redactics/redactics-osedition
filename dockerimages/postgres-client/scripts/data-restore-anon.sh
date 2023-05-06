@@ -16,18 +16,19 @@ SCHEMA=$(echo $TABLE | cut -d "." -f 1)
 SCHEMA=${SCHEMA//"\""/}
 TABLE_NOSCHEMA=$(echo $TABLE | cut -d "." -f 2)
 TABLE_NOSCHEMA=${TABLE_NOSCHEMA//"\""/}
-TEMP_TABLE=redactics_${TABLE_NOSCHEMA:0:53}
 
 if [ -z "$SOURCE_PRIMARY_KEY" ]
 then
     SOURCE_PRIMARY_KEY=$PRIMARY_KEY
 fi
 
-if [ "$CONNECTION" == "digital-twin" ]
+if [ "$CONNECTION" == "redactics-tmp" ]
 then
-    DEST_TABLE="${SOURCE_SCHEMA}.${TABLE_NOSCHEMA}"
+    # provided schema will be source schema, designate redactics tmp schema 
+    DEST_TABLE="\"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\""
 else
-    DEST_TABLE=$TABLE
+    # provided schema will be redactics tmp schema, designate source schema
+    DEST_TABLE="\"${SOURCE_SCHEMA}\".\"${TABLE_NOSCHEMA}\""
 fi
 
 /scripts/prep-certs.sh
@@ -44,8 +45,11 @@ then
 else
     if [ "$CONNECTION" == "redactics-tmp" ]
     then
+        TEMP_TABLE=\"${WORKFLOW}\".\"redactics_${TABLE_NOSCHEMA:0:53}\"
         # remove redactics generated columns so that we don't have to manipulate CSV to match source schema
         psql -c "ALTER TABLE \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" DROP COLUMN IF EXISTS redacted_email_counter;"
+    else
+        TEMP_TABLE=\"${SOURCE_SCHEMA}\".\"redactics_${TABLE_NOSCHEMA:0:53}\"
     fi
 
     # restore from delta dataset, and specify columns for digital twin to omit primary key
@@ -57,7 +61,7 @@ else
         if [ "$CONNECTION" == "redactics-tmp" ]
         then
             # clone to Redactics DB
-            curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-new.csv | psql -c "\copy \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" from stdin DELIMITER ',' csv;"
+            curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-new.csv | psql -c "\copy ${DEST_TABLE} from stdin DELIMITER ',' csv;"
         else
             # digital twin
             curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-new.csv | csvquote | gawk -vOFS=, -F "," "{print $AWK_PRINT}" | csvquote -u | psql -c "\copy ${DEST_TABLE}(${COLUMNS}) from stdin DELIMITER ',' csv;"
@@ -69,14 +73,13 @@ else
     if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
     then
         psql -c "DROP TABLE IF EXISTS ${TEMP_TABLE};"
+        psql -c "CREATE TABLE ${TEMP_TABLE} AS SELECT * FROM ${DEST_TABLE} LIMIT 0;"
         if [ "$CONNECTION" == "redactics-tmp" ]
         then
             # clone to Redactics DB
-            psql -c "CREATE TABLE ${TEMP_TABLE} AS SELECT * FROM \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" LIMIT 0;"
             curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv | psql -c "\copy ${TEMP_TABLE} from stdin DELIMITER ',' csv;"
         else
             # digital twin
-            psql -c "CREATE TABLE ${TEMP_TABLE} AS SELECT * FROM ${DEST_TABLE} LIMIT 0;"
             curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv | csvquote | gawk -vOFS=, -F "," "{print $AWK_PRINT}" | csvquote -u | psql -c "\copy ${TEMP_TABLE}(${COLUMNS}) from stdin DELIMITER ',' csv;"
         fi
         # apply updates from temporary table containing new updated data
