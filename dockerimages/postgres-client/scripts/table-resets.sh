@@ -7,6 +7,7 @@ TMP_DATABASE=$2
 TABLES=$3
 EXTENSIONS=$4
 OVERRIDE_SCHEMA=$5
+EXTENSIONS_SCHEMA=$6
 
 /scripts/prep-certs.sh
 
@@ -16,13 +17,10 @@ rm /tmp/${WORKFLOW}-drop-tables.sql || true
 IFS=', ' read -r -a tables <<< "$TABLES"
 FOUND_SCHEMA=()
 
-# TODO: setting for additional extensions
-EXTENSIONS_SCHEMA="extensions"
-# FOUND_SCHEMA+=("extensions")
-# for s in "${FOUND_SCHEMA[@]}"
-# do
-#    printf "CREATE SCHEMA IF NOT EXISTS \"$s\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql 
-# done
+if [ ! -z "$EXTENSIONS_SCHEMA" ]
+then
+    printf "CREATE SCHEMA IF NOT EXISTS \"$EXTENSIONS_SCHEMA\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql 
+fi
 
 for t in "${tables[@]}"
 do

@@ -15,7 +15,7 @@ INPUT_ID=$3
 
 # check that file was created
 check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv/wc)
-if [ "$check" != "Not Found" ]
+if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
 then
     # reset table in the event of task restarts
     psql -c "TRUNCATE TABLE \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\";"

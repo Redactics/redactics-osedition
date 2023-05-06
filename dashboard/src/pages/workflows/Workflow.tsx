@@ -287,6 +287,7 @@ class Workflow extends React.Component<IProps, IState> {
         sampleFields: "createdAndUpdated",
         createdAtField: "created_at",
         updatedAtField: "updated_at",
+        disableDeltaUpdates: false,
       },
       constraintSchema: "public",
       constraintTable: "",
@@ -358,6 +359,7 @@ class Workflow extends React.Component<IProps, IState> {
           sampleFields: config.sampleFields,
           createdAtField: config.createdAtField,
           updatedAtField: config.updatedAtField,
+          disableDeltaUpdates: config.disableDeltaUpdates,
         });
       });
     }
@@ -955,6 +957,7 @@ class Workflow extends React.Component<IProps, IState> {
         sampleFields: "createdAndUpdated",
         createdAtField: "created_at",
         updatedAtField: "updated_at",
+        disableDeltaUpdates: false,
       } 
     }
 
@@ -973,6 +976,10 @@ class Workflow extends React.Component<IProps, IState> {
       case 'sampleFields':
       case 'updatedAtField':
         state.tableOutputOptions[event.target.name] = event.target.value;
+        break;
+
+      case 'disableDeltaUpdates':
+        state.tableOutputOptions[event.target.name] = event.target.checked;
         break;
 
       default:  
@@ -1338,6 +1345,7 @@ class Workflow extends React.Component<IProps, IState> {
         sampleFields: "createdAndUpdated",
         createdAtField: "created_at",
         updatedAtField: "updated_at",
+        disableDeltaUpdates: false,
       }
     }
     else {
@@ -1411,7 +1419,7 @@ class Workflow extends React.Component<IProps, IState> {
       });
     }
 
-    console.log("FINAL", state.exportTableDataConfig);
+    //console.log("FINAL", state.exportTableDataConfig);
 
     this.setState({
       showOutputOptions: false,

@@ -42,11 +42,17 @@ then
         curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv | csvquote | gawk -vOFS=, -F "," "{print $AWK_PRINT}" | csvquote -u | psql -c "\copy ${DEST_TABLE}(${COLUMNS}) from stdin DELIMITER ',' csv header;"
     fi
 else
+    if [ "$CONNECTION" == "redactics-tmp" ]
+    then
+        # remove redactics generated columns so that we don't have to manipulate CSV to match source schema
+        psql -c "ALTER TABLE \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" DROP COLUMN IF EXISTS redacted_email_counter;"
+    fi
+
     # restore from delta dataset, and specify columns for digital twin to omit primary key
 
     # new rows
     check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-new.csv/wc)
-    if [ "$check" != "Not Found" ]
+    if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
     then
         if [ "$CONNECTION" == "redactics-tmp" ]
         then
@@ -60,16 +66,17 @@ else
 
     # updated rows
     check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv/wc)
-    if [ "$check" != "Not Found" ]
+    if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
     then
         psql -c "DROP TABLE IF EXISTS ${TEMP_TABLE};"
-        psql -c "CREATE TABLE ${TEMP_TABLE} AS SELECT * FROM ${DEST_TABLE} LIMIT 0;"
         if [ "$CONNECTION" == "redactics-tmp" ]
         then
             # clone to Redactics DB
-            curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv | psql -c "\copy ${TEMP_TABLE}(${COLUMNS}) from stdin DELIMITER ',' csv;"
+            psql -c "CREATE TABLE ${TEMP_TABLE} AS SELECT * FROM \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" LIMIT 0;"
+            curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv | psql -c "\copy ${TEMP_TABLE} from stdin DELIMITER ',' csv;"
         else
             # digital twin
+            psql -c "CREATE TABLE ${TEMP_TABLE} AS SELECT * FROM ${DEST_TABLE} LIMIT 0;"
             curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv | csvquote | gawk -vOFS=, -F "," "{print $AWK_PRINT}" | csvquote -u | psql -c "\copy ${TEMP_TABLE}(${COLUMNS}) from stdin DELIMITER ',' csv;"
         fi
         # apply updates from temporary table containing new updated data
@@ -78,7 +85,10 @@ else
         for c in "${columns[@]}"
         do
             column=$(echo $c | sed 's/"//g')
-            updates+=("\"${column}\"=${TEMP_TABLE}.\"${column}\"")
+            if [ "$column" != "redacted_email_counter" ]
+            then
+                updates+=("\"${column}\"=${TEMP_TABLE}.\"${column}\"")
+            fi
         done
         update_statements=$(IFS=, ; echo "${updates[*]}")
         psql -c "UPDATE ${DEST_TABLE} SET ${update_statements} FROM ${TEMP_TABLE} WHERE ${DEST_TABLE}.${SOURCE_PRIMARY_KEY} = ${TEMP_TABLE}.${SOURCE_PRIMARY_KEY};"

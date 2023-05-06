@@ -23,6 +23,8 @@ import {
   TableCell,
   TableBody,
   Grid as MuiGrid,
+  FormControlLabel,
+  Checkbox,
 } from '@material-ui/core';
 
 import {
@@ -83,6 +85,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
     if (!this.props.tableOutputOptions.errors) {
       this.props.tableOutputOptions.errors = {};
     }
+    const disableDeltaUpdates = this.props.tableOutputOptions.disableDeltaUpdates ? true : false;
 
     return (
       <Box mt={4}>
@@ -108,7 +111,25 @@ class WorkflowExport extends React.Component<IProps, IState> {
           </FormControl>
         </Box>
 
-        <Box mt={4} display={(this.props.constraintSchema && this.props.constraintTable) ? 'block' : 'none'}>
+        <Box mt={4}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={disableDeltaUpdates}
+                onChange={(event) => this.props.handleTableOutputChanges(event)}
+                name="disableDeltaUpdates"
+                color="primary"
+              />
+            }
+            label="Disable Delta Updates"
+          />
+        </Box>
+
+        <Box mt={4} display={(!disableDeltaUpdates && this.props.constraintSchema && this.props.constraintTable) ? 'block' : 'none'}>
+          <Typography variant="h5" gutterBottom>
+            Table Constraints
+          </Typography>
+
           <FormControl>
             <Select
               name="sampleFields"
@@ -172,15 +193,15 @@ class WorkflowExport extends React.Component<IProps, IState> {
   }
 
   displayConstraintsTable() {
-    let constraints:any = this.props.exportTableDataConfig.filter((config:any) => {
+    let options:any = this.props.exportTableDataConfig.filter((config:any) => {
       return config.numDays
     });
 
-    if (!constraints.length) {
+    if (!options.length) {
       return (
         <Box>
           <Button variant="contained" color="secondary" size="small" onClick={(event) => this.props.triggerOutputOptions(event, null)}>
-            <AddIcon />&nbsp;&nbsp;Add Data Sampling Constraint
+            <AddIcon />&nbsp;&nbsp;Set Table Output Options
           </Button>
         </Box>
       )
@@ -196,7 +217,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             <Grid item></Grid>
             <Grid item mb={6}>
               <Button variant="contained" color="secondary" size="small" onClick={(event) => this.props.triggerOutputOptions(event, null)}>
-                <AddIcon />&nbsp;&nbsp;Add Data Sampling Constraint
+                <AddIcon />&nbsp;&nbsp;Set Table Output Options
               </Button>
             </Grid>
           </Grid>
@@ -206,16 +227,19 @@ class WorkflowExport extends React.Component<IProps, IState> {
               <TableRow>
                 <TableCell>Table</TableCell>
                 <TableCell>Constraint</TableCell>
+                <TableCell>Delta Updates Disabled</TableCell>
                 <TableCell></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-            {constraints.map((c:any) => {
-              let tableName = c.table;
+            {options.map((o:any) => {
+              let tableName:string = o.table;
+              let deltaUpdatesDisabled:string = o.disableDeltaUpdates ? "yes" : "no";
               return (
                 <TableRow key={tableName}>
                   <TableCell>{tableName}</TableCell>
                   <TableCell>{this.props.genConstraintSummary(tableName)}</TableCell>
+                  <TableCell>{deltaUpdatesDisabled}</TableCell>
                   <TableCell>
                     <Button color="secondary" size="small" variant="contained" onClick={(event) => this.props.triggerOutputOptions(event, tableName)}>
                       <EditIcon />&nbsp;Edit
@@ -248,7 +272,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
           <Grid container>
             <Grid item xs={8}>
               <Typography variant="body1" gutterBottom>
-                If you want to constrain your outputs to a selected time range (creating smaller tables in the process) you can do so by adding your table constraints below. Note that if other tables depend on omitted data these relationships will be broken.
+                If you want to constrain your table outputs to a selected time range or skip attempting delta updates for specific tables you can do so by adding your configurations below. Note that if other tables depend on omitted data these relationships will be broken.
               </Typography>
             </Grid>
           </Grid>
@@ -261,7 +285,7 @@ class WorkflowExport extends React.Component<IProps, IState> {
             aria-labelledby="dialog-title"
             aria-describedby="dialog-description"
           >
-            <DialogTitle id="dialog-title">Data Sampling Constraint</DialogTitle>
+            <DialogTitle id="dialog-title">Table Output Options</DialogTitle>
             <DialogContent>
               <DialogContentText id="dialog-description">
                 {this.displayConstraintOptions()}

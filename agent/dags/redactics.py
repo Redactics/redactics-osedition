@@ -240,6 +240,15 @@ def set_run_plan(**context):
     copy_status = {}
     digital_twin = get_digital_twin()
     redactics_tmp = get_redactics_tmp()
+
+    # gather disabled delta updates
+    for export in wf_config["export"]:
+        for table, config in export.items():
+            if "disableDeltaUpdates" in config and config["disableDeltaUpdates"]:
+                print("PRESET INITIAL")
+                print(table)
+                initial_copies.append(table)
+
     for input in wf_config["inputs"]:
         source_db = get_source_db(input["id"])
         #Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
@@ -250,7 +259,7 @@ def set_run_plan(**context):
             schema_diff = False
 
             source_tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
-            tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
+            tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' AND column_name != 'redacted_email_counter' ORDER BY ordinal_position ASC").fetchall()
             if digitalTwinEnabled:
                 twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
                 twin_primary_key = ""
@@ -273,7 +282,6 @@ def set_run_plan(**context):
                 for idx, st in enumerate(source_tables):
                     if len(tmp_tables) > 0 and idx <= len(tmp_tables):
                         if (st["column_name"] != tmp_tables[idx]["column_name"] or
-                            st["is_nullable"] != tmp_tables[idx]["is_nullable"] or
                             st["data_type"] != tmp_tables[idx]["data_type"] or
                             st["udt_name"] != tmp_tables[idx]["udt_name"]):
                             print("TMP DIFF")
@@ -297,9 +305,6 @@ def set_run_plan(**context):
                             deltaUpdateFieldFound = True
                         if twin_primary_key and is_numeric_pk(twin_primary_key_type) and len(twin_tables) > 0 and idx <= len(twin_tables):
                             if (st["column_name"] != twin_tables[idx]["column_name"] or
-                                st["ordinal_position"] != twin_tables[idx]["ordinal_position"] or
-                                st["column_default"] != twin_tables[idx]["column_default"] or
-                                st["is_nullable"] != twin_tables[idx]["is_nullable"] or
                                 st["data_type"] != twin_tables[idx]["data_type"] or
                                 st["udt_name"] != twin_tables[idx]["udt_name"]) and (twin_tables[idx]["column_name"] != twin_primary_key):
                                 print("DT DIFF")
@@ -315,19 +320,19 @@ def set_run_plan(**context):
                             #print(twin_primary_key_type)
                             schema_diff = True
 
-            if not redactics_db_init:
+            if not redactics_db_init and (schema + "." + table) not in initial_copies:
                 # Redactics DB not inited - first time usage
                 copy_status[(schema + "." + table)] = "init"
                 initial_copies.append(schema + "." + table)
-            elif (schema + "." + table) in input["fullcopies"] and schema_diff:
+            elif (schema + "." + table) in input["fullcopies"] and schema_diff and (schema + "." + table) not in initial_copies:
                 # table copied but schema has changed - re-copy entire table
                 copy_status[(schema + "." + table)] = "schema-change-detected"
                 initial_copies.append(schema + "." + table)
-            elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] and deltaUpdateFieldFound:
+            elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] and deltaUpdateFieldFound and (schema + "." + table) not in initial_copies:
                 # table copied but schema has not changed - eligible for delta update
                 copy_status[(schema + "." + table)] = "delta"
                 delta_copies.append(schema + "." + table)
-            else:
+            elif (schema + "." + table) not in initial_copies:
                 # table not copied yet, or missing delta update field definition or value
                 copy_status[(schema + "." + table)] = "missing-delta-update-field" if digitalTwinEnabled and not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
                 initial_copies.append(schema + "." + table)
@@ -541,8 +546,10 @@ try:
         def gen_table_resets(input_id, schema, connection, override_schema, **context):
             tables = []
             initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            extensions_schema = ""
             for input in wf_config["inputs"]:
                 if input["id"] == input_id:
+                    extensions_schema = input["extensionsSchema"]
                     for table in initial_copies:
                         tables.append(table)
             if len(tables):
@@ -556,7 +563,7 @@ try:
                         # add anon extension requirement
                         extensions.append("plpgsql")
 
-                return [["/scripts/table-resets.sh", dag_name, schema, ",".join(tables), ",".join(extensions), override_schema]]
+                return [["/scripts/table-resets.sh", dag_name, schema, ",".join(tables), ",".join(extensions), override_schema, extensions_schema]]
             else:
                 return []
         if digitalTwinEnabled:
@@ -749,7 +756,7 @@ try:
                     for field in fields:
                         for fieldName, params in field.items():
                             if params["rule"] == "redact_email":
-                                security_labels.append("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" DROP COLUMN IF EXISTS redacted_email_counter;ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial;CREATE UNIQUE INDEX \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)") 
+                                security_labels.append("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" DROP COLUMN IF EXISTS redacted_email_counter;ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial;CREATE UNIQUE INDEX IF NOT EXISTS \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)") 
                                 security_labels.append(redact_email("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
                             elif params["rule"] == "destruction":
                                 security_labels.append(destruction("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\""))
