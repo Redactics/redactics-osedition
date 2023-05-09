@@ -20,6 +20,4 @@ then
     # reset table in the event of task restarts
     psql -c "TRUNCATE TABLE \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\";"
     curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv | psql -c "\copy \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" from stdin DELIMITER ',' csv header"
-    # mark full copy
-    curl -X PUT -d "{\"inputId\": \"${INPUT_ID}\", \"tableName\": \"${TABLE_NOQUOTES}\"}" -H "Content-Type: application/json" -s ${API_URL}/workflow/markFullCopy
 fi

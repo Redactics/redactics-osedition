@@ -11,6 +11,8 @@ AWK_PRINT=$5
 PRIMARY_KEY=$6
 SOURCE_PRIMARY_KEY=$7
 SOURCE_SCHEMA=$8
+INPUT_ID=$9
+REDACT_EMAIL_FIELDS=${10}
 # tables are limited to 63 characters, and strip quotation marks
 SCHEMA=$(echo $TABLE | cut -d "." -f 1)
 SCHEMA=${SCHEMA//"\""/}
@@ -30,6 +32,7 @@ else
     # provided schema will be redactics tmp schema, designate source schema
     DEST_TABLE="\"${SOURCE_SCHEMA}\".\"${TABLE_NOSCHEMA}\""
 fi
+DEST_TABLE_NOQUOTES=${DEST_TABLE//"\""/}
 
 /scripts/prep-certs.sh
 
@@ -41,6 +44,12 @@ then
         # reset table in the event of task restarts
         psql -c "TRUNCATE TABLE ${DEST_TABLE};"
         curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv | csvquote | gawk -vOFS=, -F "," "{print $AWK_PRINT}" | csvquote -u | psql -c "\copy ${DEST_TABLE}(${COLUMNS}) from stdin DELIMITER ',' csv header;"
+    fi
+
+    if [ "$CONNECTION" == "digital-twin" ]
+    then
+        # mark full copy
+        curl -X PUT -d "{\"inputId\": \"${INPUT_ID}\", \"tableName\": \"${DEST_TABLE_NOQUOTES}\"}" -H "Content-Type: application/json" -s ${API_URL}/workflow/markFullCopy
     fi
 else
     if [ "$CONNECTION" == "redactics-tmp" ]
@@ -84,13 +93,24 @@ else
         fi
         # apply updates from temporary table containing new updated data
         IFS=',' read -r -a columns <<< "$COLUMNS"
+        if [ ! -z "$REDACT_EMAIL_FIELDS" ]
+        then
+            IFS=',' read -r -a redact_email_fields <<< "$REDACT_EMAIL_FIELDS"
+        fi
         updates=()
         for c in "${columns[@]}"
         do
             column=$(echo $c | sed 's/"//g')
-            if [ "$column" != "redacted_email_counter" ]
+            # don't update primary key fields and fields with redacted email addresses to avoid duplication/ID conflicts
+            if [ "$column" != "redacted_email_counter" ] && [ "$column" != "$PRIMARY_KEY" ]
             then
-                updates+=("\"${column}\"=${TEMP_TABLE}.\"${column}\"")
+                if [ -z "$REDACT_EMAIL_FIELDS" ]; then
+                    # no email redaction fields
+                    updates+=("\"${column}\"=${TEMP_TABLE}.\"${column}\"")
+                elif [ ! -z "$REDACT_EMAIL_FIELDS" ] && [[ ! " ${redact_email_fields[*]} " =~ " ${column} " ]]; then
+                    # column is not in redact email field list
+                    updates+=("\"${column}\"=${TEMP_TABLE}.\"${column}\"")
+                fi
             fi
         done
         update_statements=$(IFS=, ; echo "${updates[*]}")

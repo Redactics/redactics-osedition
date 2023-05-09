@@ -234,6 +234,19 @@ def set_input_tables(input, source_db, context):
 def is_numeric_pk(data_type):
     return True if data_type == "smallint" or data_type == "integer" or data_type == "bigint" or data_type == "smallserial" or data_type == "serial" or data_type == "bigserial" else False
 
+def get_redact_email_fields(find_table):
+    redact_email_fields = []
+    for rules in wf_config["redactRules"]:
+        for t, fields in rules.items():
+            table = t.split('.')[1]
+
+            if table == find_table:
+                for field in fields:
+                    for fieldName, params in field.items():
+                        if params["rule"] == "redact_email":
+                            redact_email_fields.append(fieldName)
+    return redact_email_fields
+
 def set_run_plan(**context):
     delta_copies = []
     initial_copies = []
@@ -241,18 +254,17 @@ def set_run_plan(**context):
     digital_twin = get_digital_twin()
     redactics_tmp = get_redactics_tmp()
 
-    # gather disabled delta updates
-    for export in wf_config["export"]:
-        for table, config in export.items():
-            if "disableDeltaUpdates" in config and config["disableDeltaUpdates"]:
-                print("PRESET INITIAL")
-                print(table)
-                initial_copies.append(table)
-
     for input in wf_config["inputs"]:
         source_db = get_source_db(input["id"])
         #Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
         input_tables = set_input_tables(input, source_db, context)
+
+        # gather disabled delta updates
+        for export in wf_config["export"]:
+            for table, config in export.items():
+                if "disableDeltaUpdates" in config and config["disableDeltaUpdates"] and table in input_tables:
+                    initial_copies.append(table)
+
         for t in input_tables:
             schema = t.split('.')[0]
             table = t.split('.')[1]
@@ -541,6 +553,23 @@ try:
                     print("ALTER TABLE \"" + constraint["table_schema"] + "\".\"" + constraint["table_name"] + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
                     connection.execute("ALTER TABLE \"" + constraint["table_schema"] + "\".\"" + constraint["table_name"] + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
 
+        @task(on_success_callback=post_taskend, on_failure_callback=post_logs, trigger_rule='none_failed')
+        def init_unique_email_generator(redactics_tmp, **context):
+            for rules in wf_config["redactRules"]:
+                for t, fields in rules.items():
+                    table = t.split('.')[1]
+
+                    for field in fields:
+                        for fieldName, params in field.items():
+                            if params["rule"] == "redact_email":
+                                # create redacted email counter field, if necessary
+                                email_counter_field = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' AND column_name = 'redacted_email_counter'").fetchone()
+                                if not email_counter_field:
+                                    print("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial")
+                                    altertable = redactics_tmp.execute("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial")
+                                    redactics_tmp.execute("CREATE UNIQUE INDEX IF NOT EXISTS \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)")
+
+
         # dynamic task mapping functions
         @task(on_failure_callback=post_logs)
         def gen_table_resets(input_id, schema, connection, override_schema, **context):
@@ -756,7 +785,6 @@ try:
                     for field in fields:
                         for fieldName, params in field.items():
                             if params["rule"] == "redact_email":
-                                security_labels.append("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" DROP COLUMN IF EXISTS redacted_email_counter;ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial;CREATE UNIQUE INDEX IF NOT EXISTS \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)") 
                                 security_labels.append(redact_email("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\"", params=params))
                             elif params["rule"] == "destruction":
                                 security_labels.append(destruction("\"" + dag_name + "\".\"" + table + "\"", "\"" + fieldName + "\""))
@@ -813,7 +841,7 @@ try:
                         else:
                             awk_print.append("\"\"")
                         restore_columns.append("source_primary_key")
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "0", ",".join(restore_columns), ",".join(awk_print), "", "", schema])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "0", ",".join(restore_columns), ",".join(awk_print), "", "", schema, input_id])
             return cmds
         initial_copy_tasks += 1
 
@@ -896,7 +924,9 @@ try:
                             elif col != primary_key:
                                 awk_print.append("$" + str((idx + 1)))
                                 restore_columns.append('"' + col + '"')
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key", schema])
+
+                        redact_email_fields = get_redact_email_fields(table)
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key", schema, "", ",".join(redact_email_fields)])
             return cmds
         delta_copy_tasks += 1
 
@@ -1171,6 +1201,9 @@ try:
                 )
             delta_restore.set_upstream([delta_dump_newrow, delta_dump_updatedrow])
 
+            unique_email_generator = init_unique_email_generator(get_redactics_tmp())
+            unique_email_generator.set_upstream([restore_data, delta_restore])
+
             apply_security_labels = PostgresOperator.partial(
                 task_id='apply-security-labels',
                 postgres_conn_id='redacticsDB',
@@ -1181,7 +1214,7 @@ try:
                 ).expand(
                     sql=set_security_label_cmds()
                 )
-            apply_security_labels.set_upstream([restore_data, delta_restore])
+            apply_security_labels.set_upstream(unique_email_generator)
 
             table_dumps = KubernetesPodOperator.partial(
                 task_id="dump-tables",
@@ -1217,6 +1250,7 @@ try:
                         "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
                         "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
                         "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
+                        "API_URL": API_URL,
                         "CONNECTION": "digital-twin"
                     }
                     twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
@@ -1254,7 +1288,7 @@ try:
                         ).expand(
                             cmds=delta_anon_dump_newrow_cmds(input["id"])
                         )
-                    dt_delta_dump_newrow.set_upstream([delta_restore, apply_security_labels])
+                    dt_delta_dump_newrow.set_upstream(apply_security_labels)
 
                     dt_delta_dump_updatedrow = KubernetesPodOperator.partial(
                         task_id="delta-data-dump-digitaltwin-updated-" + str(input_idx),
@@ -1277,7 +1311,7 @@ try:
                         ).expand(
                             cmds=delta_anon_dump_updatedrow_cmds(input["id"])
                         )
-                    dt_delta_dump_updatedrow.set_upstream([delta_restore, apply_security_labels])
+                    dt_delta_dump_updatedrow.set_upstream(apply_security_labels)
 
                     dt_delta_restore = KubernetesPodOperator.partial(
                         task_id="delta-data-restore-digitaltwin-" + str(input_idx),
@@ -1371,7 +1405,7 @@ try:
         else:
             custom = DummyOperator(task_id="custom-noop", trigger_rule='none_failed', on_success_callback=post_taskend)
         totalTasks += 1
-        custom.set_upstream([delta_restore, table_dumps])
+        custom.set_upstream(table_dumps)
 
         if digitalTwinEnabled:
             input_idx = 0
@@ -1383,6 +1417,7 @@ try:
                     "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
                     "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
                     "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
+                    "API_URL": API_URL,
                     "CONNECTION": "digital-twin"
                 }
                 twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""

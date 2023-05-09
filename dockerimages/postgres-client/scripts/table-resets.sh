@@ -3,7 +3,7 @@
 set -exo pipefail
 
 WORKFLOW=$1
-TMP_DATABASE=$2
+TARGET_DATABASE=$2
 TABLES=$3
 EXTENSIONS=$4
 OVERRIDE_SCHEMA=$5
@@ -53,13 +53,17 @@ done
 IFS=', ' read -r -a extensions <<< "$EXTENSIONS"
 for e in "${extensions[@]}"
 do
-    printf "DROP EXTENSION IF EXISTS \"${e}\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-    printf "CREATE EXTENSION IF NOT EXISTS \"${e}\" schema \"${EXTENSIONS_SCHEMA}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+    printf "CREATE EXTENSION IF NOT EXISTS \"${e}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+    printf "ALTER EXTENSION \"${e}\" SET SCHEMA \"${EXTENSIONS_SCHEMA}\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
 done
 
-printf "DROP EXTENSION IF EXISTS anon CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-printf "CREATE EXTENSION anon CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-printf "SELECT anon.init();\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+if [ "${TARGET_DATABASE}" == "redactics_tmp" ]
+then
+    # reload extension to install possible updates
+    printf "DROP EXTENSION IF EXISTS anon CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+    printf "CREATE EXTENSION anon CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+    printf "SELECT anon.init();\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+fi
 
 cat /tmp/${WORKFLOW}-drop-tables.sql
-psql -f /tmp/${WORKFLOW}-drop-tables.sql -d ${TMP_DATABASE}
+psql -f /tmp/${WORKFLOW}-drop-tables.sql -d ${TARGET_DATABASE}
