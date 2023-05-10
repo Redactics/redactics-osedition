@@ -610,7 +610,7 @@ export async function helmConfig(req: Request, res: Response) {
     };
 
     helmArgs.postgresql = {
-      connection: `postgresql://postgres:changeme@agent-postgresql:5432/postgres`,
+      connection: 'postgresql://postgres:changeme@agent-postgresql:5432/postgres',
     };
 
     if (process.env.NODE_ENV === 'development') {
