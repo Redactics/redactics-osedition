@@ -84,6 +84,7 @@ export async function createAgent(req: Request, res: Response) {
     const agent:AgentRecord = req.body;
     agent.fernetKey = fernetKey;
     agent.webserverKey = webserverKey;
+    // TODO: deprecate this field, user will set this password
     agent.generatedAirflowDBPassword = cryptoRandomString({ length: 24 });
     agent.generatedAirflowAPIPassword = cryptoRandomString({ length: 24 });
 
