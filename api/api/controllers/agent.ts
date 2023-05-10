@@ -595,7 +595,7 @@ export async function helmConfig(req: Request, res: Response) {
       host: 'agent-postgresql',
       port: 5432,
       login: 'postgres',
-      password: agent.dataValues.generatedAirflowDBPassword,
+      password: 'changeme',
       schema: 'redactics_tmp',
     });
 
@@ -609,7 +609,7 @@ export async function helmConfig(req: Request, res: Response) {
     };
 
     helmArgs.postgresql = {
-      connection: `postgresql://postgres:${agent.dataValues.generatedAirflowDBPassword}@agent-postgresql:5432/postgres`,
+      connection: `postgresql://postgres:changeme@agent-postgresql:5432/postgres`,
     };
 
     if (process.env.NODE_ENV === 'development') {
@@ -662,6 +662,7 @@ export async function helmConfig(req: Request, res: Response) {
         // Redactics Airflow DB
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[0].value.comment = ' ID for internal Redactics database';
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[3].value.comment = ' Internal Redactics DB hostname (do not alter)';
+        helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[5].value.comment = ' Arbitrary database password (ensure postgresql connection string, below, uses this same password)';
       } else {
         // customer database
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[0].value.comment = ` ${connectionNames[connection.id]}`;

@@ -250,13 +250,13 @@ def get_redact_email_fields(find_table):
 def set_run_plan(**context):
     delta_copies = []
     initial_copies = []
+    pkeys = {}
     copy_status = {}
     digital_twin = get_digital_twin()
     redactics_tmp = get_redactics_tmp()
 
     for input in wf_config["inputs"]:
         source_db = get_source_db(input["id"])
-        #Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
         input_tables = set_input_tables(input, source_db, context)
 
         # gather disabled delta updates
@@ -270,6 +270,12 @@ def set_run_plan(**context):
             table = t.split('.')[1]
             schema_diff = False
 
+            # collect primary keys to find composites (untested)
+            # pkeys_query = source_db.execute("SELECT c.column_name FROM information_schema.key_column_usage AS c LEFT JOIN information_schema.table_constraints AS t ON t.constraint_name = c.constraint_name WHERE c.constraint_schema = '" + schema + "' AND t.table_name = '" + table + "' AND t.constraint_type = 'PRIMARY KEY'").fetchall()
+            # pkeys[table] = []
+            # for idx, st in enumerate(pkeys_query):
+            #     pkeys[table].append(st["column_name"])
+
             source_tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
             tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' AND column_name != 'redacted_email_counter' ORDER BY ordinal_position ASC").fetchall()
             if digitalTwinEnabled:
@@ -279,6 +285,7 @@ def set_run_plan(**context):
                 if len(twin_tables):
                     pk_query = digital_twin.execute("SELECT c.column_name FROM information_schema.key_column_usage AS c LEFT JOIN information_schema.table_constraints AS t ON t.constraint_name = c.constraint_name WHERE c.constraint_schema = '" + schema + "' AND t.table_name = '" + table + "' AND t.constraint_type = 'PRIMARY KEY'").fetchall()
                     if len(pk_query):
+                        # gather twin primary key and type to determine whether new delta updates based on numerical IDs are possible
                         pk_result = pk_query[0]
                         dt_result = digital_twin.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + pk_result["column_name"] + "'").fetchone()
                         twin_primary_key = dt_result["column_name"]
@@ -290,6 +297,9 @@ def set_run_plan(**context):
             elif digitalTwinEnabled and len(tmp_tables) != len(twin_tables):
                 # column has been added or removed
                 schema_diff = True
+            # elif len(pkeys[table]) > 1:
+            #     # composite primary keys found
+            #     schema_diff = True
             else:
                 for idx, st in enumerate(source_tables):
                     if len(tmp_tables) > 0 and idx <= len(tmp_tables):
@@ -340,6 +350,10 @@ def set_run_plan(**context):
                 # table copied but schema has changed - re-copy entire table
                 copy_status[(schema + "." + table)] = "schema-change-detected"
                 initial_copies.append(schema + "." + table)
+            # elif schema_diff and (schema + "." + table) not in initial_copies:
+            #     # delta updates should otherwise be skipped, e.g. composite primary keys
+            #     copy_status[(schema + "." + table)] = "skip-delta-updates"
+            #     initial_copies.append(schema + "." + table)
             elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] and deltaUpdateFieldFound and (schema + "." + table) not in initial_copies:
                 # table copied but schema has not changed - eligible for delta update
                 copy_status[(schema + "." + table)] = "delta"
