@@ -317,7 +317,7 @@ def set_run_plan(**context):
                         print(schema + "." + table)
                         schema_diff = True
 
-                if digitalTwinEnabled:
+                if digitalTwinEnabled and "deltaUpdateField" in digitalTwinConfig["dataFeedConfig"]:
                     # assure table includes deltaUpdateField to support delta updates
                     deltaUpdateFieldFound = False
 
@@ -360,7 +360,7 @@ def set_run_plan(**context):
                 delta_copies.append(schema + "." + table)
             elif (schema + "." + table) not in initial_copies:
                 # table not copied yet, or missing delta update field definition or value
-                copy_status[(schema + "." + table)] = "missing-delta-update-field" if digitalTwinEnabled and not digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] else "initial-copy"
+                copy_status[(schema + "." + table)] = "missing-delta-update-field" if digitalTwinEnabled and "deltaUpdateField" not in digitalTwinConfig["dataFeedConfig"] else "initial-copy"
                 initial_copies.append(schema + "." + table)
     
     print("COPY STATUS")
