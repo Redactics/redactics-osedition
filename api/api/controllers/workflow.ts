@@ -485,6 +485,13 @@ async function saveRedactRules(workflow:any, req: Request) {
   let preset;
   let presetId;
   const redactrulePromises:any = [];
+  const fullCopyResetPromises:any = [];
+
+  const existingRedactRules = await RedactRule.findAll({
+    where: {
+      workflowId: workflow.dataValues.id,
+    },
+  });
 
   // recreate redact rules, delete current
   await RedactRule.destroy({
@@ -499,6 +506,12 @@ async function saveRedactRules(workflow:any, req: Request) {
   // get all presets and rulesets
   const presets = await RedactRulePreset.findAll({});
   const redactRules = await RedactRuleset.findAll({});
+  const workflowInputs = await WorkflowInput.findAll({
+    where: {
+      workflowId: workflow.id,
+    },
+    include: Input,
+  });
 
   // skip saving blank rules (when GUI section is disabled)
   Object.values(req.body.maskingRules.filter((r:any) => (
@@ -524,6 +537,20 @@ async function saveRedactRules(workflow:any, req: Request) {
       presetId,
     };
 
+    const findInputId = workflowInputs.find(
+      (i:any) => (i.dataValues.Input.dataValues.inputName === r.databaseTable),
+    );
+
+    const searchExisting = existingRedactRules.find((e:any) => (e.dataValues.table === (`${r.schema}.${r.table}`)));
+    if (!searchExisting) {
+      fullCopyResetPromises.push(TableFullCopy.destroy({
+        where: {
+          inputId: findInputId.dataValues.inputId,
+          tableName: `${r.schema}.${r.table}`,
+        },
+      }));
+    }
+
     redactrulePromises.push(RedactRule.create(redactRule));
   });
 
@@ -531,6 +558,7 @@ async function saveRedactRules(workflow:any, req: Request) {
   ruleCreate.forEach((r:any) => {
     redactRuleUuids.push(r.dataValues.uuid);
   });
+  await Promise.all(fullCopyResetPromises);
   return redactRuleUuids;
 }
 

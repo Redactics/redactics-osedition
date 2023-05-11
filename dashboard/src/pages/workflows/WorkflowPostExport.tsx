@@ -364,6 +364,8 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
 
                   <p>Adding this data feed will require updating your Agent configuration file (provided within the <Link href="/agents" target="_blank">Agents</Link> page), replacing the "changeme"s for connection ID <code>{this.props.dataFeed.uuid}</code> with the specified connection info for this data source.</p>
 
+                  <p><b>This feature does not prevent you from accidentally destroying data by selecting the wrong output destination!</b> Your output destination will be populated with the entire public schema, the schema of your selected tables from your data source, and the table data from your selected tables. We strongly advise that your output destination be an empty/unused database (you can create a new database with the <code>create database</code> SQL command) in order to avoid collisions and unintended overwriting.</p>
+
                   <Box mt={4}>
                     <FormControl margin="dense" fullWidth>
                       <InputLabel>

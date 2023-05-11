@@ -225,7 +225,18 @@ describe('Workflow endpoints', () => {
     expect(res.body.workflow.uuid).toEqual(workflowUuid);
   });
 
-  it('update ERL workflow with masking rule preset', async() => {
+  it('update ERL workflow with masking rule preset, ensure fullcopy record is deleted', async() => {
+    await TableFullCopy.create({
+      inputId: sampleInput.dataValues.id,
+      tableName: "public.users"
+    });
+
+    await RedactRules.destroy({
+      where: {
+        workflowId: workflowId
+      }
+    });
+
     const res = await agent.put('/workflow/' + workflowUuid)
     .send({
       agentId: agentUuid,
@@ -259,6 +270,14 @@ describe('Workflow endpoints', () => {
       }
     })
     expect(redactRule.dataValues).toBeDefined();
+
+    const fullCopyCheck = await TableFullCopy.findAll({
+      where: {
+        inputId: sampleInput.dataValues.id,
+        tableName: "public.users"
+      }
+    });
+    expect(fullCopyCheck.length).toEqual(0);
   });
 
   it('update ERL workflow with exports', async() => {
