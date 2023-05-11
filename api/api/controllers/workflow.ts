@@ -230,6 +230,8 @@ export async function getWorkflow(req: Request, res: Response) {
       return res.status(404).json({ errors: 'invalid workflow ID' });
     }
 
+    const agent = await Agent.findByPk(workflow.dataValues.agentId);
+
     const workflowInputs = await WorkflowInput.findAll({
       where: {
         workflowId: workflow.dataValues.id,
@@ -400,6 +402,9 @@ export async function getWorkflow(req: Request, res: Response) {
 
     const wkConfig:any = {
       id: workflow.dataValues.uuid,
+      name: workflow.dataValues.name,
+      agentId: agent.dataValues.agentId,
+      workflowType: workflow.dataValues.workflowType,
       schedule: workflow.dataValues.schedule,
       // TODO: remove once users are using Agent 2.5.0+
       deltaUpdateField: workflow.dataValues.deltaUpdateField,
