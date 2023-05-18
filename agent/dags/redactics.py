@@ -387,18 +387,6 @@ def tally_dynamic_tasks(initial_copies, delta_copies):
     totalTasks += len(initial_copies) * initial_copy_tasks
     totalTasks += len(delta_copies) * delta_copy_tasks
     totalTasks += len(security_labels)
-
-    # sequences
-    for input in wf_config["inputs"]:
-        if len(initial_copies):
-            connection = get_source_db(input["id"])
-        for t in initial_copies:
-            schema = t.split('.')[0]
-            table = t.split('.')[1]
-
-            cols = connection.execute("SELECT column_default FROM information_schema.columns WHERE column_default LIKE 'nextval(%%' AND table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "'").fetchall()
-            # sequence dump and restore
-            totalTasks += len(cols) * 2
         
     return totalTasks
 
@@ -583,8 +571,8 @@ try:
                                     altertable = redactics_tmp.execute("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial")
                                     redactics_tmp.execute("CREATE UNIQUE INDEX IF NOT EXISTS \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)")
 
-
         # dynamic task mapping functions
+
         @task(on_failure_callback=post_logs)
         def gen_table_resets(input_id, schema, connection, override_schema, **context):
             tables = []
@@ -1028,7 +1016,6 @@ try:
                 task_id="table-resets-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,
@@ -1051,7 +1038,6 @@ try:
                 task_id="schema-restore-" + str(input_idx),
                 namespace=NAMESPACE,
                 image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
                 get_logs=True,
                 env_vars=k8s_pg_tmp_envvars,
                 secrets=secrets,

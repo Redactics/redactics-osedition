@@ -51,7 +51,6 @@ describe('Settings endpoints', () => {
     expect(searchRedactEmail[0].isDefault).toBe(true);
     expect(searchRedactEmail[0].redactData.domain).toBe("redactics.com");
     expect(searchRedactEmail[0].redactData.prefix).toBe("redacted");
-    expect(searchRedactEmail[0].redactData.primaryKey).toBe("id");
 
     expect(searchReplacement[0].isDefault).toBe(true);
     expect(searchReplacement[0].redactData.replacement).toBe("redacted");
