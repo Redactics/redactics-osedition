@@ -53,7 +53,7 @@ apiUrl = API_URL + '/workflow/' + dag_name
 request = requests.get(apiUrl, headers=headers)
 wf_config = request.json()
 input = wf_config["inputs"][0]
-input_id = wf_config["inputs"][0]["id"]
+input_id = wf_config["inputs"][0]["uuid"]
 database = wf_config["migrationDatabase"]
 clone_database = wf_config["migrationDatabaseClone"]
 
@@ -70,7 +70,7 @@ def get_source_db(input_id):
     return connection
 
 def set_exclude_tables(input):
-    source_db = get_source_db(input["id"])
+    source_db = get_source_db(input["uuid"])
     # collect tables from workflow config, supporting wildcards
     found_tables = []
     append_sql = []

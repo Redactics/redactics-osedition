@@ -36,8 +36,7 @@ REGISTRY_URL = "redactics"
 NAMESPACE = os.environ['NAMESPACE']
 AGENT_VERSION = os.environ['AGENT_VERSION']
 NODESELECTOR = os.environ['NODESELECTOR']
-if "DIGITAL_TWIN_PREPARED_STATEMENTS" in os.environ:
-    DIGITAL_TWIN_PREPARED_STATEMENTS = os.environ['DIGITAL_TWIN_PREPARED_STATEMENTS']
+DIGITAL_TWIN_PREPARED_STATEMENTS = os.environ['DIGITAL_TWIN_PREPARED_STATEMENTS'] if "DIGITAL_TWIN_PREPARED_STATEMENTS" in os.environ else None
 PG_CLIENT_VERSION = "15"
 
 is_delete_operator_pod = False if ENV == "development" else True
@@ -73,7 +72,7 @@ else:
 
 default_args = {
     #'depends_on_past': False,
-    'retries': 0 if ENV == "development" else 30,
+    'retries': 5 if ENV == "development" else 30,
     'retry_delay': timedelta(seconds=15),
     'email_on_failure': False
     # 'queue': 'bash_queue',
@@ -102,17 +101,12 @@ def random_string(table, fieldName, **params):
 
 security_labels = []
 outputs = {}
-dataFeeds = {}
+dataFeeds = []
 
 if wf_config.get("export") and len(wf_config["export"]):
     for output in wf_config["export"]:
         for table, options in output.items():
             outputs[table] = options
-
-if len(wf_config["dataFeeds"]):
-    for dataFeed in wf_config["dataFeeds"]:
-        for feed, options in dataFeed.items():
-            dataFeeds[feed] = options
 
 digitalTwinEnabled = False
 digitalTwinConfig = {}
@@ -122,17 +116,19 @@ customEnabled = False
 customConfig = {}
 
 # init data feed vars
-if wf_config.get("dataFeeds") and len(dataFeeds):
-    for feed, options in dataFeeds.items():
-        if feed == "digitalTwin":
+print("FEEDS")
+print(wf_config.get("dataFeeds"))
+if wf_config.get("dataFeeds") and len(wf_config.get("dataFeeds")):
+    for feed in wf_config.get("dataFeeds"):
+        if feed["dataFeed"] == "digitalTwin":
             digitalTwinEnabled = True
-            digitalTwinConfig = options
-        elif feed == "s3upload":
+            digitalTwinConfig = feed
+        elif feed["dataFeed"] == "s3upload":
             s3UploadEnabled = True
-            s3UploadConfig = options
-        elif feed == "custom":
+            s3UploadConfig = feed
+        elif feed["dataFeed"] == "custom":
             customEnabled = True
-            customConfig = options
+            customConfig = feed
 
 def get_source_db(input_id):
     host = BaseHook.get_connection(input_id).host
@@ -159,6 +155,8 @@ def get_redactics_tmp():
     return connection
 
 def get_digital_twin():
+    print("DT CONFIG")
+    print(digitalTwinConfig)
     host = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host
     login = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login
     password = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password
@@ -228,7 +226,7 @@ def set_input_tables(input, source_db, context):
                     found_tables.append(t["table_schema"] + "." + t["table_name"])
     print("FOUND TABLES")
     print(list(dict.fromkeys(found_tables)))
-    Variable.set(dag_name + "-erl-input-tables-" + input["id"] + "-" + context["run_id"], json.dumps(list(dict.fromkeys(found_tables))))
+    Variable.set(dag_name + "-erl-input-tables-" + input["uuid"] + "-" + context["run_id"], json.dumps(list(dict.fromkeys(found_tables))))
     return list(dict.fromkeys(found_tables))
 
 def is_numeric_pk(data_type):
@@ -236,7 +234,7 @@ def is_numeric_pk(data_type):
 
 def get_redact_email_fields(find_table):
     redact_email_fields = []
-    for rules in wf_config["redactRules"]:
+    for rules in wf_config["indexedRedactRules"]:
         for t, fields in rules.items():
             table = t.split('.')[1]
 
@@ -252,11 +250,11 @@ def set_run_plan(**context):
     initial_copies = []
     pkeys = {}
     copy_status = {}
-    digital_twin = get_digital_twin()
+    digital_twin = get_digital_twin() if digitalTwinEnabled else None
     redactics_tmp = get_redactics_tmp()
 
     for input in wf_config["inputs"]:
-        source_db = get_source_db(input["id"])
+        source_db = get_source_db(input["uuid"])
         input_tables = set_input_tables(input, source_db, context)
 
         # gather disabled delta updates
@@ -481,6 +479,8 @@ try:
                 if request.status_code != 200:
                     raise AirflowException(response)
                 runPlan = set_run_plan(**context)
+                print("RUN PLAN")
+                print(runPlan)
                 Variable.set(dag_name + "-erl-initialCopies-" + context["run_id"], json.dumps(runPlan["initial_copies"]))
                 Variable.set(dag_name + "-erl-deltaCopies-" + context["run_id"], json.dumps(runPlan["delta_copies"]))
                 Variable.set(dag_name + "-erl-copyStatus-" + context["run_id"], json.dumps(runPlan["copy_status"]))
@@ -490,7 +490,7 @@ try:
             except AirflowException as err:
                 raise AirflowException(err)
 
-        @task(on_failure_callback=post_logs)
+        @task(on_failure_callback=post_logs, trigger_rule='all_done')
         def terminate_wf(**context):
             headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
             apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postJobEnd'
@@ -517,7 +517,7 @@ try:
         def conditional_primary_key_init(**context):
             connection = get_digital_twin()
             for input in wf_config["inputs"]:
-                input_tables = json.loads(Variable.get(dag_name + "-erl-input-tables-" + input["id"] + "-" + context["run_id"], default_var=[]))
+                input_tables = json.loads(Variable.get(dag_name + "-erl-input-tables-" + input["uuid"] + "-" + context["run_id"]))
                 for t in input_tables:
                     schema = t.split('.')[0]
                     table = t.split('.')[1]
@@ -557,7 +557,7 @@ try:
 
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs, trigger_rule='none_failed')
         def init_unique_email_generator(redactics_tmp, **context):
-            for rules in wf_config["redactRules"]:
+            for rules in wf_config["indexedRedactRules"]:
                 for t, fields in rules.items():
                     table = t.split('.')[1]
 
@@ -576,10 +576,10 @@ try:
         @task(on_failure_callback=post_logs)
         def gen_table_resets(input_id, schema, connection, override_schema, **context):
             tables = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             extensions_schema = ""
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     extensions_schema = input["extensionsSchema"]
                     for table in initial_copies:
                         tables.append(table)
@@ -605,9 +605,9 @@ try:
             # initial copy schema dump
             cmds = []
             unique_schema = []
-            input_tables = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            input_tables = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in input_tables:
                         schema = t.split('.')[0]
                         if schema not in unique_schema:
@@ -620,9 +620,9 @@ try:
             # initial copy schema restore
             cmds = []
             unique_schema = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in initial_copies:
                         schema = t.split('.')[0]
                         if schema not in unique_schema:
@@ -638,9 +638,9 @@ try:
             # stage tmp tables into target schema
             cmds = []
             tables = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in initial_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -654,9 +654,9 @@ try:
         def data_dump_cmds(input_id, **context):
             # initial copy data dump
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for table in initial_copies:
                         # only append if table is in full copy list
                         cmd=["/scripts/data-dump.sh", dag_name, table]
@@ -675,9 +675,9 @@ try:
         def restore_data_cmds(input_id, **context):
             # initial copy data restore
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in initial_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -688,9 +688,9 @@ try:
         @task(on_failure_callback=post_logs)
         def table_dump_cmds(outputs, input_id, **context):
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in initial_copies:
                         table = t.split('.')[1]
                         cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\""]
@@ -711,11 +711,11 @@ try:
         def delta_dump_newrow_cmds(input_id, **context):
             # delta data dump - new rows
             cmds = []
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
             if len(delta_copies):
                 connection = get_redactics_tmp()
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -734,11 +734,11 @@ try:
         def delta_dump_updatedrow_cmds(input_id, **context):
             # delta data dump - updated rows
             cmds = []
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
             if len(delta_copies):
                 connection = get_redactics_tmp()
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -753,11 +753,11 @@ try:
         def delta_restore_cmds(input_id, **context):
             # delta data restore to RedacticsDB
             cmds = []
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[])) 
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"])) 
             if len(delta_copies):
                 connection = get_redactics_tmp()
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -780,7 +780,7 @@ try:
         @task(on_failure_callback=post_logs)
         def set_security_label_cmds(**context):
             global security_labels
-            for rules in wf_config["redactRules"]:
+            for rules in wf_config["indexedRedactRules"]:
                 for t, fields in rules.items():
                     table = t.split('.')[1]
 
@@ -805,9 +805,9 @@ try:
         def gen_dt_table_restore(input_id, **context):
             # full digital twin restore to digital twin DB
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"], default_var=[]))
+            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     if len(initial_copies):
                         connection = get_source_db(input_id)
                     for t in initial_copies:
@@ -851,11 +851,11 @@ try:
         def delta_anon_dump_newrow_cmds(input_id, **context):
             # digital twin delta dump
             cmds=[]
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
             if len(delta_copies):
                 connection = get_digital_twin()
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -874,11 +874,11 @@ try:
         def delta_anon_dump_updatedrow_cmds(input_id, **context):
             # digital twin delta dump
             cmds=[]
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
             if len(delta_copies):
                 connection = get_digital_twin()
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -893,11 +893,11 @@ try:
         def delta_anon_restore_cmds(input_id, **context):
             # digital twin delta restore to digital twin DB
             cmds=[]
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"], default_var=[]))
+            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
             if len(delta_copies):
                 connection = get_digital_twin()
             for input in wf_config["inputs"]:
-                if input["id"] == input_id:
+                if input["uuid"] == input_id:
                     for t in delta_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
@@ -966,12 +966,12 @@ try:
 
         input_idx = 0
         for input in wf_config["inputs"]:
-            extra = json.loads(BaseHook.get_connection(input["id"]).extra) if BaseHook.get_connection(input["id"]).extra else ""
+            extra = json.loads(BaseHook.get_connection(input["uuid"]).extra) if BaseHook.get_connection(input["uuid"]).extra else ""
             k8s_pg_source_envvars = {
-                "PGHOST": BaseHook.get_connection(input["id"]).host,
-                "PGUSER": BaseHook.get_connection(input["id"]).login,
-                "PGPASSWORD": BaseHook.get_connection(input["id"]).password,
-                "PGDATABASE": BaseHook.get_connection(input["id"]).schema,
+                "PGHOST": BaseHook.get_connection(input["uuid"]).host,
+                "PGUSER": BaseHook.get_connection(input["uuid"]).login,
+                "PGPASSWORD": BaseHook.get_connection(input["uuid"]).password,
+                "PGDATABASE": BaseHook.get_connection(input["uuid"]).schema,
                 "CONNECTION": "source"
             }
             if extra:
@@ -979,7 +979,7 @@ try:
                     k8s_pg_source_envvars["PGSSLMODE"] = extra["sslmode"]
                 if "sslrootcert" in extra:
                     k8s_pg_source_envvars["PGSSLROOTCERT"] = extra["sslrootcert"]
-                    secrets.append(Secret('volume', "/pgcerts-secrets/" + input["id"], "pgcert-" + input["id"]))
+                    secrets.append(Secret('volume', "/pgcerts-secrets/" + input["uuid"], "pgcert-" + input["uuid"]))
                 if "sslcert" in extra:
                     # optional
                     k8s_pg_source_envvars["PGSSLCERT"] = extra["sslcert"]
@@ -1008,7 +1008,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=schema_dump_cmds(input["id"])
+                    cmds=schema_dump_cmds(input["uuid"])
                 )
             schema_dump.set_upstream([init_custom_functions, clean_dir])
 
@@ -1030,7 +1030,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema), get_source_db(input["id"]), dag_name)
+                    cmds=gen_table_resets(input["uuid"], "{}".format(BaseHook.get_connection("redacticsDB").schema), get_source_db(input["uuid"]), dag_name)
                 )
             table_resets.set_upstream(schema_dump)
 
@@ -1052,7 +1052,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection("redacticsDB").schema))
+                    cmds=schema_restore_cmds(input["uuid"], "{}".format(BaseHook.get_connection("redacticsDB").schema))
                 )
             schema_restore.set_upstream(table_resets)
 
@@ -1079,7 +1079,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=stage_tmp_tables_cmds(input["id"])
+                    cmds=stage_tmp_tables_cmds(input["uuid"])
                 )
             stage_tmp_tables.set_upstream(trigger_drop_fk_contraints)
 
@@ -1103,7 +1103,7 @@ try:
                 on_success_callback=post_taskend,
                 max_active_tis_per_dag=1
                 ).expand(
-                    cmds=data_dump_cmds(input["id"])
+                    cmds=data_dump_cmds(input["uuid"])
                 )
             data_dump.set_upstream(stage_tmp_tables)
 
@@ -1126,7 +1126,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend,
                 ).expand(
-                    cmds=restore_data_cmds(input["id"])
+                    cmds=restore_data_cmds(input["uuid"])
                 )
             restore_data.set_upstream(data_dump)
 
@@ -1151,7 +1151,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend
                 ).expand(
-                    cmds=delta_dump_newrow_cmds(input["id"])
+                    cmds=delta_dump_newrow_cmds(input["uuid"])
                 )
             delta_dump_newrow.set_upstream([init_custom_functions, clean_dir])
 
@@ -1174,7 +1174,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend
                 ).expand(
-                    cmds=delta_dump_updatedrow_cmds(input["id"])
+                    cmds=delta_dump_updatedrow_cmds(input["uuid"])
                 )
             delta_dump_updatedrow.set_upstream([init_custom_functions, clean_dir])
 
@@ -1197,7 +1197,7 @@ try:
                 on_failure_callback=post_logs,
                 on_success_callback=post_taskend
                 ).expand(
-                    cmds=delta_restore_cmds(input["id"])
+                    cmds=delta_restore_cmds(input["uuid"])
                 )
             delta_restore.set_upstream([delta_dump_newrow, delta_dump_updatedrow])
 
@@ -1236,7 +1236,7 @@ try:
                 on_success_callback=post_taskend,
                 #trigger_rule='all_done'
                 ).expand(
-                    cmds=table_dump_cmds(outputs, input["id"])
+                    cmds=table_dump_cmds(outputs, input["uuid"])
                 )
             table_dumps.set_upstream(apply_security_labels)
 
@@ -1286,7 +1286,7 @@ try:
                         on_failure_callback=post_logs,
                         on_success_callback=post_taskend
                         ).expand(
-                            cmds=delta_anon_dump_newrow_cmds(input["id"])
+                            cmds=delta_anon_dump_newrow_cmds(input["uuid"])
                         )
                     dt_delta_dump_newrow.set_upstream(apply_security_labels)
 
@@ -1309,7 +1309,7 @@ try:
                         on_failure_callback=post_logs,
                         on_success_callback=post_taskend
                         ).expand(
-                            cmds=delta_anon_dump_updatedrow_cmds(input["id"])
+                            cmds=delta_anon_dump_updatedrow_cmds(input["uuid"])
                         )
                     dt_delta_dump_updatedrow.set_upstream(apply_security_labels)
 
@@ -1332,7 +1332,7 @@ try:
                         on_failure_callback=post_logs,
                         on_success_callback=post_taskend
                         ).expand(
-                            cmds=delta_anon_restore_cmds(input["id"])
+                            cmds=delta_anon_restore_cmds(input["uuid"])
                         )
                     dt_delta_restore.set_upstream([dt_delta_dump_newrow, dt_delta_dump_updatedrow])
                     input_idx += 1
@@ -1453,7 +1453,7 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend,
                     ).expand(
-                        cmds=gen_table_resets(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema), get_source_db(input["id"]), "")
+                        cmds=gen_table_resets(input["uuid"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema), get_source_db(input["uuid"]), "")
                     )
                 dt_table_resets.set_upstream(table_dumps)
 
@@ -1476,7 +1476,7 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend
                     ).expand(
-                        cmds=schema_restore_cmds(input["id"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
+                        cmds=schema_restore_cmds(input["uuid"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
                     )
                 dt_schema_restore.set_upstream(dt_table_resets)
 
@@ -1507,7 +1507,7 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend,
                     ).expand(
-                        cmds=gen_dt_table_restore(input["id"])
+                        cmds=gen_dt_table_restore(input["uuid"])
                     )
                 dt_data_restore.set_upstream([trigger_drop_fk_contraints_dt, primary_key_schema])
                 input_idx += 1
