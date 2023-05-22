@@ -77,7 +77,9 @@ export async function getWorkflows(req: Request, res: Response) {
 
     const allInputs = await Input.findAll({
       where: {
-        redacticsGenerated: false,
+        redacticsGenerated: {
+          [Op.not]: true,
+        },
         disabled: {
           [Op.not]: true,
         },
@@ -242,7 +244,11 @@ export async function getWorkflow(req: Request, res: Response) {
     });
 
     const allRedactRuleSets = await RedactRuleset.findAll({});
-    const allRedactRules = await RedactRule.findAll({});
+    const allRedactRules = await RedactRule.findAll({
+      where: {
+        workflowId: workflow.dataValues.id,
+      }
+    });
     const allRedactRulePresets = await RedactRulePreset.findAll({});
 
     // build inputs
@@ -272,7 +278,7 @@ export async function getWorkflow(req: Request, res: Response) {
       if ((workflow.dataValues.workflowType === 'ERL' && i.dataValues.Input && !i.dataValues.Input.dataValues.disabled)
         || workflow.dataValues.workflowType !== 'ERL') {
         inputs.push({
-          id: i.dataValues.Input.dataValues.uuid,
+          uuid: i.dataValues.Input.dataValues.uuid,
           tables: i.dataValues.tables,
           tableSelection: i.dataValues.tableSelection,
           fullcopies: fullCopies,
@@ -282,14 +288,10 @@ export async function getWorkflow(req: Request, res: Response) {
       }
     });
 
-    // build redact rules
-    const rules = allRedactRules.filter((r:any) => (
-      r.dataValues.workflowId === workflow.dataValues.id
-    ));
     // rules indexed by table for DAG
     const indexedRedactRules:any = [];
 
-    Object.values(rules).forEach((r:any) => {
+    Object.values(allRedactRules).forEach((r:any) => {
       let preset;
 
       // see if there is already a rule for current table, append columns if there is
@@ -357,15 +359,13 @@ export async function getWorkflow(req: Request, res: Response) {
     });
 
     // input formatted redact rules
-    const redactRules:any = rules.map((r:any) => {
+    const redactRules:any = allRedactRules.map((r:any) => {
       const rule = r.dataValues;
       delete rule.id;
       delete rule.workflowId;
       const ruleset = allRedactRuleSets.find((p:any) => (p.dataValues.id === rule.ruleId));
       rule.rule = ruleset.dataValues.redactKey;
       delete rule.ruleId;
-      rule.inputName = rule.databaseTable;
-      delete rule.databaseTable;
       const t = rule.table.split('.');
       [rule.schema, rule.table] = t;
 
@@ -382,13 +382,8 @@ export async function getWorkflow(req: Request, res: Response) {
         delete df.dataValues.dataFeedConfig.uploadFileChecked;
         delete df.dataValues.dataFeedConfig.s3Bucket;
       } else if (df.dataValues.dataFeed === 'digitalTwin') {
-        if (df.dataValues.dataFeedConfig.enablePostUpdatePreparedStatements) {
-          // const postUpdateKeyValues:any = {};
-          // df.dataValues.dataFeedConfig.postUpdateKeyValues.forEach((kv:any) => {
-          //   postUpdateKeyValues[kv.key] = kv.value;
-          // });
-          // df.dataValues.dataFeedConfig.postUpdateKeyValues = postUpdateKeyValues;
-        } else {
+        if (!df.dataValues.dataFeedConfig.enablePostUpdatePreparedStatements) {
+          // make definition explicit
           df.dataValues.dataFeedConfig.enablePostUpdatePreparedStatements = false;
         }
       }
@@ -400,14 +395,6 @@ export async function getWorkflow(req: Request, res: Response) {
         dataFeedConfig: df.dataValues.dataFeedConfig,
         feedSecrets: df.dataValues.feedSecrets,
       });
-
-      // dataFeeds[df.dataValues.dataFeed] = {
-      //   dataFeed: df.dataValues.dataFeed,
-      //   uuid: df.dataValues.uuid,
-      //   disabled: df.dataValues.disabled,
-      //   dataFeedConfig: df.dataValues.dataFeedConfig,
-      //   feedSecrets: df.dataValues.feedSecrets,
-      // };
     });
 
     const exportTableDataConfig:any = [];
@@ -549,7 +536,7 @@ async function saveRedactRules(workflow:any, req: Request) {
 
   // skip saving blank rules (when GUI section is disabled)
   Object.values(req.body.redactRules.filter((r:any) => (
-    !!((r.inputName && r.schema && r.table && r.column))))).forEach((r:any) => {
+    !!((r.databaseTable && r.schema && r.table && r.column))))).forEach((r:any) => {
     if (r.presetUuid) {
       // preset used
       preset = presets.find((p:any) => (p.uuid === r.presetUuid));
@@ -564,7 +551,7 @@ async function saveRedactRules(workflow:any, req: Request) {
 
     const redactRule:RedactRuleRecord = {
       workflowId: workflow.dataValues.id,
-      databaseTable: r.inputName,
+      databaseTable: r.databaseTable,
       table: (`${r.schema}.${r.table}`),
       column: r.column,
       ruleId,
@@ -572,7 +559,7 @@ async function saveRedactRules(workflow:any, req: Request) {
     };
 
     const findInputId = workflowInputs.find(
-      (i:any) => (i.dataValues.Input.dataValues.inputName === r.inputName),
+      (i:any) => (i.dataValues.Input.dataValues.inputName === r.databaseTable),
     );
 
     const searchExisting = existingRedactRules.find((e:any) => (e.dataValues.table === (`${r.schema}.${r.table}`)));
@@ -614,7 +601,7 @@ async function saveInputs(workflow:any, req: Request) {
     });
     let inputFound = false;
     inputs.forEach((input:any) => {
-      const findInput = req.body.inputs.find((i:any) => (i.id === input.dataValues.uuid));
+      const findInput = req.body.inputs.find((i:any) => (i.uuid === input.dataValues.uuid));
       if (findInput) {
         inputFound = true;
         // dedupe table listing

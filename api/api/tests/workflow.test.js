@@ -157,7 +157,7 @@ describe('Workflow endpoints', () => {
 
   it('update ERL workflow - add input', async() => {
     workflowInputs = [{
-      id: sampleInput.dataValues.uuid,
+      uuid: sampleInput.dataValues.uuid,
       enabled: true,
       tables: ["public.marketing_campaign", "public.athletes", "public.marketing_campaign"], // assure de-duplication and sorting
     }];
@@ -196,13 +196,13 @@ describe('Workflow endpoints', () => {
 
   it('update ERL workflow - valid redaction rules and inputs', async() => {
     redactRules = [{
-      inputName: sampleInput.dataValues.inputName,
+      databaseTable: sampleInput.dataValues.inputName,
       schema: "public",
       table: "users",
       column: "password",
       rule: "destruction"
     }, {
-      inputName: sampleInput.dataValues.inputName,
+      databaseTable: sampleInput.dataValues.inputName,
       schema: "public",
       table: "users",
       column: "email",
@@ -244,13 +244,13 @@ describe('Workflow endpoints', () => {
       workflowType: "ERL",
       schedule: "0 0 * * *",
       redactRules: [{
-        inputName: "Test Input",
+        databaseTable: "Test Input",
         schema: "public",
         table: "users",
         column: "password",
         presetUuid: redactEmailPreset.dataValues.uuid
       }, {
-        inputName: "Test Input",
+        databaseTable: "Test Input",
         schema: "public",
         table: "users",
         column: "email",
@@ -906,7 +906,7 @@ describe('Workflow endpoints invoked by Agent', () => {
     expect(workflow.body.indexedRedactRules[0]["public.users"].length).toEqual(2);
     expect(workflow.body.export[0]["public.athletes"].table).toEqual("public.athletes");
     expect(workflow.body.export[1]["public.marketing_campaign"].table).toEqual("public.marketing_campaign");
-    expect(workflow.body.inputs[0].id).toEqual(sampleInput.dataValues.uuid);
+    expect(workflow.body.inputs[0].uuid).toEqual(sampleInput.dataValues.uuid);
     expect(workflow.body.inputs[0].tables).toEqual(["public.athletes", "public.marketing_campaign"]);
 
     const customFeed = workflow.body.dataFeeds.find((df) => {
@@ -939,7 +939,7 @@ describe('Workflow endpoints invoked by Agent', () => {
     .expect(200);
 
     expect(workflow.body.id).toEqual(workflowMMUuid);
-    expect(workflow.body.inputs[0].id).toEqual(sampleInput.dataValues.uuid);
+    expect(workflow.body.inputs[0].uuid).toEqual(sampleInput.dataValues.uuid);
     expect(workflow.body.migrationDatabase).toEqual("redactics");
     expect(workflow.body.migrationDatabaseClone).toEqual("redactics_clone");
   })

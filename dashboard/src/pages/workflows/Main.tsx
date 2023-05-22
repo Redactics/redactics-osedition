@@ -148,6 +148,8 @@ class Workflows extends React.Component<IProps, IState> {
         return workflow;
       });
 
+      console.log("WORKFLOWS", data.workflows);
+
       this.setState({
         workflows: data.workflows,
         agentInputs: data.agentInputs,

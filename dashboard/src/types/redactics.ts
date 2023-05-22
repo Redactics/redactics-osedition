@@ -113,7 +113,7 @@ export interface WorkflowUpdate {
   workflowType: string;
   inputs: WorkflowInputRecord[];
   dataFeeds: DataFeed[];
-  maskingRules: RedactRule[];
+  redactRules: RedactRule[];
   schedule: string;
   deltaUpdateField?: string;
   migrationNamespace?: string;

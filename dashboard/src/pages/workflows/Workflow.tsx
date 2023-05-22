@@ -493,7 +493,7 @@ class Workflow extends React.Component<IProps, IState> {
       workflowType: this.props.workflow.workflowType,
       inputs: this.state.inputs,
       dataFeeds: this.state.dataFeeds,
-      maskingRules: this.state.maskingRuleValues,
+      redactRules: this.state.maskingRuleValues,
       schedule: this.state.schedule,
       exportTableDataConfig,
       deltaUpdateField: this.state.deltaUpdateField,
@@ -1004,6 +1004,7 @@ class Workflow extends React.Component<IProps, IState> {
 
   handleInputChanges(event:any, input:WorkflowInputRecord) {
     const state:any = this.state;
+    console.log("INPUTS", state.inputs);
     const findInput = state.inputs.find((i:WorkflowInputRecord) => {
       return (i.uuid === input.uuid)
     });
