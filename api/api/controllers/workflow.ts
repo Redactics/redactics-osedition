@@ -247,7 +247,7 @@ export async function getWorkflow(req: Request, res: Response) {
     const allRedactRules = await RedactRule.findAll({
       where: {
         workflowId: workflow.dataValues.id,
-      }
+      },
     });
     const allRedactRulePresets = await RedactRulePreset.findAll({});
 
