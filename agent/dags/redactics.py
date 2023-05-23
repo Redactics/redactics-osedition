@@ -116,8 +116,6 @@ customEnabled = False
 customConfig = {}
 
 # init data feed vars
-print("FEEDS")
-print(wf_config.get("dataFeeds"))
 if wf_config.get("dataFeeds") and len(wf_config.get("dataFeeds")):
     for feed in wf_config.get("dataFeeds"):
         if feed["dataFeed"] == "digitalTwin":
@@ -155,8 +153,6 @@ def get_redactics_tmp():
     return connection
 
 def get_digital_twin():
-    print("DT CONFIG")
-    print(digitalTwinConfig)
     host = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host
     login = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login
     password = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password
@@ -490,7 +486,7 @@ try:
             except AirflowException as err:
                 raise AirflowException(err)
 
-        @task(on_failure_callback=post_logs, trigger_rule='all_done')
+        @task(on_failure_callback=post_logs, trigger_rule='none_failed')
         def terminate_wf(**context):
             headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
             apiUrl = API_URL + '/workflow/job/' + Variable.get(dag_name + "-erl-currentWorkflowJobId") + '/postJobEnd'

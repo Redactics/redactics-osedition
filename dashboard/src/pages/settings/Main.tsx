@@ -294,7 +294,6 @@ class Settings extends React.Component<IProps, IState> {
       if (!p.presetName || !p.rule) {
         incompletePreset = true;
       } else if (p.rule === 'redact_email' && (!p.redactData.prefix || !p.redactData.domain)) {
-        console.log("INCOMPLETE", p.redactData)
         incompletePreset = true;
       } else if (p.rule === 'replacement' && !p.redactData.replacement) {
         incompletePreset = true;
@@ -430,7 +429,6 @@ class Settings extends React.Component<IProps, IState> {
           body: JSON.stringify(payload),
         });
 
-        console.log("PAYLOAD", this.state.redactEmailDefault.redactData);
         this.setState({
           showSnackbar: true,
           saveDefaultRulesButtonDisabled: false,
