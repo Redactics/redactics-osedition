@@ -383,6 +383,7 @@ class Inputs extends React.Component<IProps, IState> {
       else if (input.uuid === state.input.uuid) {
         input.inputName = state.input.inputName;
         input.inputType = state.input.inputType;
+        input.exportData = state.input.exportData;
         input.diskSize = state.input.diskSize;
         input.enableSSL = state.input.enableSSL;
         input.sslMode = state.input.sslMode;
