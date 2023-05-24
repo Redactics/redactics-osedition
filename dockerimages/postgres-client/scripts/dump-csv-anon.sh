@@ -154,13 +154,6 @@ while [ $# -gt 0 ]; do
     --table=*)
         table=$1
         ;;
-    -c)
-        shift
-        columns=$1
-        ;;
-    --columns=*)
-        columns=$1
-        ;;
     --start-date=*)
         start_date="${1/--start-date=/}"
         ;;
@@ -217,14 +210,9 @@ then
   exit 1
 fi
 
-if [ "$columns" == "all" ]
-then
-  filters=$(get_mask_filters $table)
-else
-  filters=$(get_mask_extract_filters $table $columns)
-fi
+filters=$(get_mask_filters $table)
 
-if [ -z $start_date ] && [ -z $delta_field_name ]
+if [ -z "$start_date" ] && [ -z "$delta_field_name" ]
 then
   $PSQL_PRINT -c "\copy (SELECT $filters FROM $table) TO STDOUT WITH CSV HEADER"
 elif [ ! -z $start_date ]
@@ -239,10 +227,10 @@ then
   then
     $PSQL_PRINT -c "\copy (SELECT $filters FROM $table WHERE (\"$created_at_field\" IS NOT NULL AND \"$created_at_field\" > '$start_date') OR (\"$updated_at_field\" IS NOT NULL AND \"$updated_at_field\" > '$start_date')) TO STDOUT WITH CSV HEADER"
   fi
-elif [ ! -z $delta_field_name ]
+elif [ ! -z "$delta_field_name" ]
 then
   # delta data dump
-  if [ -z $delta_field_val ]
+  if [ -z "$delta_field_val" ]
   then
     $PSQL_PRINT -c "\copy (SELECT $filters FROM $table WHERE \"$delta_field_name\" IS NOT NULL) TO STDOUT WITH CSV"
   else

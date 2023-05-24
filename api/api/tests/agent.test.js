@@ -174,9 +174,9 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.latestChartVersion).toEqual(process.env.LATEST_CHART_VERSION);
     expect(res.body.helmArgs.agentUpgradeAvailable).toEqual(false);
     expect(res.body.helmArgs.postgresql.persistence.enabled).toEqual(true);
-    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(5);
+    expect(res.body.helmArgs.postgresql.persistence.size).toEqual(6); // 1 GB + 5 GB buffer for Airflow data
     expect(res.body.helmArgs.httpNas.persistence.enabled).toEqual(true);
-    expect(res.body.helmArgs.httpNas.persistence.size).toEqual(3);
+    expect(res.body.helmArgs.httpNas.persistence.size).toEqual(2);
   });
 
   it('verify helmCmd creation', async() => {
@@ -228,9 +228,9 @@ describe('Agent endpoints', () => {
     expect(res.body.helmArgs.airflow.connections[1].host).toEqual("agent-postgresql");
     expect(res.body.helmArgs.airflow.connections[1].port).toEqual(5432);
     expect(res.body.helmArgs.airflow.connections[1].login).toEqual("postgres");
-    expect(res.body.helmArgs.airflow.connections[1].password).toEqual(generatedAirflowDBPassword);
+    expect(res.body.helmArgs.airflow.connections[1].password).toEqual("changeme");
     expect(res.body.helmArgs.airflow.connections[1].schema).toEqual("redactics_tmp");
-    expect(res.body.helmArgs.postgresql.connection).toEqual("postgresql://postgres:" + generatedAirflowDBPassword +"@agent-postgresql:5432/postgres");
+    expect(res.body.helmArgs.postgresql.connection).toEqual("postgresql://postgres:changeme@agent-postgresql:5432/postgres");
   });
 
   it('create migration mocking workflow to test updated helm config', async() => {

@@ -501,12 +501,12 @@ class Agent extends React.Component<IProps, IState> {
 
                 <Box mt={8}>
                   <Typography variant="h4">
-                    Input Sources
+                    Data Sources
                   </Typography>
 
                   <Box mt={2}>
                     <Typography>
-                      Use the following Input Sources with this Agent:
+                      Use the following Data Sources with this Agent:
                     </Typography>
 
                     {this.props.inputs.map((input:InputRecord) => (

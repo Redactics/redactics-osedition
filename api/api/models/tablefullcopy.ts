@@ -16,7 +16,16 @@ const TableFullCopyModel = Sequelize.define('TableFullCopy', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
 }, {
+  timestamps: false,
   tableName: 'tablefullcopies',
 });
 

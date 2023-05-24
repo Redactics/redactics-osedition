@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: {{ include "dashboard.fullname" . }}
   labels:
-    app: dashboard
+    app: {{ .Chart.Name }}
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: {{ .Values.replicas }}
@@ -14,11 +14,11 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: dashboard
+      app: {{ .Chart.Name }}
   template:
     metadata:
       labels:
-        app: dashboard
+        app: {{ .Chart.Name }}
     spec:
       containers:
       - name: dashboard

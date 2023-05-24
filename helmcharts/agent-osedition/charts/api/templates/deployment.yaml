@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: {{ include "api.fullname" . }}
   labels:
-    app: api
+    app: {{ .Chart.Name }}
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: {{ .Values.replicas }}
@@ -14,11 +14,11 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: api
+      app: {{ .Chart.Name }}
   template:
     metadata:
       labels:
-        app: api
+        app: {{ .Chart.Name }}
     spec:
       initContainers:
       - name: init-wait-for-dependencies

@@ -26,6 +26,8 @@ export async function getInputs(req: Request, res: Response) {
     inputs = inputs.map((i:any) => {
       const inputRecord:InputRecord = i.dataValues;
       delete inputRecord.id;
+      // set default if no value is provided
+      if (!inputRecord.extensionsSchema) { inputRecord.extensionsSchema = 'public'; }
       return inputRecord;
     });
 
@@ -76,6 +78,7 @@ export async function saveInputs(req: Request, res: Response) {
         diskSize: i.diskSize,
         enableSSL: i.enableSSL,
         sslMode: i.sslMode,
+        extensionsSchema: i.extensionsSchema,
       };
       if (inputUuids.includes(i.uuid)) {
         // update input

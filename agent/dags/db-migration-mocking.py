@@ -2,6 +2,7 @@ from datetime import timedelta
 from datetime import datetime
 from urllib.parse import urlparse
 from airflow.decorators import dag, task
+from sqlalchemy import create_engine, select, func, Table, Column, MetaData, and_
 
 import glob
 import airflow
@@ -51,9 +52,63 @@ headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
 apiUrl = API_URL + '/workflow/' + dag_name
 request = requests.get(apiUrl, headers=headers)
 wf_config = request.json()
-input_id = wf_config["inputs"][0]["id"]
+input = wf_config["inputs"][0]
+input_id = wf_config["inputs"][0]["uuid"]
 database = wf_config["migrationDatabase"]
 clone_database = wf_config["migrationDatabaseClone"]
+
+def get_source_db(input_id):
+    host = BaseHook.get_connection(input_id).host
+    login = BaseHook.get_connection(input_id).login
+    password = BaseHook.get_connection(input_id).password
+    schema = BaseHook.get_connection(input_id).schema
+    extra = json.loads(BaseHook.get_connection(input_id).extra) if BaseHook.get_connection(input_id).extra else ""
+
+    connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
+                            .format(login=login, password=password,
+                                    host=host, schema=schema), connect_args=extra, echo=False)
+    return connection
+
+def set_exclude_tables(input):
+    source_db = get_source_db(input["uuid"])
+    # collect tables from workflow config, supporting wildcards
+    found_tables = []
+    append_sql = []
+    schema_sql = "table_schema LIKE 'pg_%%' OR table_schema = 'information_schema'"
+    table_sql = ""
+    for t in input["tables"]:
+        schema = t.split('.')[0]
+        table = t.split('.')[1]
+
+        if "*" in schema:
+            schema = schema.replace("*", "%%")
+        if "*" in table:
+            table = table.replace("*", "%%")
+        sql = "(table_schema ILIKE '" + schema + "' AND "
+        sql += "table_name ILIKE '" + table + "')"
+        append_sql.append(sql)
+
+    idx=0
+    for sql in append_sql:
+        if (idx + 1) < len(append_sql):
+            table_sql += append_sql[idx] + " OR "
+        else:
+            table_sql += append_sql[idx]
+        idx+=1
+    
+    if table_sql:
+        print("SELECT * FROM information_schema.columns WHERE " + schema_sql + " OR " + table_sql)
+        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE " + schema_sql + " OR " + table_sql).fetchall()
+    else:
+        print("SELECT * FROM information_schema.columns WHERE " + schema_sql)
+        tables = source_db.execute("SELECT * FROM information_schema.columns WHERE " + schema_sql).fetchall()
+    if len(tables):
+        for idx, t in enumerate(tables):
+                found_tables.append(t["table_schema"] + "." + t["table_name"])
+        
+    print("FOUND TABLES")
+    print(list(dict.fromkeys(found_tables)))
+    return list(dict.fromkeys(found_tables))
 
 k8s_pg_source_envvars = {
     "PGHOST": BaseHook.get_connection(input_id).host,
@@ -167,6 +222,13 @@ def db_migration_mocking():
         except AirflowException as err: 
             raise AirflowException(err)
 
+    @task(on_failure_callback=post_logs)
+    def set_clone_cmd(**context):
+        cmds=[]
+        exclude_tables = set_exclude_tables(input)
+        cmds.append(["/scripts/clone-db.sh", database, clone_database, ",".join(exclude_tables)])
+        return cmds
+
     # drop database with force requires PG 13
     #return ["DROP DATABASE IF EXISTS redactics_clone WITH (FORCE)"]
     drop_clone = PostgresOperator(
@@ -193,11 +255,10 @@ def db_migration_mocking():
         )
     create_db.set_upstream(drop_clone)
 
-    clone_db = KubernetesPodOperator(
+    clone_db = KubernetesPodOperator.partial(
         task_id="clone-db",
         namespace=NAMESPACE,
         image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-        cmds=["/scripts/clone-db.sh", database, clone_database],
         # ensure latest PG image is cached
         image_pull_policy="Always",
         get_logs=True,
@@ -214,6 +275,8 @@ def db_migration_mocking():
         hostnetwork=False,
         on_failure_callback=post_logs,
         on_success_callback=post_taskend,
+        ).expand(
+            cmds=set_clone_cmd()
         )
     clone_db.set_upstream(create_db)
 

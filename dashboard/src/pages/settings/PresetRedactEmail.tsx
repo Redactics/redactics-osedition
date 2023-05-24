@@ -30,7 +30,6 @@ interface IState {
   key: string;
   prefix: string;
   domain: string;
-  primaryKey: string;
 }
 
 /* eslint-disable max-len */
@@ -43,7 +42,6 @@ class PresetRedactEmail extends React.Component<IProps, IState> {
       key: this.props.selectedPreset.key || '',
       prefix: this.props.selectedPreset.redactData.prefix || 'redacted',
       domain: this.props.selectedPreset.redactData.domain || 'redactics.com',
-      primaryKey: this.props.selectedPreset.redactData.primaryKey || 'id',
     };
   }
 
@@ -52,7 +50,7 @@ class PresetRedactEmail extends React.Component<IProps, IState> {
       <React.Fragment>
 
         <Typography variant="body1" gutterBottom>
-          Transform emails to unique email address derived from the row&quot;s primary key, constructed based on provided prefix and domain - i.e. <code>[prefix][primarykey]@[domain]</code>
+          Transform emails to unique email address derived from a provided prefix, an automatically generated incrementing number, and domain - i.e. <code>[prefix][primarykey]@[domain]</code>
         </Typography>
 
         <form noValidate autoComplete="off">
@@ -62,15 +60,6 @@ class PresetRedactEmail extends React.Component<IProps, IState> {
               name="prefix"
               label="Prefix"
               defaultValue={this.state.prefix}
-            />
-          </FormControl>
-
-          <FormControl fullWidth margin="normal" variant="outlined">
-            <TextField
-              onChange={(event) => this.props.handleChange(this.state.key, event)}
-              name="primaryKey"
-              label="Primary Key"
-              defaultValue={this.state.primaryKey}
             />
           </FormControl>
 

@@ -46,7 +46,7 @@ airflowHome: /opt/airflow
 defaultAirflowRepository: redactics/agent
 
 # Default airflow tag to deploy
-defaultAirflowTag: "2.3.2-3.0.0"
+defaultAirflowTag: "2.3.2-3.1.0"
 
 # Airflow version (Used to make some decisions based on Airflow Version being deployed)
 airflowVersion: "2.3.2"
@@ -293,6 +293,7 @@ extraConfigMaps:
       HELM_CMD: {{ .Values.helmCmd | toString | quote }}
       AGENT_VERSION: {{ $.Chart.Version }}
       AIRFLOW_VAR_AIRFLOW_LOG_CLEANUP__MAX_LOG_AGE_IN_DAYS: "1"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "120"
 
 # eg:
 # extraConfigMaps:

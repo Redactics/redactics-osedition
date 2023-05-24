@@ -104,11 +104,7 @@ const Button = styled(MuiButton)(spacing);
 
 interface IProps {
   inputs: WorkflowInputRecord[];
-  allInputs: InputRecord[];
   handleDeleteSecret: any;
-  markAddToS3UploadList: any;
-  addAllToS3UploadList: any;
-  addAllS3Uploads: boolean;
   agentNamespace?: string;
   dataFeeds: DataFeed[];
   dataFeed: DataFeed;
@@ -121,7 +117,6 @@ interface IProps {
   handleDataFeed: any;
   handleDataFeedBack: any;
   handleDataFeedCancel: any;
-  getS3UploadFileNames: any;
   handleDataFeedOptions: any;
   saveDataFeedChanges: any;
   triggerEditDataFeed: any;
@@ -200,11 +195,7 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
       break;
       
       case 's3upload':
-      dataFeedSummary = "Upload ";
-      dataFeedSummary += (df.dataFeedConfig.uploadFileChecked.length === this.props.getS3UploadFileNames().length)
-        ? "all" : df.dataFeedConfig.uploadFileChecked.length;
-      dataFeedSummary += (df.dataFeedConfig.uploadFileChecked.length === 1) ? " table" : " tables";
-      dataFeedSummary += " to " + uploadBucket;
+      dataFeedSummary = "Upload tables to " + uploadBucket;
       break;
 
       case 'custom':
@@ -221,37 +212,56 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
   outputTable() {
     if (this.props.dataFeeds && this.props.dataFeeds.length) {
       return (
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Data Feed</TableCell>
-              <TableCell>Summary</TableCell>
-              <TableCell></TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {this.props.dataFeeds.map((df:DataFeed) => (
-              <TableRow key={df.uuid}>
-                <TableCell>{this.dataFeedName(df.dataFeed)}</TableCell>
-                <TableCell>{this.dataFeedSummary(df)}</TableCell>
-                <NWTableCell>
-                  <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditDataFeed(df)}>
-                    <EditIcon/>&nbsp;Edit
-                  </Button>&nbsp;
-                  <Button variant="contained" color="default" size="small" onClick={() => this.props.deleteDataFeed(df)}>
-                    <DeleteIcon />&nbsp;Delete
-                  </Button>
-                </NWTableCell>
+        <Box>
+          <Grid
+            justify="space-between"
+            container
+            spacing={10}
+          >
+            <Grid item></Grid>
+            <Grid item mb={6}>
+              <Button variant="contained" color="secondary" size="small" onClick={this.props.addDataFeed}>
+                <AddIcon />&nbsp;
+                Add Data Feed
+              </Button>
+            </Grid>
+          </Grid>
+
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Data Feed</TableCell>
+                <TableCell>Summary</TableCell>
+                <TableCell></TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {this.props.dataFeeds.map((df:DataFeed) => (
+                <TableRow key={df.uuid}>
+                  <TableCell>{this.dataFeedName(df.dataFeed)}</TableCell>
+                  <TableCell>{this.dataFeedSummary(df)}</TableCell>
+                  <NWTableCell>
+                    <Button variant="contained" color="secondary" size="small" onClick={() => this.props.triggerEditDataFeed(df)}>
+                      <EditIcon/>&nbsp;Edit
+                    </Button>&nbsp;
+                    <Button variant="contained" color="default" size="small" onClick={() => this.props.deleteDataFeed(df)}>
+                      <DeleteIcon />&nbsp;Delete
+                    </Button>
+                  </NWTableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Box>
       )
     }
     else {
       return (
         <Box>
-          Click on <b>Add Data Feed</b> to define your first data feed.
+          <Button variant="contained" color="secondary" size="small" onClick={this.props.addDataFeed}>
+            <AddIcon />&nbsp;
+            Add Data Feed
+          </Button>
         </Box>
       )
     }
@@ -352,19 +362,21 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                     Digital Twin Options
                   </Typography>
 
-                  <p>Adding this data feed will require updating your Agent configuration file (provided within the <Link href="/agents" target="_blank">Agents</Link> page), replacing the "changeme"s for connection ID <code>{this.props.dataFeed.uuid}</code> with the specified connection info for this input source.</p>
+                  <p>Adding this data feed will require updating your Agent configuration file (provided within the <Link href="/agents" target="_blank">Agents</Link> page), replacing the "changeme"s for connection ID <code>{this.props.dataFeed.uuid}</code> with the specified connection info for this data source.</p>
+
+                  <p><b>This feature does not prevent you from accidentally destroying data by selecting the wrong output destination!</b> Your output destination will be populated with the entire public schema, the schema of your selected tables from your data source, and the table data from your selected tables. We strongly advise that your output destination be an empty/unused database (you can create a new database with the <code>create database</code> SQL command) in order to avoid collisions and unintended overwriting.</p>
 
                   <Box mt={4}>
                     <FormControl margin="dense" fullWidth>
                       <InputLabel>
-                        Input Source
+                        Output Destination
                       </InputLabel>
                       <Select
                         value={this.props.dataFeed.dataFeedConfig.inputSource}
                         name="inputSource"
                         onChange={(event) => this.props.handleDataFeedOptions(event)}
                       >
-                        {this.props.allInputs.map((input:InputRecord) => (
+                        {this.props.workflow.allOutputs.map((input:InputRecord) => (
                           <MenuItem key={input.uuid} value={input.uuid}>{input.inputName}</MenuItem>
                         ))}
                       </Select>
@@ -493,42 +505,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                   </Typography>
 
                   <Box mt={8}>
-                    <Typography variant="h6" gutterBottom>
-                      Data Files to Upload
-                    </Typography>
-
-                    <Grid container>
-                      <Grid item xs={8}>
-                        <Box mt={8}>
-                          <Paper variant="outlined">
-                            <Box mt={4}>
-                              <Table>
-                                <TableHead>
-                                  <TableRow>
-                                    <TableCell><Checkbox onClick={this.props.addAllToS3UploadList} checked={this.props.dataFeed.dataFeedConfig.addAllS3Uploads} /> Add All Files</TableCell>
-                                    <TableCell align="left">File</TableCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                {this.props.getS3UploadFileNames().map((f:string) => (
-                                  <TableRow key={f}>
-                                    <TableCell component="th" scope="row">
-                                      <Checkbox onClick={(event) => this.props.markAddToS3UploadList(event, f)} checked={!!(this.props.dataFeed.dataFeedConfig.uploadFileChecked && 
-                                        this.props.dataFeed.dataFeedConfig.uploadFileChecked.includes(f))} />
-                                    </TableCell>
-                                    <TableCell align="left">{f}</TableCell>
-                                  </TableRow>
-                                ))}
-                                </TableBody>
-                              </Table>
-                            </Box>
-                          </Paper>
-                        </Box>
-                      </Grid>
-                    </Grid>
-                  </Box>
-
-                  <Box mt={8}>
                     <FormControl fullWidth variant="outlined">
                       <MedTextField
                         name="S3UploadBucket"
@@ -571,7 +547,7 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
                       Custom Container/Plugin Configuration
                     </Typography>
 
-                    <p>The filenames that will be exported are as follows: <b>{this.props.getS3UploadFileNames().join(', ')}</b>. Some documentation for developing your own custom container/plugin can be found on the <Link href="/developers" target="_blank">developers page</Link>.
+                    <p>Some documentation for developing your own custom container/plugin can be found on the <Link href="/developers" target="_blank">developers page</Link>.
                     </p>
                   </Box>
 
@@ -795,22 +771,6 @@ class WorkflowPostExport extends React.Component<IProps, IState> {
           </Grid>
 
           <Box mt={8}>
-            <Grid
-              justify="space-between"
-              container
-              spacing={10}
-            >
-              <Grid item></Grid>
-              <Grid item mb={6}>
-                <div>
-                  <Button variant="contained" color="secondary" size="small" onClick={this.props.addDataFeed}>
-                    <AddIcon />&nbsp;
-                    Add Data Feed
-                  </Button>
-                </div>
-              </Grid>
-            </Grid>
-
             {this.outputTable()}
           </Box>
         </Box>

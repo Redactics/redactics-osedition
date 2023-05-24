@@ -84,6 +84,7 @@ export async function createAgent(req: Request, res: Response) {
     const agent:AgentRecord = req.body;
     agent.fernetKey = fernetKey;
     agent.webserverKey = webserverKey;
+    // TODO: deprecate this field, user will set this password
     agent.generatedAirflowDBPassword = cryptoRandomString({ length: 24 });
     agent.generatedAirflowAPIPassword = cryptoRandomString({ length: 24 });
 
@@ -340,32 +341,35 @@ export async function helmCmd(req: Request, res: Response) {
       },
     };
 
-    let largestDisk = 0;
-    let largestDiskPadded = 0;
+    let totalDBSize = 0;
+    let totalDBSizePadded = 0;
 
     agentInputs.forEach((i:any) => {
       const findInput = allInputs.find((input:any) => (
         input.dataValues.id === i.dataValues.inputId
       ));
       if (findInput) {
-        if (!helmArgs.postgresql.persistence.size
-          || (findInput.dataValues.exportData && findInput.dataValues.diskSize > largestDisk)) {
-          // add additional buffer for uncompressed, plain text files
-          largestDisk = findInput.dataValues.diskSize;
-          largestDiskPadded = Math.ceil(largestDisk * 3);
+        if (findInput.dataValues.exportData) {
+          // tally up size for redactics tmp database
+          totalDBSize += findInput.dataValues.diskSize;
+          // add additional 10% padding for uncompressed, plain text files for NAS storage
+          totalDBSizePadded += findInput.dataValues.diskSize
+            + Math.ceil(findInput.dataValues.diskSize * 0.1);
         }
       }
     });
 
     // console.log(helmArgs.workflows[0].inputs);
 
-    if (largestDiskPadded) {
+    if (totalDBSizePadded) {
       helmArgs.httpNas = {
         persistence: {
           enabled: true,
-          size: largestDiskPadded,
+          size: totalDBSizePadded,
         },
       };
+      // all tmp data plus 5 GB for Airflow data
+      helmArgs.postgresql.persistence.size = totalDBSize + 5;
     } else {
       helmArgs.httpNas = {
         persistence: {
@@ -390,8 +394,8 @@ export async function helmCmd(req: Request, res: Response) {
       `--set "redactics.namespace=${agent.namespace}"`,
     ];
 
-    if (largestDiskPadded) {
-      helmCmdSet.push(`--set "http-nas.persistence.size=${largestDiskPadded}Gi"`);
+    if (totalDBSizePadded) {
+      helmCmdSet.push(`--set "http-nas.persistence.size=${totalDBSizePadded}Gi"`);
       helmCmdSet.push('--set "http-nas.persistence.enabled=true"');
     } else {
       helmCmdSet.push('--set "http-nas.persistence.enabled=false"');
@@ -522,7 +526,7 @@ export async function helmConfig(req: Request, res: Response) {
     let enableWebserver:boolean = (process.env.NODE_ENV === 'development');
     const migrationNamespaces:string[] = [];
     workflows.forEach((workflow:any) => {
-      if (workflow.dataValues.workflowType === 'mockDatabaseMigration') {
+      if (workflow.dataValues.workflowType === 'mockDatabaseMigration' && workflow.dataValues.migrationNamespace) {
         enableWebserver = true;
         migrationNamespaces.push(workflow.dataValues.migrationNamespace);
       }
@@ -592,7 +596,7 @@ export async function helmConfig(req: Request, res: Response) {
       host: 'agent-postgresql',
       port: 5432,
       login: 'postgres',
-      password: agent.dataValues.generatedAirflowDBPassword,
+      password: 'changeme',
       schema: 'redactics_tmp',
     });
 
@@ -606,12 +610,12 @@ export async function helmConfig(req: Request, res: Response) {
     };
 
     helmArgs.postgresql = {
-      connection: `postgresql://postgres:${agent.dataValues.generatedAirflowDBPassword}@agent-postgresql:5432/postgres`,
+      connection: 'postgresql://postgres:changeme@agent-postgresql:5432/postgres',
     };
 
     if (process.env.NODE_ENV === 'development') {
       helmArgs.redactics.env = 'development';
-      helmArgs.redactics.apiURL = 'http://host.docker.internal:3000';
+      helmArgs.redactics.apiUrl = 'http://host.docker.internal:3000';
 
       // enable access to logs via web GUI
       helmArgs.workers = {
@@ -659,6 +663,7 @@ export async function helmConfig(req: Request, res: Response) {
         // Redactics Airflow DB
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[0].value.comment = ' ID for internal Redactics database';
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[3].value.comment = ' Internal Redactics DB hostname (do not alter)';
+        helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[5].value.comment = ' Arbitrary database password (ensure postgresql connection string, below, uses this same password)';
       } else {
         // customer database
         helmConfigObj.contents.items[airflowIdx].value.items[2].value.items[idx].items[0].value.comment = ` ${connectionNames[connection.id]}`;

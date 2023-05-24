@@ -29,6 +29,8 @@ import {
   MenuItem,
 } from '@material-ui/core';
 
+import { Alert as MuiAlert } from '@material-ui/lab';
+
 import {
   ExpandMore as ExpandMoreIcon,
   DeleteOutline as DeleteIcon,
@@ -52,7 +54,7 @@ import DatabaseMigrationSetup from './DatabaseMigrationSetup';
 
 import {
   RedactRule, CustomSecret, WorkflowRecord, WorkflowUpdate, PostUpdateParam,
-  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, InputRecord, AgentInputRecord, 
+  AgentRecord, RedactRulePreset, RedactRuleSet, DataFeed, AgentInputRecord, 
   WorkflowInputRecord,
 } from '../../types/redactics';
 
@@ -61,6 +63,8 @@ const Card = styled(MuiCard)(spacing);
 const Grid = styled(MuiGrid)(spacing);
 
 const Button = styled(MuiButton)(spacing);
+
+const Alert = styled(MuiAlert)(spacing);
 
 const styles = {
   selectAdornment: {
@@ -88,7 +92,6 @@ interface IProps {
   handleWFChanges: any;
   workflow: WorkflowRecord;
   agentInputs: AgentInputRecord[];
-  allInputs: InputRecord[];
   agents: AgentRecord[];
   presets?: RedactRulePreset[];
   redactrulesets: RedactRuleSet[];
@@ -104,6 +107,8 @@ interface IState {
   addAllS3Uploads: boolean;
   S3UploadBucket: string;
   tableOutputOptions: any;
+  constraintSchema: string;
+  constraintTable: string;
   exportTableSchemaAll: boolean;
   exportTableDataAll: boolean;
   S3UploadFileChecked: string[];
@@ -156,7 +161,10 @@ interface IState {
   showSnackbarEdit: boolean;
   showOutputOptions: boolean;
   editDataFeed: boolean;
-  columnExclusionProhibited: boolean;
+  invalidDeltaUpdate: boolean;
+  invalidPreparedStatement: boolean;
+  mockMigrationDatabase: boolean;
+  invalidDigitalTwinOutput: boolean;
   invalidForgetUserFields: boolean;
   invalidMigrationFields: boolean;
   digitalTwinAdded: boolean;
@@ -186,16 +194,11 @@ class Workflow extends React.Component<IProps, IState> {
     this.handleDeltaUpdate = this.handleDeltaUpdate.bind(this);
     this.handleCustomSecret = this.handleCustomSecret.bind(this);
     this.validateRedactionRules = this.validateRedactionRules.bind(this);
-    this.addExportTableColumn = this.addExportTableColumn.bind(this);
-    this.deleteExportTableColumn = this.deleteExportTableColumn.bind(this);
     this.handleTableOutputChanges = this.handleTableOutputChanges.bind(this);
-    this.validateOutputSettings = this.validateOutputSettings.bind(this);
     this.deleteWorkflowConfirmation = this.deleteWorkflowConfirmation.bind(this);
     this.cancelWorkflowConfirmation = this.cancelWorkflowConfirmation.bind(this);
     this.clipboardCopy = this.clipboardCopy.bind(this);
     this.handleSnackbarClose = this.handleSnackbarClose.bind(this);
-    this.markAddToS3UploadList = this.markAddToS3UploadList.bind(this);
-    this.addAllToS3UploadList = this.addAllToS3UploadList.bind(this);
     this.getExportFileNames = this.getExportFileNames.bind(this);
     this.saveInputChanges = this.saveInputChanges.bind(this);
     this.triggerEditInputDialog = this.triggerEditInputDialog.bind(this);
@@ -208,7 +211,9 @@ class Workflow extends React.Component<IProps, IState> {
     this.deleteWorkflow = this.deleteWorkflow.bind(this);
     this.transformExpansion = this.transformExpansion.bind(this);
     this.triggerOutputOptions = this.triggerOutputOptions.bind(this);
+    this.deleteConstraint = this.deleteConstraint.bind(this);
     this.hideOutputOptions = this.hideOutputOptions.bind(this);
+    this.genConstraintSummary = this.genConstraintSummary.bind(this);
     this.addDataFeed = this.addDataFeed.bind(this);
     this.hideDataFeed = this.hideDataFeed.bind(this);
     this.handleDataFeed = this.handleDataFeed.bind(this);
@@ -217,20 +222,25 @@ class Workflow extends React.Component<IProps, IState> {
     this.deleteParameterValue = this.deleteParameterValue.bind(this);
     this.handleDataFeedBack = this.handleDataFeedBack.bind(this);
     this.handleDataFeedCancel = this.handleDataFeedCancel.bind(this);
-    this.getS3UploadFileNames = this.getS3UploadFileNames.bind(this);
     this.handleDataFeedOptions = this.handleDataFeedOptions.bind(this);
     this.saveDataFeedChanges = this.saveDataFeedChanges.bind(this);
     this.triggerEditDataFeed = this.triggerEditDataFeed.bind(this);
     this.deleteDataFeed = this.deleteDataFeed.bind(this);
     this.resetDataFeedErrors = this.resetDataFeedErrors.bind(this);
+    this.addTableSelection = this.addTableSelection.bind(this);
+    this.deleteTableSelection = this.deleteTableSelection.bind(this);
     //this.saveFeedback = this.saveFeedback.bind(this);
 
     const maskingRuleValues:RedactRule[] = [];
     if (this.props.workflow.redactrules && this.props.workflow.redactrules.length) {
       this.props.workflow.redactrules.forEach((rule:RedactRule) => {
+        let t = rule.table.split('.');
+        let schema = t.length ? t[0] : 'public';
+        let table = t.length ? t[1] : '';
         maskingRuleValues.push({
           key: rule.uuid,
-          table: rule.table,
+          schema,
+          table,
           databaseTable: rule.databaseTable,
           column: rule.column,
           rule: rule.rule,
@@ -271,8 +281,17 @@ class Workflow extends React.Component<IProps, IState> {
       scheduleSelection: (this.props.workflow.schedule && !this.props.workflow.schedule.match(/^@/) && this.props.workflow.schedule !== 'None') ? 'custom' : this.props.workflow.schedule || '',
       customSchedule: !!((this.props.workflow.schedule && !this.props.workflow.schedule.match(/^@/) && this.props.workflow.schedule !== 'None')),
       schedule: this.props.workflow.schedule || 'None',
-      tableOutputOptions: [],
-      exportTableDataConfig: this.props.workflow.exportTableDataConfig || [],
+      tableOutputOptions: {
+        errors: {},
+        numDays: 30,
+        sampleFields: "createdAndUpdated",
+        createdAtField: "created_at",
+        updatedAtField: "updated_at",
+        disableDeltaUpdates: false,
+      },
+      constraintSchema: "public",
+      constraintTable: "",
+      exportTableDataConfig: [],
       addTable: '',
       displayExportTableSchema: 'none',
       displayExportTableData: 'none',
@@ -288,9 +307,9 @@ class Workflow extends React.Component<IProps, IState> {
       },
       input: {
         uuid: "",
-        inputName: "",
         enabled: true,
         tables: [],
+        tableSelection: ""
       },
       inputs: this.props.workflow.inputs,
       numInputs: this.props.workflow.inputs.length,
@@ -298,9 +317,6 @@ class Workflow extends React.Component<IProps, IState> {
         uuid: "",
         dataFeed: "",
         dataFeedConfig: {
-          uploadFileChecked: [],
-          addAllS3Uploads: false,
-          s3Bucket: "",
           postUpdateKeyValues: []
         },
         feedSecrets: [],
@@ -321,7 +337,10 @@ class Workflow extends React.Component<IProps, IState> {
       currentDatabaseTable: "",
       showOutputOptions: false,
       editDataFeed: false,
-      columnExclusionProhibited: false,
+      invalidDeltaUpdate: false,
+      invalidPreparedStatement: false,
+      mockMigrationDatabase: false,
+      invalidDigitalTwinOutput: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
       digitalTwinAdded: false,
@@ -330,8 +349,24 @@ class Workflow extends React.Component<IProps, IState> {
       snackbarText: ""
     };
 
+    if (Object.keys(this.props.workflow.exportTableDataConfig).length) {
+      Object.keys(this.props.workflow.exportTableDataConfig).forEach((idx:any) => {
+        const table:string = Object.keys(this.props.workflow.exportTableDataConfig[idx])[0];
+        const config:any = this.props.workflow.exportTableDataConfig[idx][table];
+        state.exportTableDataConfig.push({
+          table,
+          numDays: config.numDays,
+          sampleFields: config.sampleFields,
+          createdAtField: config.createdAtField,
+          updatedAtField: config.updatedAtField,
+          disableDeltaUpdates: config.disableDeltaUpdates,
+        });
+      });
+    }
+
     this.props.redactrulesets.forEach((rule:RedactRuleSet) => {
       state.maskingRules.push({
+        schema: '',
         table: '',
         databaseTable: '',
         column: '',
@@ -345,6 +380,7 @@ class Workflow extends React.Component<IProps, IState> {
       this.props.presets.forEach((preset:RedactRulePreset) => {
         if (!preset.isDefault) {
           state.maskingRules.push({
+            schema: '',
             table: '',
             databaseTable: '',
             column: '',
@@ -356,51 +392,6 @@ class Workflow extends React.Component<IProps, IState> {
         }
       });
     }
-
-    // set default table output options
-    this.props.workflow.inputs.forEach((input:WorkflowInputRecord) => {
-      if (input.tables && input.tables.length) {
-        input.tables.forEach((table:string) => {
-          state.tableOutputOptions[table] = {
-            errors: {
-              addColumn: false
-            },
-            addColumn: '',
-            exportColumns: "all",
-            exportRows: "all",
-            fields: [],
-            numDays: 30,
-            sampleFields: "createdAndUpdated",
-            createdAtField: "created_at",
-            updatedAtField: "updated_at",
-          }
-        })
-      }
-    })
-
-    // replace table output options with recorded values    
-    this.props.workflow.exportTableDataConfig.forEach((c:any) => {
-      Object.entries(c).forEach((cf:any) => {
-        const [table, config] = cf;
-        if (!config.updatedAtField) {
-          // default to delta update field, fallback to "updated_at" if this doesn't exist
-          config.updatedAtField = state.deltaUpdateField;
-        }
-        state.tableOutputOptions[table] = {
-          errors: {
-            addColumn: false
-          },
-          addColumn: '',
-          exportColumns: (config.fields && config.fields.length) ? "specific" : "all",
-          exportRows: (config.numDays) ? "specific" : "all",
-          fields: config.fields || [],
-          numDays: config.numDays || 30,
-          sampleFields: config.sampleFields || "createdAndUpdated",
-          createdAtField: config.createdAtField || "created_at",
-          updatedAtField: config.updatedAtField || "updated_at",
-        }
-      })
-    })
 
     // look for orphaned workflows
     if (this.props.workflow.workflowType === "ERL" && !this.props.workflow.agentId) {
@@ -446,6 +437,10 @@ class Workflow extends React.Component<IProps, IState> {
     maskingRuleValues.map((row:RedactRule) => {
       if (row.key === key && event.target.name === 'databaseTable') {
         values[0].databaseTable = event.target.value;
+      } else if (row.key === key && event.target.name === 'schema') {
+        values[0].schema = event.target.value;
+      } else if (row.key === key && event.target.name === 'table') {
+        values[0].table = event.target.value;
       } else if (row.key === key && event.target.name === 'column') {
         values[0].column = event.target.value;
       } else if (row.key === key && event.target.name === 'rule') {
@@ -483,19 +478,14 @@ class Workflow extends React.Component<IProps, IState> {
     });
 
     // prep exportTableDataConfig
-    const dataConfig:any = {};
-    this.state.allDatabaseTables.forEach((t:string) => {
-      const tableArr:string[] = t.split(': ');
-      const table:string = tableArr[(tableArr.length - 1)];
-      dataConfig[table] = {
-        table: table,
-        fields: (this.state.tableOutputOptions[table].exportColumns === "all") ? [] : this.state.tableOutputOptions[table].fields,
-        numDays: (this.state.tableOutputOptions[table].exportRows === "all") ? null : parseInt(this.state.tableOutputOptions[table].numDays),
-        sampleFields: (this.state.tableOutputOptions[table].exportRows === "all") ? null : this.state.tableOutputOptions[table].sampleFields,
-        createdAtField: (this.state.tableOutputOptions[table].exportRows === "all") ? null : this.state.tableOutputOptions[table].createdAtField,
-        updatedAtField: (this.state.tableOutputOptions[table].exportRows === "all") ? null : this.state.tableOutputOptions[table].updatedAtField,
-      }
-    })
+    let exportTableDataConfig:any = [];
+    this.state.exportTableDataConfig.forEach((c:any) => {
+      const config = c;
+      delete config.errors;
+      let exportTableDataConfigObj:any = {};
+      exportTableDataConfigObj[config.table] = config;
+      exportTableDataConfig.push(exportTableDataConfigObj)
+    });
 
     const payload:WorkflowUpdate = {
       name: this.props.workflow.name,
@@ -503,9 +493,9 @@ class Workflow extends React.Component<IProps, IState> {
       workflowType: this.props.workflow.workflowType,
       inputs: this.state.inputs,
       dataFeeds: this.state.dataFeeds,
-      maskingRules: this.state.maskingRuleValues,
+      redactRules: this.state.maskingRuleValues,
       schedule: this.state.schedule,
-      exportTableDataConfig: [dataConfig],
+      exportTableDataConfig,
       deltaUpdateField: this.state.deltaUpdateField,
       migrationNamespace: this.props.workflow.migrationNamespace,
       migrationDatabase: this.props.workflow.migrationDatabase,
@@ -517,8 +507,7 @@ class Workflow extends React.Component<IProps, IState> {
     //console.log('PAYLOAD', payload);
     //console.log(this.state);
 
-    if (this.validateRedactionRules() && this.validateOutputSettings() && 
-      this.validateMigrationMockFields()) {
+    if (this.validateRedactionRules() && this.validateMigrationMockFields()) {
       try {
         const response = await fetch(`${this.context.apiUrl}/workflow/${workflowId}`, {
           method: 'put',
@@ -537,22 +526,33 @@ class Workflow extends React.Component<IProps, IState> {
         if (data.errors) {
           let invalidSchedule:boolean = false;
           let orphanedWorkflow:boolean = false;
-          let columnExclusion:boolean = false;
+          let invalidDeltaUpdate:boolean = false;
+          let invalidPreparedStatement:boolean = false;
+          let mockMigrationDatabase:boolean = false;
+          let invalidDigitalTwinOutput:boolean = false;
           const invalidScheduleError = "Invalid schedule";
           const orphanedWorkflowError = "Invalid agent ID";
-          const columnExclusionError = "Data feed does not permit column exclusion";
+          const invalidDeltaUpdateError = "You must provide your delta update field to enable delta updates";
+          const invalidPreparedStatementError = "You must provide some key/value pairs for your prepared statements";
+          const mockMigrationDatabaseError = "Your input and target database cannot be identical";
+          const invalidDigitalTwinOutputError = "Your digital twin output cannot be the same as your input";
           
           if (Array.isArray(data.errors)) {
             // multiple errors found
             invalidSchedule = data.errors.find((e:any) => ((e.msg === invalidScheduleError)));
             orphanedWorkflow = data.errors.find((e:any) => ((e.msg === orphanedWorkflowError) && e.param === 'agentId'));
-            columnExclusion = data.errors.find((e:any) => ((e.msg === columnExclusionError)));
+            invalidDeltaUpdate = data.errors.find((e:any) => ((e.msg === invalidDeltaUpdateError)));
+            invalidPreparedStatement = data.errors.find((e:any) => ((e.msg === invalidPreparedStatementError)));
+            mockMigrationDatabase = data.errors.find((e:any) => ((e.msg === mockMigrationDatabaseError)));
+            invalidDigitalTwinOutput = data.errors.find((e:any) => ((e.msg === invalidDigitalTwinOutputError)));
           }
           else {
             // single error returned as string
             invalidSchedule = (data.errors === invalidScheduleError) ? true : false;
             orphanedWorkflow = (data.errors === orphanedWorkflowError) ? true : false;
-            columnExclusion = (data.errors === columnExclusionError) ? true : false;
+            invalidPreparedStatement = (data.errors === invalidPreparedStatementError) ? true : false;
+            mockMigrationDatabase = (data.errors === mockMigrationDatabaseError) ? true : false;
+            invalidDigitalTwinOutput = (data.errors === invalidDigitalTwinOutputError) ? true : false;
           }
           if (invalidSchedule) {
             this.setState({
@@ -568,9 +568,21 @@ class Workflow extends React.Component<IProps, IState> {
                 agentId: true,
               },
             });
-          } else if (columnExclusion) {
+          } else if (invalidDeltaUpdate) {
             this.setState({
-              columnExclusionProhibited: true,
+              invalidDeltaUpdate: true,
+            });
+          } else if (invalidPreparedStatement) {
+            this.setState({
+              invalidPreparedStatement: true,
+            });
+          } else if (mockMigrationDatabase) {
+            this.setState({
+              mockMigrationDatabase: true,
+            });
+          } else if (invalidDigitalTwinOutput) {
+            this.setState({
+              invalidDigitalTwinOutput: true,
             });
           }
           return;
@@ -632,12 +644,10 @@ class Workflow extends React.Component<IProps, IState> {
   }
 
   missingInput() {
-    let tablesProvided = false;
-    const inputs = this.props.workflow.inputs.find((input:WorkflowInputRecord) => {
-      if (input.tables && input.tables.length) { tablesProvided = true; }
-      return (input.enabled === true)
+    const inputs = this.state.inputs.find((input:WorkflowInputRecord) => {
+      return (input.enabled === true && input.tableSelection)
     });
-    return (inputs && tablesProvided) ? false : true;
+    return (inputs) ? false : true;
   }
 
   validateRedactionRules() {
@@ -650,10 +660,10 @@ class Workflow extends React.Component<IProps, IState> {
     const validFields = this.state.maskingRuleValues.filter((rule:RedactRule) => {
       let missingFields:number = 0;
 
-      if (rules.includes(`${rule.databaseTable}.${rule.column}`)) {
+      if (rules.includes(`${rule.databaseTable}.${rule.table}.${rule.column}`)) {
         dupeRedactRuleFound = true;
       } else {
-        rules.push(`${rule.databaseTable}.${rule.column}`);
+        rules.push(`${rule.databaseTable}.${rule.table}.${rule.column}`);
       }
 
       if (!rule.databaseTable) { missingFields++; }
@@ -676,33 +686,6 @@ class Workflow extends React.Component<IProps, IState> {
       dupeRedactRuleFound,
     });
     return validRules;
-  }
-
-  validateOutputSettings() {
-    let invalidDBField:boolean = false;
-    this.state.allDatabaseTables.forEach((t:string) => {
-      const tableArr:string[] = t.split(': ');
-      const table:string = tableArr[(tableArr.length - 1)];
-      if (this.state.tableOutputOptions[table].exportRows !== "all") {
-        if (this.state.tableOutputOptions[table].sampleFields.toLowerCase().match(/created/) &&
-          (!this.state.tableOutputOptions[table].createdAtField || !this.legalName(this.state.tableOutputOptions[table].createdAtField))) {
-          invalidDBField = true;
-        }
-        else if (this.state.tableOutputOptions[table].sampleFields.toLowerCase().match(/updated/) &&
-          (!this.state.tableOutputOptions[table].updatedAtField || !this.legalName(this.state.tableOutputOptions[table].updatedAtField))) {
-          invalidDBField = true;
-        }
-      }
-    })
-
-    if (invalidDBField) {
-      this.setState({
-        invalidOutputSettingField: true
-      })
-      return false;
-    }
-
-    return true;
   }
 
   validateMigrationMockFields() {
@@ -732,7 +715,10 @@ class Workflow extends React.Component<IProps, IState> {
       missingSecretField: false,
       invalidOutputSettingField: false,
       orphanedWorkflow: false,
-      columnExclusionProhibited: false,
+      invalidDeltaUpdate: false,
+      invalidPreparedStatement: false,
+      mockMigrationDatabase: false,
+      invalidDigitalTwinOutput: false,
       invalidForgetUserFields: false,
       invalidMigrationFields: false,
     });
@@ -757,6 +743,7 @@ class Workflow extends React.Component<IProps, IState> {
     maskingRuleValues.push({
       key: `new${newRuleKey}`,
       databaseTable: '',
+      schema: 'public',
       table: '',
       column: '',
       rule: '',
@@ -767,6 +754,28 @@ class Workflow extends React.Component<IProps, IState> {
       numMaskingRules,
       newRuleKey,
     });
+  }
+
+  addTableSelection() {
+    const state:IState = this.state;
+    state.input.tables.push(localStorage.getItem("schema") || "public");
+    this.setState(state);
+  }
+
+  deleteTableSelection(idx:number) {
+    const state:IState = this.state;
+    let table = state.input.tables[idx];
+
+    state.input.tables = state.input.tables.filter((t:string) => {
+      return (t !== table)
+    })
+    state.inputs = state.inputs.map((i:any) => {
+      if (i.uuid === state.input.uuid) {
+        return state.input;
+      }
+      return i;
+    })
+    this.setState(state);
   }
 
   handleSnackbarClose = () => {
@@ -826,15 +835,15 @@ class Workflow extends React.Component<IProps, IState> {
     return null;
   }
 
-  handleDataTableDelete(table:string) {
-    const exportTableDataConfig = this.state.exportTableDataConfig.filter(
-      (t:string) => t !== table,
-    );
+  // handleDataTableDelete(table:string) {
+  //   const exportTableDataConfig = this.state.exportTableDataConfig.filter(
+  //     (t:string) => t !== table,
+  //   );
 
-    this.setState({
-      exportTableDataConfig,
-    });
-  }
+  //   this.setState({
+  //     exportTableDataConfig,
+  //   });
+  // }
 
   handleCustomSecret(event:any, idx:number) {
     const state:IState = this.state;
@@ -928,26 +937,6 @@ class Workflow extends React.Component<IProps, IState> {
     );
   }
 
-  markAddToS3UploadList(event:any, fileName:string) {
-    const state:IState = this.state;
-
-    if (event.target.checked) {
-      // add to list
-      state.dataFeed.dataFeedConfig.uploadFileChecked.push(fileName);
-
-      if (state.dataFeed.dataFeedConfig.uploadFileChecked.length === this.getS3UploadFileNames().length) {
-        state.dataFeed.dataFeedConfig.addAllS3Uploads = true;
-      }
-    } else {
-      state.dataFeed.dataFeedConfig.uploadFileChecked = state.dataFeed.dataFeedConfig.uploadFileChecked.filter(
-        (f:string) => ((f !== fileName)),
-      );
-      state.dataFeed.dataFeedConfig.addAllS3Uploads = false;
-    }
-
-    this.setState(state);
-  }
-
   getExportFileNames() {
     const filenames:string[] = [];
     this.state.exportTableDataConfig.forEach((t:string) => {
@@ -957,77 +946,40 @@ class Workflow extends React.Component<IProps, IState> {
     return filenames;
   }
 
-  getS3UploadFileNames() {
-    const filenames:string[] = [];
-    if (!this.state.allDatabaseTables) { return []; }
-    this.state.allDatabaseTables.forEach((dt:string) => {
-      const tableArr = dt.split(": ");
-      const table = tableArr[(tableArr.length - 1)];
-      filenames.push(`table-${table}.csv`);
-    });
-
-    return filenames;
-  }
-
-  addAllToS3UploadList(event:any) {
-    const state:IState = this.state;
-
-    if (event.target.checked) {
-      // check all
-      state.dataFeed.dataFeedConfig.uploadFileChecked = [];
-      this.getS3UploadFileNames().forEach((f) => {
-        state.dataFeed.dataFeedConfig.uploadFileChecked.push(f);
-      });
-
-      state.dataFeed.dataFeedConfig.addAllS3Uploads = true;
-    } else {
-      state.dataFeed.dataFeedConfig.uploadFileChecked = [];
-      state.dataFeed.dataFeedConfig.addAllS3Uploads = false;
-    }
-
-    this.setState(state);
-  }
-
-  addExportTableColumn(event:any, table:string) {
-    const state:IState = this.state;
-    if (!state.tableOutputOptions[table].addColumn) { return; }
-    else if (!this.legalName(state.tableOutputOptions[table].addColumn)) {
-      state.tableOutputOptions[table].errors.addColumn = true;
-    }
-    else {
-      state.tableOutputOptions[table].fields.push(state.tableOutputOptions[table].addColumn);
-      state.tableOutputOptions[table].addColumn = "";
-      state.tableOutputOptions[table].errors.addColumn = false;
-    }
-    this.setState(state);
-  }
-
-  deleteExportTableColumn(event:any, table:string, field:string) {
-    const state:IState = this.state;
-
-    state.tableOutputOptions[table].fields = state.tableOutputOptions[table].fields.filter((f:string) => {
-      return (f === field) ? false : true;
-    })
-    this.setState(state);
-  }
-
   handleTableOutputChanges(event:any, table:string) {
     const state:IState = this.state;
-    
-    state.tableOutputOptions[table][event.target.name] = event.target.value;
+    if (!table) {
+      table = state.constraintSchema + "." + state.constraintTable;
+    }
+    if (!state.tableOutputOptions) {
+      state.tableOutputOptions = {
+        numDays: 30,
+        sampleFields: "createdAndUpdated",
+        createdAtField: "created_at",
+        updatedAtField: "updated_at",
+        disableDeltaUpdates: false,
+      } 
+    }
+
+    if (event.target.name === "schema") {
+      state.constraintSchema = event.target.value;
+    }
+    else if (event.target.name === "table") {
+      state.constraintTable = event.target.value;
+    }
+
 
     // transfer data that should be saved to exportTableDataConfig
     switch (event.target.name) {
       case 'createdAtField':
-      case 'fields':
       case 'numDays':
       case 'sampleFields':
       case 'updatedAtField':
-        state.exportTableDataConfig = state.exportTableDataConfig.map((config:any) => {
-          const table = Object.keys(config)[0]
-          config[table][event.target.name] = event.target.value;
-          return config;
-        })
+        state.tableOutputOptions[event.target.name] = event.target.value;
+        break;
+
+      case 'disableDeltaUpdates':
+        state.tableOutputOptions[event.target.name] = event.target.checked;
         break;
 
       default:  
@@ -1036,24 +988,23 @@ class Workflow extends React.Component<IProps, IState> {
     this.setState(state);
   }
 
-  triggerEditInputDialog(input:WorkflowInputRecord, workflowType:string) {
+  triggerEditInputDialog(input:WorkflowInputRecord) {
     // dereference
-    console.log("INPUT", input);
-    const inputCopy:WorkflowInputRecord = {
-      inputName: input.inputName,
+    let inputCopy:WorkflowInputRecord = {
       uuid: input.uuid,
       enabled: input.enabled,
       tables: input.tables,
+      tableSelection: input.tableSelection,
     }
     this.setState({
       input: inputCopy,
-      workflowType,
       editInputDialog:true
     });
   }
 
   handleInputChanges(event:any, input:WorkflowInputRecord) {
     const state:any = this.state;
+    console.log("INPUTS", state.inputs);
     const findInput = state.inputs.find((i:WorkflowInputRecord) => {
       return (i.uuid === input.uuid)
     });
@@ -1063,6 +1014,7 @@ class Workflow extends React.Component<IProps, IState> {
     state.inputs = state.inputs.map((i:any) => {
       if (i.uuid === input.uuid) {
         i[event.target.name] = (event.target.name === "enabled") ? event.target.checked : event.target.value;
+        state.input[event.target.name] = i[event.target.name];
       }
       return i;
     })
@@ -1085,10 +1037,17 @@ class Workflow extends React.Component<IProps, IState> {
     }
   }
 
-  handleAddTable(event:any) {
+  handleAddTable(event:any, idx:number, field:string) {
+    const state:IState = this.state;
+    if (field === "schema") {
+      state.input.tables[idx] = event.target.value + "." + state.input.tables[idx].split('.')[1];
+    }
+    else if (field === "table") {
+      state.input.tables[idx] = state.input.tables[idx].split('.')[0] + "." + event.target.value;
+    }
     this.setState({
-      addTable: event.target.value
-    })
+      input: state.input
+    });
   }
 
   triggerAddTable() {
@@ -1130,23 +1089,11 @@ class Workflow extends React.Component<IProps, IState> {
       return (i.uuid === input.uuid) ? false : true
     });
 
-     // update listing of tables
-    state.allDatabaseTables = [];
-    state.inputs.forEach((input:WorkflowInputRecord) => {
-      if (!input.tables) {
-        input.tables = [];
-      }
-      input.tables.forEach((table:string) => {
-        state.allDatabaseTables.push(state.input.inputName + ": " + table);
-      });
-    })
-
     const missingInput = this.missingInput();
 
     this.setState({
       transformExpanded: (missingInput) ? false : true,
       outputExpanded: (missingInput) ? false : true,
-      allDatabaseTables: state.allDatabaseTables,
       inputs: state.inputs
     });
   }
@@ -1186,52 +1133,54 @@ class Workflow extends React.Component<IProps, IState> {
       state.input.tables = [];
     }
 
+    state.errors.JSX = null;
+
     // find and update existing input in inputs listing
-    state.allDatabaseTables = [];
     inputs = inputs.map((input) => {
       if (!input.tables) {
         input.tables = [];
       }
 
-      // update listing of tables
-      input.tables.forEach((table:string) => {
-        state.allDatabaseTables.push(state.input.inputName + ": " + table);
-
-        if (!state.tableOutputOptions[table]) {
-          // init default settings
-          state.tableOutputOptions[table] = {
-            errors: {
-              addColumn: false
-            },
-            addColumn: '',
-            exportColumns: "all",
-            exportRows: "all",
-            fields: [],
-            numDays: 30,
-            sampleFields: "createdAndUpdated",
-            createdAtField: "created_at",
-            updatedAtField: "updated_at",
+      if (input.uuid === this.state.input.uuid) {
+        // check for valid table selection
+        input.tables.forEach((t:string) => {
+          let tableArr = t.split('.');
+          let schema = tableArr[0];
+          let table = tableArr[1];
+          if (!schema) {
+            state.errors.JSX = (
+              <Alert mb={4} severity="error">A table selection is missing a schema</Alert>
+            )
           }
-        }
-      });
+          else if (!table) {
+            state.errors.JSX = (
+              <Alert mb={4} severity="error">A table selection is missing a table</Alert>
+            )
+          }
+        });
+
+        // transfer current input into inputs array
+        return this.state.input;
+      }
 
       return input;
     });
 
-    // remove maskingrules that contain rules for tables that no longer exist
-    state.maskingRuleValues = state.maskingRuleValues.filter((rule:RedactRule) => {
-      return (state.allDatabaseTables.includes(rule.databaseTable)) ? true : false;
-    })
     state.numMaskingRules = state.maskingRuleValues.length;
 
-    state.errors.JSX = null;
     //console.log("INPUTS", inputs);
     //console.log("STATE", state)
 
-    if (this.state.input.uuid.match(/^new/)) {
+    if (state.errors.JSX) {
+      this.setState({
+        errors: state.errors
+      })
+      return;
+    }
+
+    if (state.input.uuid.match(/^new/)) {
       this.setState({
         tableOutputOptions: state.tableOutputOptions,
-        allDatabaseTables: state.allDatabaseTables,
         errors: state.errors,
         inputs: inputs,
         editInputDialog: false,
@@ -1243,7 +1192,6 @@ class Workflow extends React.Component<IProps, IState> {
       this.setState({
         maskingRuleValues: state.maskingRuleValues,
         numMaskingRules: state.numMaskingRules,
-        allDatabaseTables: state.allDatabaseTables,
         errors: state.errors,
         inputs: inputs,
         editInputDialog: false,
@@ -1388,15 +1336,95 @@ class Workflow extends React.Component<IProps, IState> {
   }
 
   triggerOutputOptions(event:any, databaseTable:string) {
+    const state:IState = this.state;
+    if (!databaseTable) {
+      state.constraintSchema = "public";
+      state.constraintTable = "";
+      state.tableOutputOptions = {
+        errors: {},
+        numDays: 30,
+        sampleFields: "createdAndUpdated",
+        createdAtField: "created_at",
+        updatedAtField: "updated_at",
+        disableDeltaUpdates: false,
+      }
+    }
+    else {
+      state.constraintSchema = databaseTable.split('.')[0];
+      state.constraintTable = databaseTable.split('.')[1];
+      state.tableOutputOptions = state.exportTableDataConfig.find((config:any) => {
+        return config.table === databaseTable
+      });
+      state.tableOutputOptions.errors = {};
+    }
+
     this.setState({
       currentDatabaseTable: databaseTable,
+      tableOutputOptions: state.tableOutputOptions,
+      constraintSchema: state.constraintSchema,
+      constraintTable: state.constraintTable,
       showOutputOptions: true
     })
   }
 
-  hideOutputOptions() {
+  deleteConstraint(event:any, databaseTable:string) {
+    const state:IState = this.state;
+    state.exportTableDataConfig = state.exportTableDataConfig.filter((config:any) => {
+      return (config.table !== databaseTable);
+    });
     this.setState({
-      showOutputOptions: false
+      exportTableDataConfig: state.exportTableDataConfig
+    })
+  }
+
+  genConstraintSummary(table:string) {
+    let display:string = "";
+    let scheme:string = "";
+    let findConfig = this.state.exportTableDataConfig.find((config:any) => {
+      return config.table === table;
+    });
+    if (findConfig) {
+      switch (findConfig.sampleFields) {
+        case 'createdAndUpdated':
+        scheme = "rows created and updated";
+        break;
+
+        case 'created':
+        scheme = "rows created";
+        break;
+
+        case 'updated':
+        scheme = "rows updated";
+        break;
+      }
+      display = scheme + " in the last " + findConfig.numDays + " days";
+    }
+    return display;
+  }
+
+  hideOutputOptions() {
+    const state:IState = this.state;
+    if (!state.currentDatabaseTable && this.state.constraintSchema && this.state.constraintTable) {
+      // new constraint
+      state.tableOutputOptions.table = this.state.constraintSchema + "." + this.state.constraintTable;
+      state.exportTableDataConfig.push(state.tableOutputOptions);
+    }
+    else if (this.state.constraintSchema && this.state.constraintTable) {
+      // update existing
+      state.exportTableDataConfig = state.exportTableDataConfig.map((config:any) => {
+        if (config.table === state.currentDatabaseTable) {
+          state.tableOutputOptions.table = this.state.constraintSchema + "." + this.state.constraintTable;
+          return state.tableOutputOptions;
+        }
+        return config;
+      });
+    }
+
+    //console.log("FINAL", state.exportTableDataConfig);
+
+    this.setState({
+      showOutputOptions: false,
+      exportTableDataConfig: state.exportTableDataConfig,
     })
   }
 
@@ -1496,8 +1524,7 @@ class Workflow extends React.Component<IProps, IState> {
 
       case 's3upload':
       state.dataFeed.dataFeedConfig = {
-        uploadFileChecked: [],
-        addAllS3Uploads: false
+        postUpdateKeyValues: [],
       }
       break;
 
@@ -1507,6 +1534,7 @@ class Workflow extends React.Component<IProps, IState> {
         tag: "",
         shell: "",
         command: "",
+        postUpdateKeyValues: [],
       }
       break;
     }
@@ -1687,6 +1715,8 @@ class Workflow extends React.Component<IProps, IState> {
                     hideInputDialog={this.hideInputDialog}
                     deleteDatabaseTable={this.deleteDatabaseTable}
                     handleSnackbarClose={this.handleEditWorkflowSnackbarClose}
+                    addTableSelection={this.addTableSelection}
+                    deleteTableSelection={this.deleteTableSelection}
                   />
                 </ExpansionPanelDetails>
               </ExpansionPanel>
@@ -1696,7 +1726,7 @@ class Workflow extends React.Component<IProps, IState> {
 
           <Box mt={4} display={(this.props.workflow.workflowType.match(/^ERL/)) ? 'block' : 'none'}>
             <Paper variant="outlined">
-              <ExpansionPanel disabled={this.missingInput()} expanded={this.state.transformExpanded} onChange={(event, expanded) => this.transformExpansion(event, expanded)}>
+              <ExpansionPanel disabled={this.missingInput()} expanded={!this.missingInput() && this.state.transformExpanded} onChange={(event, expanded) => this.transformExpansion(event, expanded)}>
                 <ExpansionPanelSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>Processing/Transformation Settings</Typography>
                 </ExpansionPanelSummary>
@@ -1735,21 +1765,22 @@ class Workflow extends React.Component<IProps, IState> {
                 </ExpansionPanelSummary>
                 <ExpansionPanelDetails>
                   <WorkflowExport
-                    workflow={this.props.workflow}
+                    exportTableDataConfig={this.state.exportTableDataConfig}
                     showOutputOptions={this.state.showOutputOptions}
                     hideOutputOptions={this.hideOutputOptions}
                     triggerOutputOptions={this.triggerOutputOptions}
+                    deleteConstraint={this.deleteConstraint}
                     currentDatabaseTable={this.state.currentDatabaseTable}
                     allDatabaseTables={this.state.allDatabaseTables}
                     tableOutputOptions={this.state.tableOutputOptions}
+                    constraintSchema={this.state.constraintSchema}
+                    constraintTable={this.state.constraintTable}
                     handleTableOutputChanges={this.handleTableOutputChanges}
-                    addExportTableColumn={this.addExportTableColumn}
-                    deleteExportTableColumn={this.deleteExportTableColumn}
+                    genConstraintSummary={this.genConstraintSummary}
                   />
 
                   <WorkflowPostExport
                     inputs={this.state.inputs}
-                    allInputs={this.props.allInputs}
                     dataFeeds={this.state.dataFeeds}
                     dataFeed={this.state.dataFeed}
                     addParameterValue={this.addParameterValue}
@@ -1763,7 +1794,6 @@ class Workflow extends React.Component<IProps, IState> {
                     handleDataFeed={this.handleDataFeed}
                     handleDataFeedBack={this.handleDataFeedBack}
                     handleDataFeedCancel={this.handleDataFeedCancel}
-                    getS3UploadFileNames={this.getS3UploadFileNames}
                     handleDataFeedOptions={this.handleDataFeedOptions}
                     saveDataFeedChanges={this.saveDataFeedChanges}
                     triggerEditDataFeed={this.triggerEditDataFeed}
@@ -1772,9 +1802,6 @@ class Workflow extends React.Component<IProps, IState> {
                     handleCustomSecret={this.handleCustomSecret}
                     addSecret={this.addSecret}
                     handleDeleteSecret={this.handleDeleteSecret}
-                    markAddToS3UploadList={this.markAddToS3UploadList}
-                    addAllToS3UploadList={this.addAllToS3UploadList}
-                    addAllS3Uploads={this.state.addAllS3Uploads}
                     agentNamespace={this.state.agentNamespace}
                   />
                 </ExpansionPanelDetails>
@@ -2050,6 +2077,48 @@ class Workflow extends React.Component<IProps, IState> {
                       [month](1-12)
                       [day of the week](0-6)
                     </b>
+                  </p>
+                </DialogContentText>
+
+                <DialogActions>
+                  <Button color="primary" onClick={this.hideErrorDialog}>
+                    Okay
+                  </Button>
+                </DialogActions>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={this.state.mockMigrationDatabase}
+              aria-labelledby="dialog-title"
+              aria-describedby="dialog-description"
+            >
+              <DialogTitle id="dialog-title">Error</DialogTitle>
+              <DialogContent>
+                <DialogContentText id="dialog-description">
+                  <p>
+                    Your database and cloned database name cannot be identical.
+                  </p>
+                </DialogContentText>
+
+                <DialogActions>
+                  <Button color="primary" onClick={this.hideErrorDialog}>
+                    Okay
+                  </Button>
+                </DialogActions>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={this.state.invalidDigitalTwinOutput}
+              aria-labelledby="dialog-title"
+              aria-describedby="dialog-description"
+            >
+              <DialogTitle id="dialog-title">Error</DialogTitle>
+              <DialogContent>
+                <DialogContentText id="dialog-description">
+                  <p>
+                    You cannot designate a Digital Twin output that is also configured as an input source.
                   </p>
                 </DialogContentText>
 

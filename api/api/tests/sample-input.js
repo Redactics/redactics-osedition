@@ -14,6 +14,7 @@ exports.genSampleInput = async function(inputName) {
     exportData: true,
     redacticsGenerated: false,
     sslMode: "prefer",
+    extensionsSchema: "public",
   });
 
   return sampleInput;

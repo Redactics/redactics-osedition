@@ -30,6 +30,7 @@ export interface RedactRuleSet {
 
 export interface RedactRule {
   uuid?: string;
+  schema: string;
   table: string;
   databaseTable: string;
   column: string;
@@ -112,7 +113,7 @@ export interface WorkflowUpdate {
   workflowType: string;
   inputs: WorkflowInputRecord[];
   dataFeeds: DataFeed[];
-  maskingRules: RedactRule[];
+  redactRules: RedactRule[];
   schedule: string;
   deltaUpdateField?: string;
   migrationNamespace?: string;
@@ -129,9 +130,11 @@ export interface WorkflowRecord extends WorkflowUpdate {
   lastStackTrace?: string;
   redactrules?: RedactRule[];
   inputs: WorkflowInputRecord[];
+  allOutputs: InputRecord[];
   datafeeds: DataFeed[];
   allDatabaseTables: string[];
   agentName: string;
+  exportTableDataConfig: any;
 }
 
 export interface InputRecord {
@@ -144,7 +147,7 @@ export interface InputRecord {
   enableSSL?: boolean;
   sslMode?: string;
   exportData: boolean;
-  //tables?: string[];
+  extensionsSchema: string;
 }
 
 export interface AgentInputRecord {
@@ -155,9 +158,9 @@ export interface AgentInputRecord {
 
 export interface WorkflowInputRecord {
   uuid: string;
-  inputName: string;
   enabled: boolean;
   tables: string[];
+  tableSelection: string;
 }
 
 export interface DataFeed {

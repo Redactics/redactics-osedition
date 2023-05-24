@@ -9,7 +9,7 @@ const util = require('util');
 
 const { Op } = require('sequelize');
 
-var redactRuleSets, sampleInput, sampleAgent, workflowInputs, maskingRules, exportTableDataConfig, s3DataFeed, digitalTwinDataFeed, redactRulePresets, agentId, agentUuid, workflowId, workflowUuid, workflowWebUuid, workflowWebId, presetReplacement, redactEmailPreset, scan, scanTable, inputId, inputUuid, inputMMUuid, dataFeedUuid, workflowJobUuid, workflowJobId, workflowMMUuid;
+var redactRuleSets, sampleInput, sampleInput2, sampleAgent, workflowInputs, redactRules, exportTableDataConfig, s3DataFeed, digitalTwinDataFeed, redactRulePresets, agentId, agentUuid, workflowId, workflowUuid, workflowWebUuid, workflowWebId, presetReplacement, redactEmailPreset, scan, scanTable, inputId, inputUuid, inputMMUuid, dataFeedUuid, workflowJobUuid, workflowJobId, workflowMMUuid;
 
 const { genSeedData } = require('./seed');
 const { genSampleInput } = require('./sample-input');
@@ -31,8 +31,9 @@ describe('Workflow endpoints', () => {
     redactEmailPreset = seedData.redactEmailPreset;
   })
 
-  it('create sample input', async () => {
+  it('create sample inputs', async () => {
     sampleInput = await genSampleInput('Test Input');
+    sampleInput2 = await genSampleInput('Test Input2');
   });
 
   it('create sample agent', async () => {
@@ -47,7 +48,7 @@ describe('Workflow endpoints', () => {
       agentId: agentUuid,
       name: "Test Workflow",
       workflowType: "ERL",
-      maskingRules: [],
+      redactRules: [],
       inputs: [],
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -68,7 +69,7 @@ describe('Workflow endpoints', () => {
       agentId: "e43e2f24-83c0-4f1d-8f34-687578721ebd",
       name: "Test Workflow",
       workflowType: "ERL",
-      maskingRules: [],
+      redactRules: [],
       inputs: [],
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -82,7 +83,7 @@ describe('Workflow endpoints', () => {
       agentId: agentUuid,
       name: "Test Workflow",
       workflowType: "blah",
-      maskingRules: [],
+      redactRules: [],
       inputs: [],
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -97,7 +98,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "blah",
-      maskingRules: [],
+      redactRules: [],
       inputs: [],
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -112,7 +113,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: [],
+      redactRules: [],
       inputs: [],
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -127,7 +128,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: [],
+      redactRules: [],
       inputs: [],
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -142,11 +143,11 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: [],
+      redactRules: [],
       inputs: {
         uuid: "f1e5456c-89be-49c0-aa27-42af34b6c0f0",
         enabled: true,
-        tables: ["athletes", "marketing_campaign"]
+        tables: ["public.athletes", "public.marketing_campaign"]
       },
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -158,7 +159,7 @@ describe('Workflow endpoints', () => {
     workflowInputs = [{
       uuid: sampleInput.dataValues.uuid,
       enabled: true,
-      tables: ["marketing_campaign", "athletes", "marketing_campaign"], // assure de-duplication and sorting
+      tables: ["public.marketing_campaign", "public.athletes", "public.marketing_campaign"], // assure de-duplication and sorting
     }];
 
     const res = await agent.put('/workflow/' + workflowUuid)
@@ -167,7 +168,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: [],
+      redactRules: [],
       inputs: workflowInputs,
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -190,16 +191,20 @@ describe('Workflow endpoints', () => {
     expect(wfInput.dataValues.enabled).toEqual(true);
     expect(wfInput.dataValues.inputId).toEqual(sampleInput.dataValues.id);
     expect(wfInput.dataValues.workflowId).toEqual(workflowId);
-    expect(wfInput.dataValues.tables).toEqual(["athletes", "marketing_campaign"]);
+    expect(wfInput.dataValues.tables).toEqual(["public.athletes", "public.marketing_campaign"]);
   });
 
   it('update ERL workflow - valid redaction rules and inputs', async() => {
-    maskingRules = [{
-      databaseTable: "Test Input: users",
+    redactRules = [{
+      databaseTable: sampleInput.dataValues.inputName,
+      schema: "public",
+      table: "users",
       column: "password",
       rule: "destruction"
     }, {
-      databaseTable: "Test Input: users",
+      databaseTable: sampleInput.dataValues.inputName,
+      schema: "public",
+      table: "users",
       column: "email",
       rule: "redact_email"
     }]
@@ -210,7 +215,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: [],
       dataFeeds: [],
@@ -220,19 +225,34 @@ describe('Workflow endpoints', () => {
     expect(res.body.workflow.uuid).toEqual(workflowUuid);
   });
 
-  it('update ERL workflow with masking rule preset', async() => {
+  it('update ERL workflow with masking rule preset, ensure fullcopy record is deleted', async() => {
+    await TableFullCopy.create({
+      inputId: sampleInput.dataValues.id,
+      tableName: "public.users"
+    });
+
+    await RedactRules.destroy({
+      where: {
+        workflowId: workflowId
+      }
+    });
+
     const res = await agent.put('/workflow/' + workflowUuid)
     .send({
       agentId: agentUuid,
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: [{
-        databaseTable: "Test Input: users",
+      redactRules: [{
+        databaseTable: "Test Input",
+        schema: "public",
+        table: "users",
         column: "password",
         presetUuid: redactEmailPreset.dataValues.uuid
       }, {
-        databaseTable: "Test Input: users",
+        databaseTable: "Test Input",
+        schema: "public",
+        table: "users",
         column: "email",
         rule: "redact_email"
       }],
@@ -250,10 +270,18 @@ describe('Workflow endpoints', () => {
       }
     })
     expect(redactRule.dataValues).toBeDefined();
+
+    const fullCopyCheck = await TableFullCopy.findAll({
+      where: {
+        inputId: sampleInput.dataValues.id,
+        tableName: "public.users"
+      }
+    });
+    expect(fullCopyCheck.length).toEqual(0);
   });
 
   it('update ERL workflow with exports', async() => {
-    exportTableDataConfig = [{"athletes": {"table": "athletes", "fields": [], "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}, "marketing_campaign": {"table": "marketing_campaign", "fields": [], "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}}];
+    exportTableDataConfig = [{"public.athletes": {"table": "public.athletes", "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}}, {"public.marketing_campaign": {"table": "public.marketing_campaign", "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}}];
 
     const res = await agent.put('/workflow/' + workflowUuid)
     .send({
@@ -261,7 +289,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [],
@@ -272,16 +300,15 @@ describe('Workflow endpoints', () => {
         uuid: workflowUuid
       }
     })
-    expect(workflow.dataValues.exportTableDataConfig[0].athletes.table).toEqual("athletes");
-    expect(workflow.dataValues.exportTableDataConfig[0].marketing_campaign.table).toEqual("marketing_campaign");
+    expect(workflow.dataValues.exportTableDataConfig[0]["public.athletes"].table).toEqual("public.athletes");
+    expect(workflow.dataValues.exportTableDataConfig[1]["public.marketing_campaign"].table).toEqual("public.marketing_campaign");
   });
 
   it('update ERL workflow with s3 upload data feed', async() => {
     s3DataFeed = [{
       "dataFeed": "s3upload",
       "dataFeedConfig": {
-        "S3UploadBucket": "bucket",
-        "uploadFileChecked": ["table-athletes.csv","table-marketing_campaign.csv"]
+        "S3UploadBucket": "bucket"
       }
     }];
 
@@ -291,7 +318,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: s3DataFeed,
@@ -307,9 +334,9 @@ describe('Workflow endpoints', () => {
 
     expect(dataFeed.dataValues.dataFeedConfig.S3UploadBucket).toEqual("s3://bucket");
     expect(dataFeed.dataValues.dataFeedConfig.image).toEqual("redactics/postexport-s3upload");
-    expect(dataFeed.dataValues.dataFeedConfig.tag).toEqual("1.0.1");
+    expect(dataFeed.dataValues.dataFeedConfig.tag).toEqual("1.1.0");
     expect(dataFeed.dataValues.dataFeedConfig.shell).toEqual("/bin/bash");
-    expect(dataFeed.dataValues.dataFeedConfig.command).toEqual("/bin/upload-to-s3 " + workflowUuid + " table-athletes.csv,table-marketing_campaign.csv s3://bucket");
+    expect(dataFeed.dataValues.dataFeedConfig.command).toEqual("/bin/upload-to-s3 " + workflowUuid + " s3://bucket");
     expect(dataFeed.dataValues.feedSecrets[0].secretKey).toEqual("credentials");
     expect(dataFeed.dataValues.feedSecrets[0].secretName).toEqual("aws");
     expect(dataFeed.dataValues.feedSecrets[0].secretPath).toEqual("/root/.aws");
@@ -328,7 +355,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [digitalTwinDataFeed],
@@ -354,7 +381,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [digitalTwinDataFeed],
@@ -371,7 +398,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [digitalTwinDataFeed],
@@ -394,7 +421,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [{
@@ -414,7 +441,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [{
@@ -446,14 +473,13 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [{
         "dataFeed": "s3upload",
         "dataFeedConfig": {
-          "S3UploadBucket": "bucket",
-          "uploadFileChecked": ["table-athletes.csv","table-marketing_campaign.csv"]
+          "S3UploadBucket": "bucket"
         }
       }, {
         "dataFeed": "digitalTwin",
@@ -486,7 +512,7 @@ describe('Workflow endpoints', () => {
       name: "Test Workflow",
       workflowType: "ERL",
       schedule: "0 0 * * *",
-      maskingRules: maskingRules,
+      redactRules: redactRules,
       inputs: workflowInputs,
       exportTableDataConfig: exportTableDataConfig,
       dataFeeds: [{
@@ -513,8 +539,7 @@ describe('Workflow endpoints', () => {
       {
         "dataFeed": "s3upload",
         "dataFeedConfig": {
-          "S3UploadBucket": "bucket",
-          "uploadFileChecked": ["table-athletes.csv","table-marketing_campaign.csv"]
+          "S3UploadBucket": "bucket"
         }
       }, {
         "dataFeed": "digitalTwin",
@@ -554,6 +579,30 @@ describe('Workflow endpoints', () => {
     expect(dataFeed.dataValues.feedSecrets[1].secretType).toEqual("env");
   });
 
+  it('fetch workflow, modify and same back same data structure', async() => {
+    let res = await agent.get('/workflow/' + workflowUuid);
+    let workflow = res.body;
+    //console.log("WF", util.inspect(workflow, { depth: null }));
+    workflow.name = "Updated Workflow";
+
+    res = await agent.put('/workflow/' + workflowUuid)
+    .send(workflow)
+    .expect(200);
+
+    res = await agent.get('/workflow/' + workflowUuid);
+    //console.log("NEW WF", util.inspect(res.body, { depth: null }));
+    expect(res.body.name).toEqual(workflow.name);
+    expect(res.body.id).toEqual(workflow.id);
+    expect(res.body.agentId).toEqual(workflow.agentId);
+    expect(res.body.workflowType).toEqual(workflow.workflowType);
+    expect(res.body.schedule).toEqual(workflow.schedule);
+    expect(res.body.redactRules.length).toEqual(2);
+    expect(res.body.indexedRedactRules.length).toEqual(1);
+    expect(res.body.export.length).toEqual(2);
+    expect(res.body.dataFeeds.length).toEqual(3);
+    expect(res.body.inputs.length).toEqual(1);
+  });
+
   it('create mockDatabaseMigration workflow', async() => {
     const res = await agent.post('/workflow')
     .send({
@@ -563,6 +612,23 @@ describe('Workflow endpoints', () => {
     })
     .expect(200);
     workflowMMUuid = res.body.uuid;
+  });
+
+  it('assure mockDatabaseMigration valid database clone name', async() => {
+    // database and database clone names match
+    const res = await agent.put('/workflow/' + workflowMMUuid)
+    .send({
+      agentId: agentUuid,
+      name: "Test Migration",
+      workflowType: "mockDatabaseMigration",
+      inputs: workflowInputs,
+      migrationNamespace: "redactics",
+      migrationDatabase: "redactics",
+      migrationDatabaseClone: "redactics",
+      migrationConfiguration: "helmhook",
+      migrationHelmHookWeight: -10,
+    })
+    .expect(400);
   });
 
   it('update mockDatabaseMigration workflow', async() => {
@@ -597,10 +663,13 @@ describe('Workflow endpoints', () => {
 
     expect(res.body.workflows.length).toEqual(2);
     expect(res.body.workflows[0].uuid).toEqual(workflowUuid);
-    expect(res.body.workflows[0].name).toEqual("Test Workflow");
+    expect(res.body.workflows[0].name).toEqual("Updated Workflow");
     expect(res.body.workflows[0].inputs[0].enabled).toEqual(true);
     expect(res.body.workflows[0].inputs[0].inputName).toEqual('Test Input');
-    expect(res.body.workflows[0].inputs[0].tables).toEqual(['athletes', 'marketing_campaign']);
+    expect(res.body.workflows[0].inputs[0].tables).toEqual(['public.athletes', 'public.marketing_campaign']);
+    // assure output data source options exclude configured inputs
+    expect(res.body.workflows[0].allOutputs.length).toEqual(1);
+    expect(res.body.workflows[0].allOutputs[0].uuid).toEqual(sampleInput2.dataValues.uuid);
     expect(res.body.presets.length).toEqual(4);
     expect(res.body.redactrulesets.length).toEqual(4);
     expect(res.body.agents.length).toEqual(1);
@@ -629,7 +698,7 @@ it('ERL workflows should skip inputs with no tables', async() => {
 
 it('ERL workflows should skip disabled inputs', async() => {
   await WorkflowInput.update({
-    tables: ["athletes", "marketing_campaign"]
+    tables: ["public.athletes", "public.marketing_campaign"]
   }, {
     where: {
       inputId: sampleInput.dataValues.id
@@ -744,7 +813,7 @@ describe('Workflow jobs', () => {
 
     const wfJob = res.body[0];
     expect(wfJob.uuid).toBeDefined();
-    expect(wfJob.workflowName).toEqual('Test Workflow');
+    expect(wfJob.workflowName).toEqual('Updated Workflow');
     expect(wfJob.workflowId).toEqual(workflowUuid);
     expect(wfJob.status).toEqual('queued');
     expect(wfJob.workflowType).toEqual('ERL');
@@ -834,22 +903,34 @@ describe('Workflow endpoints invoked by Agent', () => {
 
     expect(workflow.body.id).toEqual(workflowUuid);
     expect(workflow.body.schedule).toEqual("0 0 * * *");
-    expect(workflow.body.redactRules[0].users.length).toEqual(2);
-    expect(workflow.body.export[0].athletes.table).toEqual("athletes");
-    expect(workflow.body.export[0].athletes.fields).toEqual([]);
-    expect(workflow.body.export[0].marketing_campaign.table).toEqual("marketing_campaign");
-    expect(workflow.body.export[0].marketing_campaign.fields).toEqual([]);
-    expect(workflow.body.inputs[0].id).toEqual(sampleInput.dataValues.uuid);
-    expect(workflow.body.inputs[0].tables).toEqual(["athletes", "marketing_campaign"]);
-    expect(workflow.body.dataFeeds[0].custom.dataFeed).toEqual("custom");
-    expect(workflow.body.dataFeeds[0].custom.dataFeedConfig.image).toEqual("debian");
-    expect(workflow.body.dataFeeds[0].custom.feedSecrets[0].secretKey).toEqual("key");
-    expect(workflow.body.dataFeeds[0].s3upload.dataFeed).toEqual("s3upload");
-    expect(workflow.body.dataFeeds[0].s3upload.dataFeedConfig.image).toEqual("redactics/postexport-s3upload"); 
-    expect(workflow.body.dataFeeds[0].digitalTwin.dataFeedConfig.enableDeltaUpdates).toEqual(true); 
-    expect(workflow.body.dataFeeds[0].digitalTwin.dataFeedConfig.deltaUpdateField).toEqual("updated_at"); 
-    expect(workflow.body.dataFeeds[0].digitalTwin.dataFeedConfig.enablePostUpdatePreparedStatements).toEqual(true); 
-    expect(workflow.body.dataFeeds[0].digitalTwin.dataFeedConfig.postUpdateKeyValues["company"]).toEqual("ACME");
+    expect(workflow.body.indexedRedactRules[0]["public.users"].length).toEqual(2);
+    expect(workflow.body.export[0]["public.athletes"].table).toEqual("public.athletes");
+    expect(workflow.body.export[1]["public.marketing_campaign"].table).toEqual("public.marketing_campaign");
+    expect(workflow.body.inputs[0].uuid).toEqual(sampleInput.dataValues.uuid);
+    expect(workflow.body.inputs[0].tables).toEqual(["public.athletes", "public.marketing_campaign"]);
+
+    const customFeed = workflow.body.dataFeeds.find((df) => {
+      return df.dataFeed === "custom"
+    });
+
+    const s3Feed = workflow.body.dataFeeds.find((df) => {
+      return df.dataFeed === "s3upload"
+    });
+
+    const dtFeed = workflow.body.dataFeeds.find((df) => {
+      return df.dataFeed === "digitalTwin"
+    });
+
+    expect(customFeed);
+    expect(customFeed.dataFeedConfig.image).toEqual("debian");
+    expect(customFeed.feedSecrets[0].secretKey).toEqual("key");
+    expect(s3Feed);
+    expect(s3Feed.dataFeedConfig.image).toEqual("redactics/postexport-s3upload");
+    expect(dtFeed);
+    expect(dtFeed.dataFeedConfig.enableDeltaUpdates).toEqual(true); 
+    expect(dtFeed.dataFeedConfig.deltaUpdateField).toEqual("updated_at"); 
+    expect(dtFeed.dataFeedConfig.enablePostUpdatePreparedStatements).toEqual(true); 
+    expect(dtFeed.dataFeedConfig.postUpdateKeyValues[0].value).toEqual("ACME");
   });
 
   it('get mockDatabaseMigration workflow', async() => {
@@ -858,7 +939,7 @@ describe('Workflow endpoints invoked by Agent', () => {
     .expect(200);
 
     expect(workflow.body.id).toEqual(workflowMMUuid);
-    expect(workflow.body.inputs[0].id).toEqual(sampleInput.dataValues.uuid);
+    expect(workflow.body.inputs[0].uuid).toEqual(sampleInput.dataValues.uuid);
     expect(workflow.body.migrationDatabase).toEqual("redactics");
     expect(workflow.body.migrationDatabaseClone).toEqual("redactics_clone");
   })
@@ -981,7 +1062,7 @@ describe('Workflow endpoints invoked by Agent', () => {
     .put('/workflow/markFullCopy')
     .send({
       inputId: "c1b0f889-868f-46fb-a1c2-e40fe9f10f8a",
-      tableName: "athletes"
+      tableName: "public.athletes"
     })
     .expect(404);
   })
@@ -991,35 +1072,44 @@ describe('Workflow endpoints invoked by Agent', () => {
     .put('/workflow/markFullCopy')
     .send({
       inputId: sampleInput.dataValues.uuid,
-      tableName: "athletes"
+      tableName: "public.athletes"
     })
     .expect(200);
 
     const fullCopy = await TableFullCopy.findOne({
       where: {
         inputId: sampleInput.dataValues.id,
-        tableName: "athletes"
+        tableName: "public.athletes"
       }
     });
     expect(fullCopy.dataValues).toBeDefined();
   });
 
-  it('markFullCopy - prevent duplicate', async() => {
+  it('markFullCopy - prevent duplicate, track updated timestamp', async() => {
+    const fullCopy = await TableFullCopy.findOne({
+      where: {
+        inputId: sampleInput.dataValues.id,
+        tableName: "public.athletes"
+      }
+    });
+    const updatedAt = fullCopy.dataValues.updatedAt;
+
     const res = await agent
     .put('/workflow/markFullCopy')
     .send({
       inputId: sampleInput.dataValues.uuid,
-      tableName: "athletes"
+      tableName: "public.athletes"
     })
     .expect(200);
 
-    const fullCopy = await TableFullCopy.findAll({
+    const fullCopyCheck = await TableFullCopy.findAll({
       where: {
         inputId: sampleInput.dataValues.id,
-        tableName: "athletes"
+        tableName: "public.athletes"
       }
     });
-    expect(fullCopy.length).toEqual(1);
+    expect(fullCopyCheck.length).toEqual(1);
+    expect(fullCopyCheck[0].dataValues.updatedAt).not.toEqual(updatedAt);
   });
 
   it('markFullCopy - second', async() => {
@@ -1027,7 +1117,7 @@ describe('Workflow endpoints invoked by Agent', () => {
     .put('/workflow/markFullCopy')
     .send({
       inputId: sampleInput.dataValues.uuid,
-      tableName: "marketing_campaign"
+      tableName: "public.marketing_campaign"
     })
     .expect(200);
 

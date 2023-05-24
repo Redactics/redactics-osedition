@@ -3,14 +3,21 @@
 set -exo pipefail
 
 WORKFLOW=$1
-TMP_DATABASE=$2
-TABLE=$3
+TABLE=$2
+SCHEMA=$(echo $TABLE | cut -d "." -f 1)
+SCHEMA=${SCHEMA//"\""/}
+TABLE_NOSCHEMA=$(echo $TABLE | cut -d "." -f 2)
+TABLE_NOSCHEMA=${TABLE_NOSCHEMA//"\""/}
+TABLE_NOQUOTES=${TABLE//"\""/}
+INPUT_ID=$3
 
 /scripts/prep-certs.sh
 
-if [ -z $TABLE ]
+# check that file was created
+check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv/wc)
+if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
 then
-    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fpgdump | pg_restore -O -d ${TMP_DATABASE}
-else
-    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fpgdump-${TABLE} | pg_restore -O -d ${TMP_DATABASE}
+    # reset table in the event of task restarts
+    psql -c "TRUNCATE TABLE \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\";"
+    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv | psql -c "\copy \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" from stdin DELIMITER ',' csv header"
 fi

@@ -87,7 +87,7 @@ interface IState {
   newWorkflowDialog: boolean;
   workflows: WorkflowRecord[];
   agentInputs: AgentInputRecord[];
-  allInputs: InputRecord[];
+  allOutputs: InputRecord[];
   presets: RedactRulePreset[];
   redactrulesets: RedactRuleSet[];
   agents: AgentRecord[];
@@ -111,7 +111,7 @@ class Workflows extends React.Component<IProps, IState> {
       newWorkflowDialog: false,
       workflows: [],
       agentInputs: [],
-      allInputs: [],
+      allOutputs: [],
       presets: [],
       redactrulesets: [],
       agents: [],
@@ -148,10 +148,12 @@ class Workflows extends React.Component<IProps, IState> {
         return workflow;
       });
 
+      console.log("WORKFLOWS", data.workflows);
+
       this.setState({
         workflows: data.workflows,
         agentInputs: data.agentInputs,
-        allInputs: data.allInputs,
+        allOutputs: data.allOutputs,
         presets: data.presets,
         redactrulesets: data.redactrulesets,
         agents: data.agents,
@@ -313,7 +315,7 @@ class Workflows extends React.Component<IProps, IState> {
 
         <Box mt={4}>
           <Typography variant="body1" gutterBottom>
-            Build and maintain your data management workflows here. Configuration changes will be picked up by your Agent install usually within a few minutes.
+            Build and maintain your data management workflows here. Configuration changes will be picked up by your installed Agent usually within a few minutes.
           </Typography>
         </Box>
 
@@ -498,7 +500,6 @@ class Workflows extends React.Component<IProps, IState> {
           redactrulesets={this.state.redactrulesets}
           agents={this.state.agents}
           agentInputs={this.state.agentInputs}
-          allInputs={this.state.allInputs}
           key={workflow.uuid}
           handleWFChanges={this.handleWFChanges}
           deleteWorkflow={this.deleteWorkflow}

@@ -111,6 +111,7 @@ export interface InputRecord {
   enableSSL?: boolean;
   sslMode?: string;
   exportData: boolean;
+  extensionsSchema?: string;
 }
 
 export interface AgentInputRecord {
@@ -123,6 +124,7 @@ export interface WorkflowInputRecord {
   inputId: number;
   enabled: boolean;
   tables: string[];
+  tableSelection: string;
 }
 
 export interface AgentConnection {

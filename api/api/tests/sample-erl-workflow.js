@@ -11,7 +11,7 @@ exports.genSampleERLWorkflow = async function(agentId, name, inputs) {
     name: name,
     agentId: agentId,
     schedule: "* 5 * * *",
-    exportTableDataConfig: [{"athletes": {"table": "athletes", "fields": [], "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}, "marketing_campaign": {"table": "marketing_campaign", "fields": [], "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}}],
+    exportTableDataConfig: [{"public.athletes": {"table": "public.athletes", "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}, "public.marketing_campaign": {"table": "public.marketing_campaign", "numDays": null, "sampleFields": null, "createdAtField": null, "updatedAtField": null}}],
   });
 
   if (inputs && inputs.length) {
@@ -20,7 +20,7 @@ exports.genSampleERLWorkflow = async function(agentId, name, inputs) {
       workflowInputPromises.push(WorkflowInput.create({
         workflowId: sampleWorkflow.dataValues.id,
         inputId: input.dataValues.id,
-        tables: ["marketing_campaign", "athletes"],
+        tables: ["public.marketing_campaign", "public.athletes"],
         enabled: true,
       }))
     });

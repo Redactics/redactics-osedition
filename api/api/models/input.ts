@@ -49,6 +49,10 @@ const InputModel = Sequelize.define('Input', {
     type: DataTypes.BOOLEAN,
     allowNull: true,
   },
+  extensionsSchema: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
 }, {
   tableName: 'inputs',
 });
