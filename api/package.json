@@ -7,7 +7,7 @@
     "tsc": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only ./api/server.ts",
     "prod": "tsc && node ./build/server.js",
-    "test": "db-migrate up && jest -i --forceExit api/tests/*.test.js",
+    "test": "npm install && db-migrate up && jest -i --forceExit api/tests/*.test.js",
     "migrate": "db-migrate up",
     "eslint": "eslint api/*.ts api/controllers api/models api/routes api/db api/config"
   },
