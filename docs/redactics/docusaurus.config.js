@@ -58,10 +58,10 @@ const config = {
       // Replace with your project's social card
       image: 'img/docusaurus-social-card.jpg',
       navbar: {
-        title: 'Redactics Documentation',
+        title: 'Documentation',
         logo: {
           alt: 'Redactics',
-          src: 'img/logo.svg',
+          src: 'img/Redactics-Logo-Horizontal.png',
         },
         items: [
           {

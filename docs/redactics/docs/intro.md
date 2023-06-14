@@ -26,5 +26,5 @@ Kubernetes Helm is used by all editions to simplify installation. If you don't c
 * **cli**: the Redactics Agent can be remote controlled via this CLI, which is simply a bash script which makes interacting with the Agent convenient. For example, if you wish to trigger a DAG/workflow outside of its scheduled time you can do so via this CLI.
 * **dashboard**: this dashboard is a React app built with Create React App for configuring your Redactics Agent and workflows via the Redactics Node.js API. Since it relies on the Redactics API it is also intended to be accessed via a private network with appropriate access controls and Kubernetes RBAC rules.
 * **dockerimages**: all custom Docker images used by Redactics can be accessed here.
-* **docs***: this documentation.
+* **docs**: this documentation.
 * **helmcharts**: this Kubernetes Helm chart drives the turn-key installation of all of the above components, and PostgreSQL (which is used to back Airflow and to assist with various data transformations) into your Kubernetes namespace. A public Chartmuseum repo containing all versions of this Helm chart is available, but if you wish to self-host your Helm chart you can do so via this Helm chart.
