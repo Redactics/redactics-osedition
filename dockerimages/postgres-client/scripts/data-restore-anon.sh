@@ -38,7 +38,7 @@ DEST_TABLE_NOQUOTES=${DEST_TABLE//"\""/}
 
 if [ "$FULLCOPY" == "0" ]
 then
-    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv/wc)
+    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv/check | jq '.size')
     if [ "$check" != "Not Found" ]
     then
         # reset table in the event of task restarts
@@ -64,7 +64,7 @@ else
     # restore from delta dataset, and specify columns for digital twin to omit primary key
 
     # new rows
-    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-new.csv/wc)
+    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-new.csv/check | jq '.size')
     if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
     then
         if [ "$CONNECTION" == "redactics-tmp" ]
@@ -78,7 +78,7 @@ else
     fi
 
     # updated rows
-    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv/wc)
+    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdelta-table-${TABLE_NOQUOTES}-updated.csv/check | jq '.size')
     if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
     then
         psql -c "DROP TABLE IF EXISTS ${TEMP_TABLE};"

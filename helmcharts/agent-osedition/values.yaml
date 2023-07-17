@@ -46,7 +46,7 @@ airflowHome: /opt/airflow
 defaultAirflowRepository: redactics/agent
 
 # Default airflow tag to deploy
-defaultAirflowTag: "2.3.2-3.1.0"
+defaultAirflowTag: "2.3.2-3.1.1"
 
 # Airflow version (Used to make some decisions based on Airflow Version being deployed)
 airflowVersion: "2.3.2"

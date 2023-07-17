@@ -3,7 +3,7 @@ FROM postgres:15
 COPY csvquote /csvquote
 
 RUN apt update && \
-  apt install -y curl gawk build-essential && \
+  apt install -y curl gawk build-essential jq && \
   cd /csvquote && \
   make && \
   make install
