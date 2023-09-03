@@ -10,10 +10,12 @@ usage()
   printf '%s\n\n' "Redactics Agent possible commands:"
   printf '%s\n' "- ${bold}list-snapshots"
   printf '%s\n\n' "  ${normal}lists all available volume snapshots"
-  printf '%s\n' "- ${bold}create-snapshot [snapshot name] [landing DB name]"
-  printf '%s\n\n' "  ${normal}creates snapshot [snapshot name] for landing database [landing DB name]"
-  printf '%s\n' "- ${bold}create-database [DB name] [snapshot name] [landing DB name]"
-  printf '%s\n\n' "  ${normal}creates database [DB name] from [snapshot name] for landing database [landing DB name]"
+  printf '%s\n' "- ${bold}create-snapshot [snapshot name] [helm DB name]"
+  printf '%s\n\n' "  ${normal}creates snapshot [snapshot name] for helm database [helm DB name] (the Helm database name is the helm installation name viewable via helm ls)"
+  printf '%s\n' "- ${bold}delete-snapshot [snapshot name]"
+  printf '%s\n\n' "  ${normal}deletes snapshot [snapshot name]"
+  printf '%s\n' "- ${bold}create-database [DB name] [snapshot name] [helm DB name] [landing DB name]"
+  printf '%s\n\n' "  ${normal}creates database [DB name] from [snapshot name] for  helm database [helm DB name] running landing database [landing DB name] (the Helm database name is the helm installation name viewable via helm ls, the landing DB name is the Postgres database name)"
   printf '%s\n' "- ${bold}delete-database [DB name] [--retain-disk]"
   printf '%s\n\n' "  ${normal}deletes database [DB name] and optionally retains the disk to reuse this data later (requires an identically named database)"
   printf '%s\n' "- ${bold}list-exports [workflow ID]"
@@ -157,14 +159,14 @@ list-snapshots)
 
 create-snapshot)
   SNAPSHOT_NAME=$2
-  LANDING_DB_NAME=$3
-  if [ -z $SNAPSHOT_NAME ] || [ -z $DB_NAME ]
+  HELM_DB_NAME=$3
+  if [ -z $SNAPSHOT_NAME ] || [ -z $HELM_DB_NAME ]
   then
     usage
     exit 1
   fi
   get_namespace
-  verify_helm_db $LANDING_DB_NAME
+  verify_helm_db $HELM_DB_NAME
   read -r -d '' MANIFEST <<- EOM
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
@@ -173,28 +175,44 @@ metadata:
 spec:
   volumeSnapshotClassName: redactics-aws-snapshot
   source:
-    persistentVolumeClaimName: data-${LANDING_DB_NAME}-postgresql-0
+    persistentVolumeClaimName: data-${HELM_DB_NAME}-postgresql-0
 EOM
   printf "$MANIFEST" | $KUBECTL apply -n $NAMESPACE -f -
-  printf "Your snapshot has been created. To monitor it's availability:\n\n${bold}$KUBECTL -n $NAMESPACE get volumesnapshot\n"
+  printf "Your snapshot has been created. To monitor its availability:\n\n${bold}$KUBECTL -n $NAMESPACE get volumesnapshot\n"
+  ;;
+
+delete-snapshot)
+  SNAPSHOT_NAME=$2
+  if [ -z $SNAPSHOT_NAME ]
+  then
+    usage
+    exit 1
+  fi
+  get_namespace
+  $KUBECTL -n $NAMESPACE get volumesnapshot $SNAPSHOT_NAME > /dev/null
+  if [ $? -ne 0 ]; then
+    printf "${bold}ERROR: invalid snapshot name $SNAPSHOT_NAME. You can view your available snapshots by running:${normal}\n$KUBECTL -n $NAMESPACE get volumesnapshots\n"
+    exit 1
+  fi
+  $KUBECTL -n $NAMESPACE delete volumesnapshot $SNAPSHOT_NAME
   ;;
 
 create-database)
   DB_NAME=$2
   SNAPSHOT_NAME=$3
-  LANDING_DB_NAME=$4
-  if [ -z $SNAPSHOT_NAME ] || [ -z $LANDING_DB_NAME ] || [ -z $DB_NAME ]
+  HELM_DB_NAME=$4
+  LANDING_DB_NAME=$5
+  # TODO: get landing DB name from Airflow var?
+  if [ -z $SNAPSHOT_NAME ] || [ -z $HELM_DB_NAME ] || [ -z $LANDING_DB_NAME ] || [ -z $DB_NAME ]
   then
     usage
     exit 1
   fi
-  # DB name should not contain spaces
-  # if [ $DB_NAME ]
-  # DB name should be unique
+  # TODO: DB name should not contain spaces
+  # TODO: DB name should be unique
   get_namespace
-  verify_helm_db $LANDING_DB_NAME
   # get disk size
-  DISK_SIZE=$($KUBECTL -n $NAMESPACE get pvc data-${LANDING_DB_NAME}-postgresql-0 | tail -n +2 | awk '{print $4}')
+  DISK_SIZE=$($KUBECTL -n $NAMESPACE get pvc data-${HELM_DB_NAME}-postgresql-0 | tail -n +2 | awk '{print $4}')
   $HELM -n $NAMESPACE upgrade --install \
     --set "redactics.dbname=${LANDING_DB_NAME}" \
     --set "primary.persistence.size=${DISK_SIZE}" \
