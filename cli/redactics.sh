@@ -10,8 +10,12 @@ usage()
   printf '%s\n\n' "Redactics Agent possible commands:"
   printf '%s\n' "- ${bold}list-snapshots"
   printf '%s\n\n' "  ${normal}lists all available volume snapshots"
-  printf '%s\n' "- ${bold}create-snapshot [snapshot name] [DB name]"
-  printf '%s\n\n' "  ${normal}creates snapshot for landing database associated with [workflow ID]"
+  printf '%s\n' "- ${bold}create-snapshot [snapshot name] [landing DB name]"
+  printf '%s\n\n' "  ${normal}creates snapshot [snapshot name] for landing database [landing DB name]"
+  printf '%s\n' "- ${bold}create-database [DB name] [snapshot name] [landing DB name]"
+  printf '%s\n\n' "  ${normal}creates database [DB name] from [snapshot name] for landing database [landing DB name]"
+  printf '%s\n' "- ${bold}delete-database [DB name] [--retain-disk]"
+  printf '%s\n\n' "  ${normal}deletes database [DB name] and optionally retains the disk to reuse this data later (requires an identically named database)"
   printf '%s\n' "- ${bold}list-exports [workflow ID]"
   printf '%s\n\n' "  ${normal}lists all exported files exported from [workflow ID]"
   printf '%s\n' "- ${bold}download-export [workflow ID] [filename]"
@@ -50,7 +54,7 @@ function get_namespace {
   fi
 }
 
-function verify_dbname {
+function verify_helm_db {
   $HELM -n $NAMESPACE ls | awk '{print $1}' | grep -e "^${1}$" > /dev/null
   if [ $? -ne 0 ]; then
     POSSIBLE_DBS=$($HELM -n $NAMESPACE ls | tail -n +2 | awk '{print $1}' | grep -v 'agent')
@@ -153,9 +157,14 @@ list-snapshots)
 
 create-snapshot)
   SNAPSHOT_NAME=$2
-  DB_NAME=$3
+  LANDING_DB_NAME=$3
+  if [ -z $SNAPSHOT_NAME ] || [ -z $DB_NAME ]
+  then
+    usage
+    exit 1
+  fi
   get_namespace
-  verify_dbname $DB_NAME
+  verify_helm_db $LANDING_DB_NAME
   read -r -d '' MANIFEST <<- EOM
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
@@ -164,10 +173,60 @@ metadata:
 spec:
   volumeSnapshotClassName: redactics-aws-snapshot
   source:
-    persistentVolumeClaimName: data-${DB_NAME}-postgresql-0
+    persistentVolumeClaimName: data-${LANDING_DB_NAME}-postgresql-0
 EOM
   printf "$MANIFEST" | $KUBECTL apply -n $NAMESPACE -f -
   printf "Your snapshot has been created. To monitor it's availability:\n\n${bold}$KUBECTL -n $NAMESPACE get volumesnapshot\n"
+  ;;
+
+create-database)
+  DB_NAME=$2
+  SNAPSHOT_NAME=$3
+  LANDING_DB_NAME=$4
+  if [ -z $SNAPSHOT_NAME ] || [ -z $LANDING_DB_NAME ] || [ -z $DB_NAME ]
+  then
+    usage
+    exit 1
+  fi
+  # DB name should not contain spaces
+  # if [ $DB_NAME ]
+  # DB name should be unique
+  get_namespace
+  verify_helm_db $LANDING_DB_NAME
+  # get disk size
+  DISK_SIZE=$($KUBECTL -n $NAMESPACE get pvc data-${LANDING_DB_NAME}-postgresql-0 | tail -n +2 | awk '{print $4}')
+  $HELM -n $NAMESPACE upgrade --install \
+    --set "redactics.dbname=${LANDING_DB_NAME}" \
+    --set "primary.persistence.size=${DISK_SIZE}" \
+    --set "primary.persistence.storageClass=ebs-sc" \
+    --set "primary.persistence.dataSource.name=${SNAPSHOT_NAME}" \
+    --set "primary.persistence.dataSource.kind=VolumeSnapshot" \
+    --set "primary.persistence.dataSource.apiGroup=snapshot.storage.k8s.io" \
+    ${DB_NAME} redactics/postgresql
+  ;;
+
+delete-database)
+  DB_NAME=$2
+  RETAIN_DISK=$3
+  if [ -z $DB_NAME ]
+  then
+    usage
+    exit 1
+  fi
+  get_namespace
+  verify_helm_db $DB_NAME
+  if [ -z $RETAIN_DISK ]
+  then
+    # get PVC
+    PVC=$($KUBECTL -n $NAMESPACE describe po ${DB_NAME}-postgresql-0 | grep ClaimName | awk '{print $2}')
+    $HELM uninstall $DB_NAME
+    $KUBECTL -n $NAMESPACE delete pvc $PVC
+  elif [ $RETAIN_DISK = "--retain-disk" ]
+  then
+    $HELM uninstall $DB_NAME
+  else
+    usage
+  fi
   ;;
 
 list-exports)
