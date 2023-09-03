@@ -8,6 +8,8 @@ usage()
 {
   printf 'Usage: %s [-h|--help] <command>\n\n' "$0"
   printf '%s\n\n' "Redactics Agent possible commands:"
+  printf '%s\n' "- ${bold}list-snapshots"
+  printf '%s\n\n' "  ${normal}lists all available volume snapshots"
   printf '%s\n' "- ${bold}list-exports [workflow ID]"
   printf '%s\n\n' "  ${normal}lists all exported files exported from [workflow ID]"
   printf '%s\n' "- ${bold}download-export [workflow ID] [filename]"
@@ -19,9 +21,11 @@ usage()
   printf '%s\n' "- ${bold}install-sample-table [connection ID] [sample table]"
   printf '%s\n' "  ${normal}installs a collection of sample tables using the authentication info provided for [workflow ID] and [connection ID]"
   printf '%s\n\n' "  [Sample table] options include: athletes, marketing_campaign, [connection ID] is the connection ID from your Helm configuration file"
+  printf '%s\n' "- ${bold}test-requirements"
+  printf '%s\n\n' "  ${normal}tests for presence of volume snapshot manifests and valid RBAC permissions required for this CLI"
   printf '%s\n' "- ${bold}output-diagostics"
-  printf '%s\n' "  ${normal}creates a folder called \"redactics-diagnostics\" containing files useful to assist with troubleshooting agent issues"
-  printf '%s\n\n' "  (this excludes sensitive information such as your Helm config file or the contents of your Kubernetes secrets)"
+  printf '%s\n\n' "  ${normal}creates a folder called \"redactics-diagnostics\" containing files useful to assist with troubleshooting agent issues"
+  printf '%s\n' "  (this excludes sensitive information such as your Helm config file or the contents of your Kubernetes secrets)"
   printf '%s\n' "- ${bold}version"
   printf '%s\n\n' "  ${normal}outputs Redactics Agent CLI version"
   printf '%s\n' "- ${bold}-h, --help"
@@ -31,7 +35,7 @@ usage()
 NAMESPACE=
 AGENT_SCHEDULER=
 AGENT_HTTP_NAS=
-VERSION=3.0.0
+VERSION=3.1.0
 KUBECTL=$(which kubectl)
 HELM=$(which helm)
 DOCKER_COMPOSE=$(which docker-compose)
@@ -131,6 +135,11 @@ fi
 
 case "$1" in
 
+list-snapshots)
+  get_namespace
+  $KUBECTL -n $NAMESPACE get volumesnapshots
+  ;;
+
 list-exports)
   WORKFLOW=$2
   if [ -z $WORKFLOW ]
@@ -215,6 +224,38 @@ install-sample-table)
   then
     printf "${bold}YOUR TABLE INSTALLATION HAS BEEN QUEUED!\n\n${normal}To track progress, enter ${bold}redactics list-runs sampletable-${SAMPLE_TABLE}${normal} or visit the ${bold}Workflow Jobs${normal} section of your Redactics account.\nBoth the results and any errors will be reported to your Redactics account\n"
   fi
+  ;;
+
+test-requirements)
+  $KUBECTL -n kube-system get serviceaccount snapshot-controller > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get deploy snapshot-controller > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get crd volumesnapshotclasses.snapshot.storage.k8s.io > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get crd volumesnapshotcontents.snapshot.storage.k8s.io > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get crd volumesnapshots.snapshot.storage.k8s.io > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL get storageclass ebs-sc > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL get volumesnapshotclass redactics-aws-snapshot > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  printf "All requirements checks have passed, you are good to go!\n"
   ;;
 
 output-diagnostics)
