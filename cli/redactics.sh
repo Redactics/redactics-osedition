@@ -10,6 +10,8 @@ usage()
   printf '%s\n\n' "Redactics Agent possible commands:"
   printf '%s\n' "- ${bold}list-snapshots"
   printf '%s\n\n' "  ${normal}lists all available volume snapshots"
+  printf '%s\n' "- ${bold}create-snapshot [snapshot name] [DB name]"
+  printf '%s\n\n' "  ${normal}creates snapshot for landing database associated with [workflow ID]"
   printf '%s\n' "- ${bold}list-exports [workflow ID]"
   printf '%s\n\n' "  ${normal}lists all exported files exported from [workflow ID]"
   printf '%s\n' "- ${bold}download-export [workflow ID] [filename]"
@@ -41,9 +43,18 @@ HELM=$(which helm)
 DOCKER_COMPOSE=$(which docker-compose)
 
 function get_namespace {
-  NAMESPACE=$(helm ls --all-namespaces | grep agent | grep agent | awk '{print $2}')
+  NAMESPACE=$($HELM ls --all-namespaces | grep agent | grep agent | awk '{print $2}')
   if [[ -z "$NAMESPACE" ]]; then
     printf "ERROR: Redactics does not appeared to be installed on the Kubernetes cluster you are currently authenticated to. Please re-install Redactics using the command provided within the \"Agents\" section of the Redactics dashboard\n"
+    exit 1
+  fi
+}
+
+function verify_dbname {
+  $HELM -n $NAMESPACE ls | awk '{print $1}' | grep -e "^${1}$" > /dev/null
+  if [ $? -ne 0 ]; then
+    POSSIBLE_DBS=$($HELM -n $NAMESPACE ls | tail -n +2 | awk '{print $1}' | grep -v 'agent')
+    printf "${bold}ERROR: the database $1 could not be found. Your available databases are:${normal}\n$POSSIBLE_DBS\n"
     exit 1
   fi
 }
@@ -138,6 +149,25 @@ case "$1" in
 list-snapshots)
   get_namespace
   $KUBECTL -n $NAMESPACE get volumesnapshots
+  ;;
+
+create-snapshot)
+  SNAPSHOT_NAME=$2
+  DB_NAME=$3
+  get_namespace
+  verify_dbname $DB_NAME
+  read -r -d '' MANIFEST <<- EOM
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: $SNAPSHOT_NAME
+spec:
+  volumeSnapshotClassName: redactics-aws-snapshot
+  source:
+    persistentVolumeClaimName: data-${DB_NAME}-postgresql-0
+EOM
+  printf "$MANIFEST" | $KUBECTL apply -n $NAMESPACE -f -
+  printf "Your snapshot has been created. To monitor it's availability:\n\n${bold}$KUBECTL -n $NAMESPACE get volumesnapshot\n"
   ;;
 
 list-exports)
