@@ -208,12 +208,10 @@ create-database)
     usage
     exit 1
   fi
-  # TODO: DB name should not contain spaces
-  # TODO: DB name should be unique
   get_namespace
   # get disk size
   DISK_SIZE=$($KUBECTL -n $NAMESPACE get pvc data-${HELM_DB_NAME}-postgresql-0 | tail -n +2 | awk '{print $4}')
-  $HELM -n $NAMESPACE upgrade --install \
+  $HELM -n $NAMESPACE install \
     --set "redactics.dbname=${LANDING_DB_NAME}" \
     --set "primary.persistence.size=${DISK_SIZE}" \
     --set "primary.persistence.storageClass=ebs-sc" \
