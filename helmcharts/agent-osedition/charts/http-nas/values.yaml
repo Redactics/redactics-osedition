@@ -2,6 +2,8 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+enabled: false
+
 replicaCount: 1
 storagePath: /mnt/storage
 
@@ -12,7 +14,7 @@ image:
   tag: 1.3.1
 
 persistence:
-  enabled: true
+  enabled: false
   pvc:
     claimName: http-nas-storage
     size: ~

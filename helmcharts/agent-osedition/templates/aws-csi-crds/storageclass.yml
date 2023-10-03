@@ -1,0 +1,9 @@
+{{- if eq .Values.redactics.cloudProvider "aws" }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-sc
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+#volumeBindingMode: Immediate
+{{ end }}

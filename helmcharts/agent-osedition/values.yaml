@@ -46,7 +46,7 @@ airflowHome: /opt/airflow
 defaultAirflowRepository: redactics/agent
 
 # Default airflow tag to deploy
-defaultAirflowTag: "2.3.2-3.1.0"
+defaultAirflowTag: "2.3.2-4.0.0"
 
 # Airflow version (Used to make some decisions based on Airflow Version being deployed)
 airflowVersion: "2.3.2"
@@ -275,6 +275,10 @@ enableBuiltInSecretEnvVars:
 #   '{{ .Release.Name }}-other-secret-name-suffix':
 #     data: |
 #        ...
+extraSecrets:
+  '{{ .Release.Name }}-usersecrets':  
+    data: |
+      LANDING_USERS: {{ .Values.redactics.landingUsers | toJson | b64enc | quote }}
 
 # Extra ConfigMaps that will be managed by the chart
 # (You can use them with extraEnv or extraEnvFrom or some of the extraVolumes values).
@@ -1581,3 +1585,6 @@ airflow:
   fernetKey: ~
   webserverSecretKey: ~
   connections: ~
+
+redactics:
+  cloudProvider: ""

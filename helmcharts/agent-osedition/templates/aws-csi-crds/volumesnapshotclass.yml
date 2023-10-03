@@ -1,0 +1,8 @@
+{{- if eq .Values.redactics.cloudProvider "aws" }}
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: redactics-aws-snapshot
+driver: ebs.csi.aws.com
+deletionPolicy: Delete
+{{ end }}

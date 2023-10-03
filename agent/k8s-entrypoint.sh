@@ -8,7 +8,8 @@ cp -r /pgcerts-secrets/* /pgcerts/ || true
 chmod 0600 /pgcerts/*/..data/sslkey || true
 
 echo "*** staging DAGs"
-cp /tmp/functions.sql /opt/airflow/dags/
+cp /tmp/erl-functions.sql /opt/airflow/dags/
+cp /tmp/replication-*.sql /opt/airflow/dags/
 cp /tmp/airflow-log-cleanup.py /opt/airflow/dags/
 cp /tmp/refresh-dags.py /opt/airflow/dags/
 cp /tmp/heartbeat.py /opt/airflow/dags/

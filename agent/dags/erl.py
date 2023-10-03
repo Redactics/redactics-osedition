@@ -23,7 +23,7 @@ from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import Kubernete
 from airflow.kubernetes.secret import Secret
 from airflow.models import Variable
 
-cf_file = open("/opt/airflow/dags/functions.sql", "r")
+cf_file = open("/opt/airflow/dags/erl-functions.sql", "r")
 CUSTOM_FUNCTIONS = cf_file.read()
 cf_file.close()
 dag_name = os.path.basename(__file__).split('.')[0]
