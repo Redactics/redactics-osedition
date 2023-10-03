@@ -8,6 +8,16 @@ usage()
 {
   printf 'Usage: %s [-h|--help] <command>\n\n' "$0"
   printf '%s\n\n' "Redactics Agent possible commands:"
+  printf '%s\n' "- ${bold}list-snapshots"
+  printf '%s\n\n' "  ${normal}lists all available volume snapshots"
+  printf '%s\n' "- ${bold}create-snapshot [snapshot name] [helm DB name]"
+  printf '%s\n\n' "  ${normal}creates snapshot [snapshot name] for helm database [helm DB name] (the Helm database name is the helm installation name viewable via helm ls)"
+  printf '%s\n' "- ${bold}delete-snapshot [snapshot name]"
+  printf '%s\n\n' "  ${normal}deletes snapshot [snapshot name]"
+  printf '%s\n' "- ${bold}create-database [DB name] [snapshot name] [helm DB name] [landing DB name]"
+  printf '%s\n\n' "  ${normal}creates database [DB name] from [snapshot name] for  helm database [helm DB name] running landing database [landing DB name] (the Helm database name is the helm installation name viewable via helm ls, the landing DB name is the Postgres database name)"
+  printf '%s\n' "- ${bold}delete-database [DB name] [--retain-disk]"
+  printf '%s\n\n' "  ${normal}deletes database [DB name] and optionally retains the disk to reuse this data later (requires an identically named database)"
   printf '%s\n' "- ${bold}list-exports [workflow ID]"
   printf '%s\n\n' "  ${normal}lists all exported files exported from [workflow ID]"
   printf '%s\n' "- ${bold}download-export [workflow ID] [filename]"
@@ -19,9 +29,11 @@ usage()
   printf '%s\n' "- ${bold}install-sample-table [connection ID] [sample table]"
   printf '%s\n' "  ${normal}installs a collection of sample tables using the authentication info provided for [workflow ID] and [connection ID]"
   printf '%s\n\n' "  [Sample table] options include: athletes, marketing_campaign, [connection ID] is the connection ID from your Helm configuration file"
+  printf '%s\n' "- ${bold}test-requirements"
+  printf '%s\n\n' "  ${normal}tests for presence of volume snapshot manifests and valid RBAC permissions required for this CLI"
   printf '%s\n' "- ${bold}output-diagostics"
-  printf '%s\n' "  ${normal}creates a folder called \"redactics-diagnostics\" containing files useful to assist with troubleshooting agent issues"
-  printf '%s\n\n' "  (this excludes sensitive information such as your Helm config file or the contents of your Kubernetes secrets)"
+  printf '%s\n\n' "  ${normal}creates a folder called \"redactics-diagnostics\" containing files useful to assist with troubleshooting agent issues"
+  printf '%s\n' "  (this excludes sensitive information such as your Helm config file or the contents of your Kubernetes secrets)"
   printf '%s\n' "- ${bold}version"
   printf '%s\n\n' "  ${normal}outputs Redactics Agent CLI version"
   printf '%s\n' "- ${bold}-h, --help"
@@ -31,15 +43,24 @@ usage()
 NAMESPACE=
 AGENT_SCHEDULER=
 AGENT_HTTP_NAS=
-VERSION=3.0.0
+VERSION=3.1.0
 KUBECTL=$(which kubectl)
 HELM=$(which helm)
 DOCKER_COMPOSE=$(which docker-compose)
 
 function get_namespace {
-  NAMESPACE=$(helm ls --all-namespaces | grep agent | grep agent | awk '{print $2}')
+  NAMESPACE=$($HELM ls --all-namespaces | grep agent | grep agent | awk '{print $2}')
   if [[ -z "$NAMESPACE" ]]; then
     printf "ERROR: Redactics does not appeared to be installed on the Kubernetes cluster you are currently authenticated to. Please re-install Redactics using the command provided within the \"Agents\" section of the Redactics dashboard\n"
+    exit 1
+  fi
+}
+
+function verify_helm_db {
+  $HELM -n $NAMESPACE ls | awk '{print $1}' | grep -e "^${1}$" > /dev/null
+  if [ $? -ne 0 ]; then
+    POSSIBLE_DBS=$($HELM -n $NAMESPACE ls | tail -n +2 | awk '{print $1}' | grep -v 'agent')
+    printf "${bold}ERROR: the database $1 could not be found. Your available databases are:${normal}\n$POSSIBLE_DBS\n"
     exit 1
   fi
 }
@@ -131,6 +152,99 @@ fi
 
 case "$1" in
 
+list-snapshots)
+  get_namespace
+  $KUBECTL -n $NAMESPACE get volumesnapshots
+  ;;
+
+create-snapshot)
+  SNAPSHOT_NAME=$2
+  HELM_DB_NAME=$3
+  if [ -z $SNAPSHOT_NAME ] || [ -z $HELM_DB_NAME ]
+  then
+    usage
+    exit 1
+  fi
+  get_namespace
+  verify_helm_db $HELM_DB_NAME
+  read -r -d '' MANIFEST <<- EOM
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: $SNAPSHOT_NAME
+spec:
+  volumeSnapshotClassName: redactics-aws-snapshot
+  source:
+    persistentVolumeClaimName: data-${HELM_DB_NAME}-postgresql-0
+EOM
+  printf "$MANIFEST" | $KUBECTL apply -n $NAMESPACE -f -
+  printf "Your snapshot has been created. To monitor its availability:\n\n${bold}$KUBECTL -n $NAMESPACE get volumesnapshot\n"
+  ;;
+
+delete-snapshot)
+  SNAPSHOT_NAME=$2
+  if [ -z $SNAPSHOT_NAME ]
+  then
+    usage
+    exit 1
+  fi
+  get_namespace
+  $KUBECTL -n $NAMESPACE get volumesnapshot $SNAPSHOT_NAME > /dev/null
+  if [ $? -ne 0 ]; then
+    printf "${bold}ERROR: invalid snapshot name $SNAPSHOT_NAME. You can view your available snapshots by running:${normal}\n$KUBECTL -n $NAMESPACE get volumesnapshots\n"
+    exit 1
+  fi
+  $KUBECTL -n $NAMESPACE delete volumesnapshot $SNAPSHOT_NAME
+  ;;
+
+create-database)
+  DB_NAME=$2
+  SNAPSHOT_NAME=$3
+  HELM_DB_NAME=$4
+  LANDING_DB_NAME=$5
+  # TODO: get landing DB name from Airflow var?
+  if [ -z $SNAPSHOT_NAME ] || [ -z $HELM_DB_NAME ] || [ -z $LANDING_DB_NAME ] || [ -z $DB_NAME ]
+  then
+    usage
+    exit 1
+  fi
+  get_namespace
+  # get disk size
+  DISK_SIZE=$($KUBECTL -n $NAMESPACE get pvc data-${HELM_DB_NAME}-postgresql-0 | tail -n +2 | awk '{print $4}')
+  $HELM -n $NAMESPACE install \
+    --set "redactics.dbname=${LANDING_DB_NAME}" \
+    --set "primary.persistence.size=${DISK_SIZE}" \
+    --set "primary.persistence.storageClass=ebs-sc" \
+    --set "primary.persistence.dataSource.name=${SNAPSHOT_NAME}" \
+    --set "primary.persistence.dataSource.kind=VolumeSnapshot" \
+    --set "primary.persistence.dataSource.apiGroup=snapshot.storage.k8s.io" \
+    ${DB_NAME} redactics/postgresql
+  ;;
+
+delete-database)
+  DB_NAME=$2
+  RETAIN_DISK=$3
+  if [ -z $DB_NAME ]
+  then
+    usage
+    exit 1
+  fi
+  get_namespace
+  verify_helm_db $DB_NAME
+  if [ -z $RETAIN_DISK ]
+  then
+    # get PVC
+    PVC=$($KUBECTL -n $NAMESPACE describe po ${DB_NAME}-postgresql-0 | grep ClaimName | awk '{print $2}')
+    $HELM uninstall $DB_NAME
+    $KUBECTL -n $NAMESPACE delete pvc $PVC
+  elif [ $RETAIN_DISK = "--retain-disk" ]
+  then
+    $HELM uninstall $DB_NAME
+  else
+    usage
+  fi
+  ;;
+
 list-exports)
   WORKFLOW=$2
   if [ -z $WORKFLOW ]
@@ -215,6 +329,38 @@ install-sample-table)
   then
     printf "${bold}YOUR TABLE INSTALLATION HAS BEEN QUEUED!\n\n${normal}To track progress, enter ${bold}redactics list-runs sampletable-${SAMPLE_TABLE}${normal} or visit the ${bold}Workflow Jobs${normal} section of your Redactics account.\nBoth the results and any errors will be reported to your Redactics account\n"
   fi
+  ;;
+
+test-requirements)
+  $KUBECTL -n kube-system get serviceaccount snapshot-controller > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get deploy snapshot-controller > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get crd volumesnapshotclasses.snapshot.storage.k8s.io > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get crd volumesnapshotcontents.snapshot.storage.k8s.io > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL -n kube-system get crd volumesnapshots.snapshot.storage.k8s.io > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL get storageclass ebs-sc > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  $KUBECTL get volumesnapshotclass redactics-aws-snapshot > /dev/null
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  printf "All requirements checks have passed, you are good to go!\n"
   ;;
 
 output-diagnostics)
