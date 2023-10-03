@@ -359,8 +359,8 @@ export async function getWorkflow(req: Request, res: Response) {
       }
 
       const t = r.table.split('.');
-      let ruleSchema = "";
-      let ruleTable = "";
+      let ruleSchema = '';
+      let ruleTable = '';
       [ruleSchema, ruleTable] = t;
       redactRules.push({
         uuid: r.uuid,
@@ -371,7 +371,7 @@ export async function getWorkflow(req: Request, res: Response) {
         rule: ruleset.redactKey,
         redactData: preset.redactData,
         createdAt: r.createdAt,
-        updatedAt: r.updatedAt
+        updatedAt: r.updatedAt,
       });
     });
 
@@ -401,8 +401,8 @@ export async function getWorkflow(req: Request, res: Response) {
     });
 
     const exportTableDataConfig:any = [];
-    if (workflow.dataValues.exportTableDataConfig &&
-      Object.keys(workflow.dataValues.exportTableDataConfig).length) {
+    if (workflow.dataValues.exportTableDataConfig
+      && Object.keys(workflow.dataValues.exportTableDataConfig).length) {
       Object.keys(workflow.dataValues.exportTableDataConfig).forEach((idx:any) => {
         const table:string = Object.keys(workflow.dataValues.exportTableDataConfig[idx])[0];
         const config:any = workflow.dataValues.exportTableDataConfig[idx][table];
