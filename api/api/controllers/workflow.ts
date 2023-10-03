@@ -288,8 +288,9 @@ export async function getWorkflow(req: Request, res: Response) {
       }
     });
 
-    // rules indexed by table for DAG
+    // rules indexed by table for ERL DAG
     const indexedRedactRules:any = [];
+    const redactRules:any = [];
 
     Object.values(allRedactRules).forEach((r:any) => {
       let preset;
@@ -356,20 +357,22 @@ export async function getWorkflow(req: Request, res: Response) {
         // prevent duplicate table entries
         indexedRedactRules.push(rule);
       }
-    });
 
-    // input formatted redact rules
-    const redactRules:any = allRedactRules.map((r:any) => {
-      const rule = r.dataValues;
-      delete rule.id;
-      delete rule.workflowId;
-      const ruleset = allRedactRuleSets.find((p:any) => (p.dataValues.id === rule.ruleId));
-      rule.rule = ruleset.dataValues.redactKey;
-      delete rule.ruleId;
-      const t = rule.table.split('.');
-      [rule.schema, rule.table] = t;
-
-      return rule;
+      const t = r.table.split('.');
+      let ruleSchema = "";
+      let ruleTable = "";
+      [ruleSchema, ruleTable] = t;
+      redactRules.push({
+        uuid: r.uuid,
+        databaseTable: r.databaseTable,
+        schema: ruleSchema,
+        table: ruleTable,
+        column: r.column,
+        rule: ruleset.redactKey,
+        redactData: preset.redactData,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt
+      });
     });
 
     // build dataFeeds
@@ -398,7 +401,8 @@ export async function getWorkflow(req: Request, res: Response) {
     });
 
     const exportTableDataConfig:any = [];
-    if (Object.keys(workflow.dataValues.exportTableDataConfig).length) {
+    if (workflow.dataValues.exportTableDataConfig &&
+      Object.keys(workflow.dataValues.exportTableDataConfig).length) {
       Object.keys(workflow.dataValues.exportTableDataConfig).forEach((idx:any) => {
         const table:string = Object.keys(workflow.dataValues.exportTableDataConfig[idx])[0];
         const config:any = workflow.dataValues.exportTableDataConfig[idx][table];
