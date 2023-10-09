@@ -155,7 +155,7 @@ def replication():
             Variable.set(dag_name + '-tableSchemaVersion', TABLE_SCHEMA_VERSION)
 
         # check on Redactics role
-        if os.environ['LANDING_USERS']:
+        if "LANDING_USERS" in os.environ:
             if not redactics_tmp:
                 redactics_tmp = get_landing_db(landing_db)
             landing_users = json.loads(os.environ['LANDING_USERS'])
