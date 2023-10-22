@@ -539,7 +539,7 @@ async function saveRedactRules(workflow:any, req: Request) {
   });
 
   // skip saving blank rules (when GUI section is disabled)
-  Object.values(req.body.redactRules.filter((r:any) => (
+  Object.values(req.body.maskingRules.filter((r:any) => (
     !!((r.databaseTable && r.schema && r.table && r.column))))).forEach((r:any) => {
     if (r.presetUuid) {
       // preset used

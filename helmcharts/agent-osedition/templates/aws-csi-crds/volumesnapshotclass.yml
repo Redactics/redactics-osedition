@@ -1,4 +1,5 @@
 {{- if eq .Values.redactics.cloudProvider "aws" }}
+# TODO: only apply if voluemsnapshotclass CRD exists
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass
 metadata:

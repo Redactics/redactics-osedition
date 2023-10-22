@@ -13,7 +13,7 @@ if [ $total_workflows -gt 0 ]; then
   if [ "$workflow_type" = "replication" ]; then
       cp /tmp/replication.py /opt/airflow/dags/${workflow_id}.py
   elif [ "$workflow_type" = "ERL" ]; then
-      cp /tmp/redactics.py /opt/airflow/dags/${workflow_id}.py
+      cp /tmp/erl.py /opt/airflow/dags/${workflow_id}.py
   elif [ "$workflow_type" = "mockDatabaseMigration" ]; then
       cp /tmp/db-migration-mocking.py /opt/airflow/dags/${workflow_id}-migrationmocking.py
   fi

@@ -48,7 +48,9 @@ export async function getAgent(req: Request, res: Response) {
       if (agent.inputs) {
         agent.inputs.forEach((ci:any) => {
           const input = inputs.find((i:any) => (i.dataValues.id === ci.dataValues.inputId));
-          formattedInputs.push(input.dataValues.uuid);
+          if (input) {
+            formattedInputs.push(input.dataValues.uuid);
+          }
         });
         delete agent.inputs;
         agent.inputs = formattedInputs;
