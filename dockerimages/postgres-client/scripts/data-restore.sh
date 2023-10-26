@@ -18,6 +18,6 @@ check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${T
 if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
 then
     # reset table in the event of task restarts
-    psql -c "TRUNCATE TABLE \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\";"
-    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv | psql -c "\copy \"${WORKFLOW}\".\"${TABLE_NOSCHEMA}\" from stdin DELIMITER ',' csv header"
+    psql -c "TRUNCATE TABLE \"${SCHEMA}\".\"${TABLE_NOSCHEMA}\";"
+    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv | psql -c "\copy \"${SCHEMA}\".\"${TABLE_NOSCHEMA}\" from stdin DELIMITER ',' csv header"
 fi

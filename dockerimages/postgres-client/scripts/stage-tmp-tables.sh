@@ -11,5 +11,5 @@ IFS=',' read -r -a tables <<< "$TABLES"
 for table in "${tables[@]}"
 do
     echo "Move table $table into schema $WORKFLOW"
-    psql -c "ALTER TABLE $table SET SCHEMA \"$WORKFLOW\""
+    #psql -c "ALTER TABLE $table SET SCHEMA \"$WORKFLOW\""
 done
