@@ -14,8 +14,8 @@ INPUT_ID=$3
 /scripts/prep-certs.sh
 
 # check that file was created
-check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv/wc)
-if [ "$check" != "Not Found" ] && [ "$check" != "0" ]
+check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Fdump-${SCHEMA}.${TABLE_NOSCHEMA}.csv/check)
+if [ "$check" != "Not Found" ]
 then
     # reset table in the event of task restarts
     psql -c "TRUNCATE TABLE \"${SCHEMA}\".\"${TABLE_NOSCHEMA}\";"

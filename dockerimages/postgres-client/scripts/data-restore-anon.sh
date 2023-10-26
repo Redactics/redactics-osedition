@@ -38,7 +38,7 @@ DEST_TABLE_NOQUOTES=${DEST_TABLE//"\""/}
 
 if [ "$FULLCOPY" == "0" ]
 then
-    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv/wc)
+    check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv/check)
     if [ "$check" != "Not Found" ]
     then
         # reset table in the event of task restarts
