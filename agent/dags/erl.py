@@ -42,15 +42,6 @@ PG_CLIENT_VERSION = "15"
 is_delete_operator_pod = False if ENV == "development" else True
 secrets = []
 
-k8s_pg_tmp_envvars = {
-    "PGHOST": BaseHook.get_connection("redacticsDB").host,
-    "PGUSER": BaseHook.get_connection("redacticsDB").login,
-    "PGPASSWORD": BaseHook.get_connection("redacticsDB").password,
-    "PGDATABASE": BaseHook.get_connection("redacticsDB").schema,
-    "API_URL": API_URL,
-    "CONNECTION": "redactics-tmp"
-}
-
 if NODESELECTOR != "<nil>":
     nodeselector_key = NODESELECTOR.split('.')[0]
     nodeselector_value = NODESELECTOR.split('.')[1]
@@ -128,7 +119,7 @@ if wf_config.get("dataFeeds") and len(wf_config.get("dataFeeds")):
             customEnabled = True
             customConfig = feed
 
-def get_source_db(input_id):
+def get_db(input_id):
     host = BaseHook.get_connection(input_id).host
     login = BaseHook.get_connection(input_id).login
     password = BaseHook.get_connection(input_id).password
@@ -140,40 +131,47 @@ def get_source_db(input_id):
                                     host=host, schema=schema), connect_args=extra, echo=False)
     return connection
 
-def get_redactics_tmp():
-    host = BaseHook.get_connection("redacticsDB").host
-    login = BaseHook.get_connection("redacticsDB").login
-    password = BaseHook.get_connection("redacticsDB").password
-    schema = BaseHook.get_connection("redacticsDB").schema
-    extra = json.loads(BaseHook.get_connection("redacticsDB").extra) if BaseHook.get_connection("redacticsDB").extra else ""
+def transformation_enabled():
+    init_anon = False
+    for input in wf_config["inputs"]:
+        if input["inputFunction"] == "transformation":
+            init_anon = True
+    return init_anon
 
-    connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-                            .format(login=login, password=password,
-                                    host=host, schema=schema), connect_args=extra, echo=False)
-    return connection
-
-def get_digital_twin():
-    host = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host
-    login = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login
-    password = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password
-    schema = BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema
-    extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
-
-    connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-                            .format(login=login, password=password,
-                                    host=host, schema=schema), connect_args=extra, echo=False)
-    return connection
+def get_transformation_db():
+    for input in wf_config["inputs"]:
+        if input["inputFunction"] == "transformation":
+            return get_db(input["uuid"])
+        
+def get_target_db():
+    if transformation_enabled():
+        return "redacticsDB"
+    else:
+        for input in wf_config["inputs"]:
+            if input["inputFunction"] == "target":
+                return input["uuid"]
+        
+target_db = get_target_db()
+k8s_pg_targetdb_envvars = {
+    "PGHOST": BaseHook.get_connection(target_db).host,
+    "PGUSER": BaseHook.get_connection(target_db).login,
+    "PGPASSWORD": BaseHook.get_connection(target_db).password,
+    "PGDATABASE": BaseHook.get_connection(target_db).schema,
+    "API_URL": API_URL,
+    "CONNECTION": target_db
+}
 
 def db_init():
     # check that extension has been inited
-    connection = get_redactics_tmp()
+    if not transformation_enabled():
+        return False
+    connection = get_transformation_db()
     results = connection.execute("SELECT oid FROM pg_extension WHERE extname='anon'").scalar()
     return False if results is None else True
 
-initial_copy_tasks = 0
-delta_copy_tasks = 0
 redactics_db_init = db_init()
 totalTasks = 0
+copyTasks = 0
 
 def set_input_tables(input, source_db, context):
     # collect tables from workflow config, supporting wildcards
@@ -225,161 +223,14 @@ def set_input_tables(input, source_db, context):
     Variable.set(dag_name + "-erl-input-tables-" + input["uuid"] + "-" + context["run_id"], json.dumps(list(dict.fromkeys(found_tables))))
     return list(dict.fromkeys(found_tables))
 
-def is_numeric_pk(data_type):
-    return True if data_type == "smallint" or data_type == "integer" or data_type == "bigint" or data_type == "smallserial" or data_type == "serial" or data_type == "bigserial" else False
-
-def get_redact_email_fields(find_table):
-    redact_email_fields = []
-    for rules in wf_config["indexedRedactRules"]:
-        for t, fields in rules.items():
-            table = t.split('.')[1]
-
-            if table == find_table:
-                for field in fields:
-                    for fieldName, params in field.items():
-                        if params["rule"] == "redact_email":
-                            redact_email_fields.append(fieldName)
-    return redact_email_fields
-
-def set_run_plan(**context):
-    delta_copies = []
-    initial_copies = []
-    pkeys = {}
-    copy_status = {}
-    digital_twin = get_digital_twin() if digitalTwinEnabled else None
-    redactics_tmp = get_redactics_tmp()
-
-    for input in wf_config["inputs"]:
-        source_db = get_source_db(input["uuid"])
-        input_tables = set_input_tables(input, source_db, context)
-
-        # gather disabled delta updates
-        for export in wf_config["export"]:
-            for table, config in export.items():
-                if "disableDeltaUpdates" in config and config["disableDeltaUpdates"] and table in input_tables:
-                    initial_copies.append(table)
-
-        for t in input_tables:
-            schema = t.split('.')[0]
-            table = t.split('.')[1]
-            schema_diff = False
-
-            # collect primary keys to find composites (untested)
-            # pkeys_query = source_db.execute("SELECT c.column_name FROM information_schema.key_column_usage AS c LEFT JOIN information_schema.table_constraints AS t ON t.constraint_name = c.constraint_name WHERE c.constraint_schema = '" + schema + "' AND t.table_name = '" + table + "' AND t.constraint_type = 'PRIMARY KEY'").fetchall()
-            # pkeys[table] = []
-            # for idx, st in enumerate(pkeys_query):
-            #     pkeys[table].append(st["column_name"])
-
-            source_tables = source_db.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' ORDER BY ordinal_position ASC").fetchall()
-            tmp_tables = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' AND column_name != 'redacted_email_counter' ORDER BY ordinal_position ASC").fetchall()
-            if digitalTwinEnabled:
-                twin_tables = digital_twin.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + schema + "' AND table_name ILIKE '" + table + "' AND column_name != 'source_primary_key' ORDER BY ordinal_position ASC").fetchall()
-                twin_primary_key = ""
-                twin_primary_key_type = ""
-                if len(twin_tables):
-                    pk_query = digital_twin.execute("SELECT c.column_name FROM information_schema.key_column_usage AS c LEFT JOIN information_schema.table_constraints AS t ON t.constraint_name = c.constraint_name WHERE c.constraint_schema = '" + schema + "' AND t.table_name = '" + table + "' AND t.constraint_type = 'PRIMARY KEY'").fetchall()
-                    if len(pk_query):
-                        # gather twin primary key and type to determine whether new delta updates based on numerical IDs are possible
-                        pk_result = pk_query[0]
-                        dt_result = digital_twin.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + pk_result["column_name"] + "'").fetchone()
-                        twin_primary_key = dt_result["column_name"]
-                        twin_primary_key_type = dt_result["data_type"]
-
-            if len(source_tables) != len(tmp_tables):
-                # column has been added or removed
-                schema_diff = True
-            elif digitalTwinEnabled and len(tmp_tables) != len(twin_tables):
-                # column has been added or removed
-                schema_diff = True
-            # elif len(pkeys[table]) > 1:
-            #     # composite primary keys found
-            #     schema_diff = True
-            else:
-                for idx, st in enumerate(source_tables):
-                    if len(tmp_tables) > 0 and idx <= len(tmp_tables):
-                        if (st["column_name"] != tmp_tables[idx]["column_name"] or
-                            st["data_type"] != tmp_tables[idx]["data_type"] or
-                            st["udt_name"] != tmp_tables[idx]["udt_name"]):
-                            print("TMP DIFF")
-                            print(schema + "." + table)
-                            #print(st)
-                            #print(tmp_tables[idx])
-                            schema_diff = True    
-                    else:
-                        # destination tables haven't been created yet
-                        print("NO DEST TMP")
-                        print(schema + "." + table)
-                        schema_diff = True
-
-                if digitalTwinEnabled and "deltaUpdateField" in digitalTwinConfig["dataFeedConfig"]:
-                    # assure table includes deltaUpdateField to support delta updates
-                    deltaUpdateFieldFound = False
-
-                    # mismatching digital twin schema should prompt table regeneration 
-                    for idx, st in enumerate(tmp_tables):
-                        if st["column_name"] == digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]:
-                            deltaUpdateFieldFound = True
-                        if twin_primary_key and is_numeric_pk(twin_primary_key_type) and len(twin_tables) > 0 and idx <= len(twin_tables):
-                            if (st["column_name"] != twin_tables[idx]["column_name"] or
-                                st["data_type"] != twin_tables[idx]["data_type"] or
-                                st["udt_name"] != twin_tables[idx]["udt_name"]) and (twin_tables[idx]["column_name"] != twin_primary_key):
-                                print("DT DIFF")
-                                print(schema + "." + table)
-                                #print(st)
-                                #print(twin_tables[idx])
-                                schema_diff = True   
-                        else:
-                            # destination tables haven't been created yet
-                            print("NO DEST DT")
-                            print(schema + "." + table)
-                            #print(twin_primary_key)
-                            #print(twin_primary_key_type)
-                            schema_diff = True
-
-            if not redactics_db_init and (schema + "." + table) not in initial_copies:
-                # Redactics DB not inited - first time usage
-                copy_status[(schema + "." + table)] = "init"
-                initial_copies.append(schema + "." + table)
-            elif (schema + "." + table) in input["fullcopies"] and schema_diff and (schema + "." + table) not in initial_copies:
-                # table copied but schema has changed - re-copy entire table
-                copy_status[(schema + "." + table)] = "schema-change-detected"
-                initial_copies.append(schema + "." + table)
-            # elif schema_diff and (schema + "." + table) not in initial_copies:
-            #     # delta updates should otherwise be skipped, e.g. composite primary keys
-            #     copy_status[(schema + "." + table)] = "skip-delta-updates"
-            #     initial_copies.append(schema + "." + table)
-            elif (schema + "." + table) in input["fullcopies"] and digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enableDeltaUpdates"] and digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] and deltaUpdateFieldFound and (schema + "." + table) not in initial_copies:
-                # table copied but schema has not changed - eligible for delta update
-                copy_status[(schema + "." + table)] = "delta"
-                delta_copies.append(schema + "." + table)
-            elif (schema + "." + table) not in initial_copies:
-                # table not copied yet, or missing delta update field definition or value
-                copy_status[(schema + "." + table)] = "missing-delta-update-field" if digitalTwinEnabled and "deltaUpdateField" not in digitalTwinConfig["dataFeedConfig"] else "initial-copy"
-                initial_copies.append(schema + "." + table)
-    
-    print("COPY STATUS")
-    print(copy_status)
-    print("INITIAL")
-    print(initial_copies)
-    print("DELTA")
-    print(delta_copies)
-    print("INPUT")
-    print(input["fullcopies"])
-    return {
-        "copy_status": copy_status,
-        "initial_copies": initial_copies,
-        "delta_copies": delta_copies
-    } 
-
-def tally_dynamic_tasks(initial_copies, delta_copies):
+def tally_dynamic_tasks(table_copies):
     global totalTasks
-    global initial_copy_tasks
-    global delta_copy_tasks
-    if not db_init():
+    global copyTasks
+    if transformation_enabled() and not db_init():
+        # extension init
         totalTasks += 1
     # dynamic tasks based on the number of initial copies
-    totalTasks += len(initial_copies) * initial_copy_tasks
-    totalTasks += len(delta_copies) * delta_copy_tasks
+    totalTasks += len(table_copies) * copyTasks
     totalTasks += len(security_labels)
         
     return totalTasks
@@ -399,8 +250,7 @@ try:
     )
     def redactics_workflow():
         global totalTasks
-        global initial_copy_tasks
-        global delta_copy_tasks
+        global copyTasks
 
         def post_logs(context):
             try:
@@ -474,13 +324,14 @@ try:
             try:
                 if request.status_code != 200:
                     raise AirflowException(response)
-                runPlan = set_run_plan(**context)
-                print("RUN PLAN")
-                print(runPlan)
-                Variable.set(dag_name + "-erl-initialCopies-" + context["run_id"], json.dumps(runPlan["initial_copies"]))
-                Variable.set(dag_name + "-erl-deltaCopies-" + context["run_id"], json.dumps(runPlan["delta_copies"]))
-                Variable.set(dag_name + "-erl-copyStatus-" + context["run_id"], json.dumps(runPlan["copy_status"]))
-                totalTasks = tally_dynamic_tasks(runPlan["initial_copies"], runPlan["delta_copies"])
+                #runPlan = set_run_plan(**context)
+                totalTasks = 0
+                for input in wf_config["inputs"]:
+                    tableListing = set_input_tables(input, get_db(input["uuid"]), context)
+                    print("TABLE LISTING")
+                    print(tableListing)
+                    Variable.set(dag_name + "-erl-tableListing-" + context["run_id"], json.dumps(tableListing))
+                totalTasks = totalTasks + tally_dynamic_tasks(tableListing)
                 Variable.set(dag_name + "-erl-totalTasks-" + context["run_id"], totalTasks)
                 Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
             except AirflowException as err:
@@ -504,55 +355,13 @@ try:
             request = requests.delete(apiUrl)
             response = request.text
             try:
-                if request.status_code != 200:
+                if request.status_code != 200 and response != "Not Found":
                     raise AirflowException(response)
             except AirflowException as err:
                 raise AirflowException(err)
 
-        @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
-        def conditional_primary_key_init(**context):
-            connection = get_digital_twin()
-            for input in wf_config["inputs"]:
-                input_tables = json.loads(Variable.get(dag_name + "-erl-input-tables-" + input["uuid"] + "-" + context["run_id"]))
-                for t in input_tables:
-                    schema = t.split('.')[0]
-                    table = t.split('.')[1]
-                    print("CREATE SOURCE PRIMARY KEY " + schema + "." + table)
-
-                    # get primary key(s)
-                    pk_query = connection.execute("SELECT c.column_name FROM information_schema.key_column_usage AS c LEFT JOIN information_schema.table_constraints AS t ON t.constraint_name = c.constraint_name WHERE c.constraint_schema = '" + schema + "' AND t.table_name = '" + table + "' AND t.constraint_type = 'PRIMARY KEY'").fetchall()
-                    if len(pk_query):
-                        pk_result = pk_query[0]
-
-                        result = connection.execute("SELECT column_name, column_default, data_type FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name ILIKE '" + pk_result["column_name"] + "'").fetchone()
-
-                        # check for presence of source primary key to create if necessary
-                        spk_query = connection.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' AND column_name = 'source_primary_key'").fetchall()
-                        if len(spk_query) == 0:
-                            connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key " + result["data_type"])
-                            connection.execute("CREATE INDEX \"" + table + "_source_primary_key\" ON \"" + schema + "\".\"" + table + "\"(source_primary_key)")
-                        # create default sequence for primary key column, if necessary
-                        if result["column_default"] is None:
-                            if result["data_type"] == "uuid":
-                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + result["column_name"] + "\" SET DEFAULT uuid_generate_v4()")
-                            else:
-                                connection.execute("CREATE SEQUENCE IF NOT EXISTS \"" + schema + "\".\"" + table + "_pkey_seq\"")
-                                connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ALTER COLUMN \"" + result["column_name"] + "\" SET DEFAULT nextval('" + table + "_pkey_seq'::regclass)")
-                    else:
-                        # create unused source_primary_key column of type int4
-                        connection.execute("ALTER TABLE \"" + schema + "\".\"" + table + "\" ADD COLUMN source_primary_key int4")
-
-        @task(on_success_callback=post_taskend, on_failure_callback=post_logs)
-        def drop_fk_constraints(connection, **context):
-            # destroy all foreign constraints
-            results = connection.execute("SELECT DISTINCT(constraint_name), table_schema, table_name FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY'").fetchall()
-            if len(results):
-                for constraint in results:
-                    print("ALTER TABLE \"" + constraint["table_schema"] + "\".\"" + constraint["table_name"] + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
-                    connection.execute("ALTER TABLE \"" + constraint["table_schema"] + "\".\"" + constraint["table_name"] + "\" DROP CONSTRAINT \"" + constraint["constraint_name"] + "\"")
-
         @task(on_success_callback=post_taskend, on_failure_callback=post_logs, trigger_rule='none_failed')
-        def init_unique_email_generator(redactics_tmp, **context):
+        def init_unique_email_generator(connection, **context):
             for rules in wf_config["indexedRedactRules"]:
                 for t, fields in rules.items():
                     table = t.split('.')[1]
@@ -561,25 +370,25 @@ try:
                         for fieldName, params in field.items():
                             if params["rule"] == "redact_email":
                                 # create redacted email counter field, if necessary
-                                email_counter_field = redactics_tmp.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' AND column_name = 'redacted_email_counter'").fetchone()
+                                email_counter_field = connection.execute("SELECT * FROM information_schema.columns WHERE table_schema ILIKE '" + dag_name + "' AND table_name ILIKE '" + table + "' AND column_name = 'redacted_email_counter'").fetchone()
                                 if not email_counter_field:
                                     print("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial")
-                                    altertable = redactics_tmp.execute("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial")
-                                    redactics_tmp.execute("CREATE UNIQUE INDEX IF NOT EXISTS \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)")
+                                    altertable = connection.execute("ALTER TABLE \"" + dag_name + "\".\"" + table + "\" ADD COLUMN redacted_email_counter bigserial")
+                                    connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS \"" + table + "_redacted_email_counter\" ON \"" + dag_name + "\".\"" + table + "\"(redacted_email_counter)")
 
         # dynamic task mapping functions
 
         @task(on_failure_callback=post_logs)
-        def gen_table_resets(input_id, schema, connection, override_schema, **context):
+        def gen_table_resets(input_id, schema, connection, **context):
             tables = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
+            input_tables = json.loads(Variable.get(dag_name + "-erl-tableListing-" + context["run_id"]))
             extensions_schema = ""
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
                     extensions_schema = input["extensionsSchema"]
-                    for table in initial_copies:
+                    for table in input_tables:
                         tables.append(table)
-            if len(tables):
+            if len(tables) and connection:
                 # fetch extensions to enable
                 results = connection.execute("SELECT extname FROM pg_extension").fetchall()
                 extensions = []
@@ -590,18 +399,16 @@ try:
                         # add anon extension requirement
                         extensions.append("plpgsql")
 
-                return [["/scripts/table-resets.sh", dag_name, schema, ",".join(tables), ",".join(extensions), override_schema, extensions_schema]]
+                return [["/scripts/table-resets.sh", dag_name, schema, input_id, ",".join(tables), ",".join(extensions), extensions_schema]]
             else:
                 return []
-        if digitalTwinEnabled:
-            initial_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
         def schema_dump_cmds(input_id, **context):
             # initial copy schema dump
             cmds = []
             unique_schema = []
-            input_tables = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
+            input_tables = json.loads(Variable.get(dag_name + "-erl-tableListing-" + context["run_id"]))
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
                     for t in input_tables:
@@ -616,44 +423,24 @@ try:
             # initial copy schema restore
             cmds = []
             unique_schema = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
+            input_tables = json.loads(Variable.get(dag_name + "-erl-tableListing-" + context["run_id"]))
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
-                    for t in initial_copies:
+                    for t in input_tables:
                         schema = t.split('.')[0]
                         if schema not in unique_schema:
                             unique_schema.append(schema)
                             cmds.append(["/scripts/schema-restore.sh", dag_name, target_database, schema])
             return cmds
-        initial_copy_tasks += 1
-        if digitalTwinEnabled:
-            initial_copy_tasks += 1
-
-        @task(on_failure_callback=post_logs)
-        def stage_tmp_tables_cmds(input_id, **context):
-            # stage tmp tables into target schema
-            cmds = []
-            tables = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
-            for input in wf_config["inputs"]:
-                if input["uuid"] == input_id:
-                    for t in initial_copies:
-                        schema = t.split('.')[0]
-                        table = t.split('.')[1]
-                        tables.append(schema + "." + table)
-            if len(tables):
-                cmds.append(["/scripts/stage-tmp-tables.sh", dag_name, ",".join(tables)])
-            return cmds
-        initial_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
         def data_dump_cmds(input_id, **context):
             # initial copy data dump
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
+            input_tables = json.loads(Variable.get(dag_name + "-erl-tableListing-" + context["run_id"]))
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
-                    for table in initial_copies:
+                    for table in input_tables:
                         # only append if table is in full copy list
                         cmd=["/scripts/data-dump.sh", dag_name, table]
 
@@ -665,29 +452,42 @@ try:
                                 cmd.extend([startDate, options["sampleFields"], options["createdAtField"], options["updatedAtField"]])
                         cmds.append(cmd)
             return cmds
-        initial_copy_tasks += 1        
 
         @task(on_failure_callback=post_logs)
         def restore_data_cmds(input_id, **context):
-            # initial copy data restore
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
+            input_tables = json.loads(Variable.get(dag_name + "-erl-tableListing-" + context["run_id"]))
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
-                    for t in initial_copies:
+                    for t in input_tables:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
                         cmds.append(["/scripts/data-restore.sh", dag_name, "\"" + schema + "\".\"" + table + "\"", input_id])
             return cmds
-        initial_copy_tasks += 1
+    
+        @task(on_failure_callback=post_logs)
+        def generate_constraints_cmd(input_id, **context):
+            cmds = []
+            for input in wf_config["inputs"]:
+                if input["uuid"] == input_id:
+                    cmds.append(["/scripts/generate-constraints-sql.sh", dag_name, input_id])
+            return cmds
+        
+        @task(on_failure_callback=post_logs)
+        def restore_fk_constraints_cmd(input_id, **context):
+            cmds = []
+            for input in wf_config["inputs"]:
+                if input["uuid"] == input_id:
+                    cmds.append(["/scripts/restore-fk-constraints.sh", dag_name, input_id])
+            return cmds
 
         @task(on_failure_callback=post_logs)
         def table_dump_cmds(outputs, input_id, **context):
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
+            input_tables = json.loads(Variable.get(dag_name + "-erl-tableListing-" + context["run_id"]))
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
-                    for t in initial_copies:
+                    for t in input_tables:
                         table = t.split('.')[1]
                         cmd=["/scripts/dump-csv-anon-wrapper.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\""]
 
@@ -699,83 +499,12 @@ try:
                                 cmd.extend([startDate, options["sampleFields"], options["createdAtField"], options["updatedAtField"]])
                         cmds.append(cmd)
             return cmds
-        initial_copy_tasks += 1
-
-        ### delta updates
-
-        @task(on_failure_callback=post_logs)
-        def delta_dump_newrow_cmds(input_id, **context):
-            # delta data dump - new rows
-            cmds = []
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
-            if len(delta_copies):
-                connection = get_redactics_tmp()
-            for input in wf_config["inputs"]:
-                if input["uuid"] == input_id:
-                    for t in delta_copies:
-                        schema = t.split('.')[0]
-                        table = t.split('.')[1]
-                        tmp_schema = MetaData(schema=dag_name)
-
-                        data = Table(table, tmp_schema, autoload=True, autoload_with=connection)
-                        # requires a single primary key
-                        primary_key = data.primary_key.columns.values()[0].name
-                        results = connection.execute("SELECT \"" + str(primary_key) + "\" FROM \"" + dag_name + "\".\"" + table + "\" WHERE \"" + str(primary_key) + "\" IS NOT NULL ORDER BY \"" + str(primary_key) + "\" DESC LIMIT 1").scalar()
-                        primary_key_val = str(results) if results else ""
-                        cmds.append(["/scripts/delta-data-dump.sh", dag_name, schema + "." + table, primary_key, primary_key_val, "new"])
-            return cmds
-        delta_copy_tasks += 1
-
-        @task(on_failure_callback=post_logs)
-        def delta_dump_updatedrow_cmds(input_id, **context):
-            # delta data dump - updated rows
-            cmds = []
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
-            if len(delta_copies):
-                connection = get_redactics_tmp()
-            for input in wf_config["inputs"]:
-                if input["uuid"] == input_id:
-                    for t in delta_copies:
-                        schema = t.split('.')[0]
-                        table = t.split('.')[1]
-
-                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + dag_name + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
-                        last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
-                        cmds.append(["/scripts/delta-data-dump.sh", dag_name, schema + "." + table, digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
-            return cmds
-        delta_copy_tasks += 1
-
-        @task(on_failure_callback=post_logs)
-        def delta_restore_cmds(input_id, **context):
-            # delta data restore to RedacticsDB
-            cmds = []
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"])) 
-            if len(delta_copies):
-                connection = get_redactics_tmp()
-            for input in wf_config["inputs"]:
-                if input["uuid"] == input_id:
-                    for t in delta_copies:
-                        schema = t.split('.')[0]
-                        table = t.split('.')[1]
-                        tmp_schema = MetaData(schema=dag_name)
-
-                        # get primary key
-                        data = Table(table, tmp_schema, autoload=True, autoload_with=connection)
-                        primary_key = data.primary_key.columns.values()[0].name
-                        # get schema info
-                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + dag_name + "' ORDER BY ordinal_position ASC").fetchall()
-                        
-                        restore_columns = []
-                        for c in cols:
-                            col = "".join(c)
-                            restore_columns.append('"' + col + '"')
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + schema + "\".\"" + table + "\"", "1", ",".join(restore_columns), "", primary_key])
-            return cmds
-        delta_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
         def set_security_label_cmds(**context):
             global security_labels
+            if not transformation_enabled():
+                return []
             for rules in wf_config["indexedRedactRules"]:
                 for t, fields in rules.items():
                     table = t.split('.')[1]
@@ -801,132 +530,17 @@ try:
         def gen_dt_table_restore(input_id, **context):
             # full digital twin restore to digital twin DB
             cmds = []
-            initial_copies = json.loads(Variable.get(dag_name + "-erl-initialCopies-" + context["run_id"]))
+            table_copies = json.loads(Variable.get(dag_name + "-erl-tableCopies-" + context["run_id"]))
+            if len(table_copies):
+                connection = get_db(input_id)
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
-                    if len(initial_copies):
-                        connection = get_source_db(input_id)
-                    for t in initial_copies:
+                    for t in table_copies:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
-                        public_schema = MetaData(schema=schema)
-                        print("GET PRIMARY KEY " + table)
-
-                        awk_print = []
-                        # get primary key
-                        data = Table(table, public_schema, autoload=True, autoload_with=connection)
-                        primary_key = ""
-                        if len(data.primary_key.columns.values()):
-                            primary_key = data.primary_key.columns.values()[0].name
-                        # get schema info
-                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' ORDER BY ordinal_position ASC").fetchall()
-                        # find primary key index
-                        primary_key_idx = 0
-                        for idx, c in enumerate(cols):
-                            col = "".join(c)
-                            if col == primary_key:
-                                primary_key_idx = (idx + 1)
-                        
-                        # build awk print args to output source_primary_key column and discard primary key
-                        restore_columns = []
-                        for idx, c in enumerate(cols):
-                            col = "".join(c)
-                            if col != primary_key:
-                                awk_print.append("$" + str((idx + 1)))
-                                restore_columns.append('"' + col + '"')
-                        if primary_key_idx > 0:
-                            awk_print.append("$" + str(primary_key_idx))
-                        else:
-                            awk_print.append("\"\"")
-                        restore_columns.append("source_primary_key")
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "0", ",".join(restore_columns), ",".join(awk_print), "", "", schema, input_id])
+                       
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\""])
             return cmds
-        initial_copy_tasks += 1
-
-        @task(on_failure_callback=post_logs)
-        def delta_anon_dump_newrow_cmds(input_id, **context):
-            # digital twin delta dump
-            cmds=[]
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
-            if len(delta_copies):
-                connection = get_digital_twin()
-            for input in wf_config["inputs"]:
-                if input["uuid"] == input_id:
-                    for t in delta_copies:
-                        schema = t.split('.')[0]
-                        table = t.split('.')[1]
-                        dt_schema = MetaData(schema=schema)
-
-                        # get primary key
-                        data = Table(table, dt_schema, autoload=True, autoload_with=connection)
-                        primary_key = data.primary_key.columns.values()[0].name
-                        results = connection.execute("SELECT source_primary_key FROM \"" + schema + "\".\"" + table + "\" ORDER BY source_primary_key DESC LIMIT 1").scalar()
-                        primary_key_val = str(results) if results else ""
-                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", primary_key, primary_key_val, "new"])
-            return cmds
-        delta_copy_tasks += 1
-
-        @task(on_failure_callback=post_logs)
-        def delta_anon_dump_updatedrow_cmds(input_id, **context):
-            # digital twin delta dump
-            cmds=[]
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
-            if len(delta_copies):
-                connection = get_digital_twin()
-            for input in wf_config["inputs"]:
-                if input["uuid"] == input_id:
-                    for t in delta_copies:
-                        schema = t.split('.')[0]
-                        table = t.split('.')[1]
-
-                        results = connection.execute("SELECT \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" FROM \"" + schema + "\".\"" + table + "\" WHERE \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" IS NOT NULL ORDER BY \"" + digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"] + "\" DESC LIMIT 1").fetchone()
-                        last_updated = str(results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]]) if results and results[digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"]] else ""
-                        cmds.append(["/scripts/dump-deltacsv-anon-wrapper.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", digitalTwinConfig["dataFeedConfig"]["deltaUpdateField"], last_updated, "updated"])
-            return cmds
-        delta_copy_tasks += 1
-        
-        @task(on_failure_callback=post_logs)
-        def delta_anon_restore_cmds(input_id, **context):
-            # digital twin delta restore to digital twin DB
-            cmds=[]
-            delta_copies = json.loads(Variable.get(dag_name + "-erl-deltaCopies-" + context["run_id"]))
-            if len(delta_copies):
-                connection = get_digital_twin()
-            for input in wf_config["inputs"]:
-                if input["uuid"] == input_id:
-                    for t in delta_copies:
-                        schema = t.split('.')[0]
-                        table = t.split('.')[1]
-                        dt_schema = MetaData(schema=schema)
-
-                        awk_print = []
-                        # get primary key
-                        data = Table(table, dt_schema, autoload=True, autoload_with=connection)
-                        primary_key = data.primary_key.columns.values()[0].name
-                        # get schema info
-                        cols = connection.execute("SELECT column_name FROM information_schema.columns WHERE table_name ILIKE '" + table + "' AND table_schema ILIKE '" + schema + "' ORDER BY ordinal_position ASC").fetchall()
-                        # find primary key index
-                        primary_key_idx = 0
-                        for idx, c in enumerate(cols):
-                            col = "".join(c)
-                            if col == primary_key:
-                                primary_key_idx = (idx + 1)
-                        
-                        # build awk print args to output source_primary_key column and discard primary key
-                        restore_columns = []
-                        for idx, c in enumerate(cols):
-                            col = "".join(c)
-                            if col == "source_primary_key":
-                                awk_print.append("$" + str(primary_key_idx))
-                                restore_columns.append('"' + col + '"')
-                            elif col != primary_key:
-                                awk_print.append("$" + str((idx + 1)))
-                                restore_columns.append('"' + col + '"')
-
-                        redact_email_fields = get_redact_email_fields(table)
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", "1", ",".join(restore_columns), ",".join(awk_print), primary_key, "source_primary_key", schema, "", ",".join(redact_email_fields)])
-            return cmds
-        delta_copy_tasks += 1
 
         @task(on_failure_callback=post_logs)
         def get_prepared_statements(**context):
@@ -962,382 +576,198 @@ try:
 
         input_idx = 0
         for input in wf_config["inputs"]:
-            extra = json.loads(BaseHook.get_connection(input["uuid"]).extra) if BaseHook.get_connection(input["uuid"]).extra else ""
-            k8s_pg_source_envvars = {
-                "PGHOST": BaseHook.get_connection(input["uuid"]).host,
-                "PGUSER": BaseHook.get_connection(input["uuid"]).login,
-                "PGPASSWORD": BaseHook.get_connection(input["uuid"]).password,
-                "PGDATABASE": BaseHook.get_connection(input["uuid"]).schema,
-                "CONNECTION": "source"
-            }
-            if extra:
-                if "sslmode" in extra:
-                    k8s_pg_source_envvars["PGSSLMODE"] = extra["sslmode"]
-                if "sslrootcert" in extra:
-                    k8s_pg_source_envvars["PGSSLROOTCERT"] = extra["sslrootcert"]
-                    secrets.append(Secret('volume', "/pgcerts-secrets/" + input["uuid"], "pgcert-" + input["uuid"]))
-                if "sslcert" in extra:
-                    # optional
-                    k8s_pg_source_envvars["PGSSLCERT"] = extra["sslcert"]
-                if "sslkey" in extra:
-                    # optional
-                    k8s_pg_source_envvars["PGSSLKEY"] = extra["sslkey"]
-        
-            ### full copy tasks
+            if input["inputFunction"] == "source":
+                extra = json.loads(BaseHook.get_connection(input["uuid"]).extra) if BaseHook.get_connection(input["uuid"]).extra else ""
+                k8s_pg_source_envvars = {
+                    "PGHOST": BaseHook.get_connection(input["uuid"]).host,
+                    "PGUSER": BaseHook.get_connection(input["uuid"]).login,
+                    "PGPASSWORD": BaseHook.get_connection(input["uuid"]).password,
+                    "PGDATABASE": BaseHook.get_connection(input["uuid"]).schema,
+                    "CONNECTION": "source"
+                }
+                if extra:
+                    if "sslmode" in extra:
+                        k8s_pg_source_envvars["PGSSLMODE"] = extra["sslmode"]
+                    if "sslrootcert" in extra:
+                        k8s_pg_source_envvars["PGSSLROOTCERT"] = extra["sslrootcert"]
+                        secrets.append(Secret('volume', "/pgcerts-secrets/" + input["uuid"], "pgcert-" + input["uuid"]))
+                    if "sslcert" in extra:
+                        # optional
+                        k8s_pg_source_envvars["PGSSLCERT"] = extra["sslcert"]
+                    if "sslkey" in extra:
+                        # optional
+                        k8s_pg_source_envvars["PGSSLKEY"] = extra["sslkey"]
+            
+                ### full copy tasks
 
-            schema_dump = KubernetesPodOperator.partial(
-                task_id="schema-dump-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_source_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = client.V1ResourceRequirements(
-                #     requests={"memory": "256Mi"}
-                # ),
-                name="agent-pg-schemadump",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                ).expand(
-                    cmds=schema_dump_cmds(input["uuid"])
-                )
-            schema_dump.set_upstream([init_custom_functions, clean_dir])
-
-            table_resets = KubernetesPodOperator.partial(
-                task_id="table-resets-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                get_logs=True,
-                env_vars=k8s_pg_tmp_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-pg-tableresets",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                ).expand(
-                    cmds=gen_table_resets(input["uuid"], "{}".format(BaseHook.get_connection("redacticsDB").schema), get_source_db(input["uuid"]), dag_name)
-                )
-            table_resets.set_upstream(schema_dump)
-
-            schema_restore = KubernetesPodOperator.partial(
-                task_id="schema-restore-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                get_logs=True,
-                env_vars=k8s_pg_tmp_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-pg-schemarestore",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                ).expand(
-                    cmds=schema_restore_cmds(input["uuid"], "{}".format(BaseHook.get_connection("redacticsDB").schema))
-                )
-            schema_restore.set_upstream(table_resets)
-
-            trigger_drop_fk_contraints = drop_fk_constraints(get_redactics_tmp())
-            totalTasks += 1
-            trigger_drop_fk_contraints.set_upstream(schema_restore)
-
-            stage_tmp_tables = KubernetesPodOperator.partial(
-                task_id="stage-tmp-tables-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_tmp_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-stage-tmp-tables",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                ).expand(
-                    cmds=stage_tmp_tables_cmds(input["uuid"])
-                )
-            stage_tmp_tables.set_upstream(trigger_drop_fk_contraints)
-
-            data_dump = KubernetesPodOperator.partial(
-                task_id="data-dump-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_source_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-pg-datadump",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                max_active_tis_per_dag=1
-                ).expand(
-                    cmds=data_dump_cmds(input["uuid"])
-                )
-            data_dump.set_upstream(stage_tmp_tables)
-
-            restore_data = KubernetesPodOperator.partial(
-                task_id="restore-data-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_tmp_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-restore-data",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                ).expand(
-                    cmds=restore_data_cmds(input["uuid"])
-                )
-            restore_data.set_upstream(data_dump)
-
-            ### delta copy tasks
-
-            delta_dump_newrow = KubernetesPodOperator.partial(
-                task_id="delta-dump-new-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_source_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-pg-deltadump-new",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend
-                ).expand(
-                    cmds=delta_dump_newrow_cmds(input["uuid"])
-                )
-            delta_dump_newrow.set_upstream([init_custom_functions, clean_dir])
-
-            delta_dump_updatedrow = KubernetesPodOperator.partial(
-                task_id="delta-dump-updated-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_source_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-pg-deltadump-updated",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend
-                ).expand(
-                    cmds=delta_dump_updatedrow_cmds(input["uuid"])
-                )
-            delta_dump_updatedrow.set_upstream([init_custom_functions, clean_dir])
-
-            delta_restore = KubernetesPodOperator.partial(
-                task_id="delta-restore-" + str(input_idx),
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_tmp_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-pg-deltarestore",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend
-                ).expand(
-                    cmds=delta_restore_cmds(input["uuid"])
-                )
-            delta_restore.set_upstream([delta_dump_newrow, delta_dump_updatedrow])
-
-            unique_email_generator = init_unique_email_generator(get_redactics_tmp())
-            unique_email_generator.set_upstream([restore_data, delta_restore])
-
-            apply_security_labels = PostgresOperator.partial(
-                task_id='apply-security-labels',
-                postgres_conn_id='redacticsDB',
-                database='redactics_tmp',
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                trigger_rule='none_failed'
-                ).expand(
-                    sql=set_security_label_cmds()
-                )
-            apply_security_labels.set_upstream(unique_email_generator)
-
-            table_dumps = KubernetesPodOperator.partial(
-                task_id="dump-tables",
-                namespace=NAMESPACE,
-                image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                image_pull_policy="Always",
-                get_logs=True,
-                env_vars=k8s_pg_tmp_envvars,
-                secrets=secrets,
-                affinity=affinity,
-                # resources = {
-                #     "request_memory": "256Mi"
-                # },
-                name="agent-dump-tables",
-                is_delete_operator_pod=is_delete_operator_pod,
-                in_cluster=True,
-                hostnetwork=False,
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                #trigger_rule='all_done'
-                ).expand(
-                    cmds=table_dump_cmds(outputs, input["uuid"])
-                )
-            table_dumps.set_upstream(apply_security_labels)
-
-            if digitalTwinEnabled:
-                input_idx = 0
-                for input in wf_config["inputs"]:
-                    dfSecrets = []
-
-                    k8s_pg_twin_envvars = {
-                        "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host,
-                        "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
-                        "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
-                        "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
-                        "API_URL": API_URL,
-                        "CONNECTION": "digital-twin"
-                    }
-                    twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
-                    if twin_extra:
-                        if "sslmode" in twin_extra:
-                            k8s_pg_twin_envvars["PGSSLMODE"] = twin_extra["sslmode"]
-                        if "sslrootcert" in twin_extra:
-                            k8s_pg_twin_envvars["PGSSLROOTCERT"] = twin_extra["sslrootcert"]
-                            dfSecrets.append(Secret('volume', "/pgcerts-secrets/" + digitalTwinConfig["dataFeedConfig"]["inputSource"], "pgcert-" + digitalTwinConfig["dataFeedConfig"]["inputSource"]))
-                        if "sslcert" in twin_extra:
-                            # optional
-                            k8s_pg_twin_envvars["PGSSLCERT"] = twin_extra["sslcert"]
-                        if "sslkey" in extra:
-                            # optional
-                            k8s_pg_twin_envvars["PGSSLKEY"] = twin_extra["sslkey"]
-
-                    dt_delta_dump_newrow = KubernetesPodOperator.partial(
-                        task_id="delta-data-dump-digitaltwin-new-" + str(input_idx),
-                        namespace=NAMESPACE,
-                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                        image_pull_policy="Always",
-                        get_logs=True,
-                        env_vars=k8s_pg_tmp_envvars,
-                        secrets=dfSecrets,
-                        affinity=affinity,
-                        # resources = {
-                        #     "request_memory": "256Mi"
-                        # },
-                        name="agent-pg-deltadump-digitaltwin-new",
-                        is_delete_operator_pod=is_delete_operator_pod,
-                        in_cluster=True,
-                        hostnetwork=False,
-                        on_failure_callback=post_logs,
-                        on_success_callback=post_taskend
-                        ).expand(
-                            cmds=delta_anon_dump_newrow_cmds(input["uuid"])
-                        )
-                    dt_delta_dump_newrow.set_upstream(apply_security_labels)
-
-                    dt_delta_dump_updatedrow = KubernetesPodOperator.partial(
-                        task_id="delta-data-dump-digitaltwin-updated-" + str(input_idx),
-                        namespace=NAMESPACE,
-                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                        image_pull_policy="Always",
-                        get_logs=True,
-                        env_vars=k8s_pg_tmp_envvars,
-                        secrets=dfSecrets,
-                        affinity=affinity,
-                        # resources = {
-                        #     "request_memory": "256Mi"
-                        # },
-                        name="agent-pg-deltadump-digitaltwin-updated",
-                        is_delete_operator_pod=is_delete_operator_pod,
-                        in_cluster=True,
-                        hostnetwork=False,
-                        on_failure_callback=post_logs,
-                        on_success_callback=post_taskend
-                        ).expand(
-                            cmds=delta_anon_dump_updatedrow_cmds(input["uuid"])
-                        )
-                    dt_delta_dump_updatedrow.set_upstream(apply_security_labels)
-
-                    dt_delta_restore = KubernetesPodOperator.partial(
-                        task_id="delta-data-restore-digitaltwin-" + str(input_idx),
-                        namespace=NAMESPACE,
-                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                        image_pull_policy="Always",
-                        get_logs=True,
-                        env_vars=k8s_pg_twin_envvars,
-                        secrets=dfSecrets,
-                        affinity=affinity,
-                        # resources = {
-                        #     "request_memory": "256Mi"
-                        # },
-                        name="agent-pg-deltarestore-digitaltwin",
-                        is_delete_operator_pod=is_delete_operator_pod,
-                        in_cluster=True,
-                        hostnetwork=False,
-                        on_failure_callback=post_logs,
-                        on_success_callback=post_taskend
-                        ).expand(
-                            cmds=delta_anon_restore_cmds(input["uuid"])
-                        )
-                    dt_delta_restore.set_upstream([dt_delta_dump_newrow, dt_delta_dump_updatedrow])
-                    input_idx += 1
-            else:
-                dt_delta_restore = DummyOperator(task_id="dt-delta-restore-noop", on_success_callback=post_taskend)
-                dt_delta_restore.set_upstream(delta_restore)
+                generate_constraints_sql = KubernetesPodOperator.partial(
+                    task_id="generate-constraints-sql-" + str(input_idx),
+                    namespace=NAMESPACE,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
+                    get_logs=True,
+                    env_vars=k8s_pg_source_envvars,
+                    secrets=secrets,
+                    affinity=affinity,
+                    # resources = {
+                    #     "request_memory": "256Mi"
+                    # },
+                    name="generate-constraint-sql",
+                    is_delete_operator_pod=is_delete_operator_pod,
+                    in_cluster=True,
+                    hostnetwork=False,
+                    on_failure_callback=post_logs,
+                    on_success_callback=post_taskend,
+                    ).expand(
+                        cmds=generate_constraints_cmd(input["uuid"])
+                    )
+                generate_constraints_sql.set_upstream([init_custom_functions, clean_dir])
                 totalTasks += 1
 
-        ### full copy data feeds
+                schema_dump = KubernetesPodOperator.partial(
+                    task_id="schema-dump-" + str(input_idx),
+                    namespace=NAMESPACE,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
+                    get_logs=True,
+                    env_vars=k8s_pg_source_envvars,
+                    secrets=secrets,
+                    affinity=affinity,
+                    # resources = client.V1ResourceRequirements(
+                    #     requests={"memory": "256Mi"}
+                    # ),
+                    name="agent-pg-schemadump",
+                    is_delete_operator_pod=is_delete_operator_pod,
+                    in_cluster=True,
+                    hostnetwork=False,
+                    on_failure_callback=post_logs,
+                    on_success_callback=post_taskend,
+                    ).expand(
+                        cmds=schema_dump_cmds(input["uuid"])
+                    )
+                schema_dump.set_upstream(generate_constraints_sql)
+                totalTasks += 1
+
+                table_resets = KubernetesPodOperator.partial(
+                    task_id="table-resets-" + str(input_idx),
+                    namespace=NAMESPACE,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    get_logs=True,
+                    env_vars=k8s_pg_targetdb_envvars,
+                    secrets=secrets,
+                    affinity=affinity,
+                    # resources = {
+                    #     "request_memory": "256Mi"
+                    # },
+                    name="agent-pg-tableresets",
+                    is_delete_operator_pod=is_delete_operator_pod,
+                    in_cluster=True,
+                    hostnetwork=False,
+                    on_failure_callback=post_logs,
+                    on_success_callback=post_taskend,
+                    ).expand(
+                        cmds=gen_table_resets(input["uuid"], "{}".format(BaseHook.get_connection(target_db).schema), get_db(target_db))
+                    )
+                table_resets.set_upstream(schema_dump)
+                totalTasks += 1
+
+                schema_restore = KubernetesPodOperator.partial(
+                    task_id="schema-restore-" + str(input_idx),
+                    namespace=NAMESPACE,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    get_logs=True,
+                    env_vars=k8s_pg_targetdb_envvars,
+                    secrets=secrets,
+                    affinity=affinity,
+                    # resources = {
+                    #     "request_memory": "256Mi"
+                    # },
+                    name="agent-pg-schemarestore",
+                    is_delete_operator_pod=is_delete_operator_pod,
+                    in_cluster=True,
+                    hostnetwork=False,
+                    on_failure_callback=post_logs,
+                    on_success_callback=post_taskend,
+                    ).expand(
+                        cmds=schema_restore_cmds(input["uuid"], "{}".format(BaseHook.get_connection(target_db).schema))
+                    )
+                schema_restore.set_upstream(table_resets)
+                totalTasks += 1
+
+                data_dump = KubernetesPodOperator.partial(
+                    task_id="data-dump-" + str(input_idx),
+                    namespace=NAMESPACE,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
+                    get_logs=True,
+                    env_vars=k8s_pg_source_envvars,
+                    secrets=secrets,
+                    affinity=affinity,
+                    # resources = {
+                    #     "request_memory": "256Mi"
+                    # },
+                    name="agent-pg-datadump",
+                    is_delete_operator_pod=is_delete_operator_pod,
+                    in_cluster=True,
+                    hostnetwork=False,
+                    on_failure_callback=post_logs,
+                    on_success_callback=post_taskend,
+                    #max_active_tis_per_dag=1
+                    ).expand(
+                        cmds=data_dump_cmds(input["uuid"])
+                    )
+                data_dump.set_upstream(schema_restore)
+                copyTasks += 1
+
+                restore_data = KubernetesPodOperator.partial(
+                    task_id="restore-data-" + str(input_idx),
+                    namespace=NAMESPACE,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
+                    get_logs=True,
+                    env_vars=k8s_pg_targetdb_envvars,
+                    secrets=secrets,
+                    affinity=affinity,
+                    # resources = {
+                    #     "request_memory": "256Mi"
+                    # },
+                    name="agent-restore-data",
+                    is_delete_operator_pod=is_delete_operator_pod,
+                    in_cluster=True,
+                    hostnetwork=False,
+                    on_failure_callback=post_logs,
+                    on_success_callback=post_taskend,
+                    ).expand(
+                        cmds=restore_data_cmds(input["uuid"])
+                    )
+                restore_data.set_upstream(data_dump)
+                copyTasks += 1
+
+                restore_fk_constraints = KubernetesPodOperator.partial(
+                    task_id="restore-fk-constraints-" + str(input_idx),
+                    namespace=NAMESPACE,
+                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                    image_pull_policy="Always",
+                    get_logs=True,
+                    env_vars=k8s_pg_targetdb_envvars,
+                    secrets=secrets,
+                    affinity=affinity,
+                    # resources = {
+                    #     "request_memory": "256Mi"
+                    # },
+                    name="restore-fk-constraints",
+                    is_delete_operator_pod=is_delete_operator_pod,
+                    in_cluster=True,
+                    hostnetwork=False,
+                    on_failure_callback=post_logs,
+                    on_success_callback=post_taskend,
+                    ).expand(
+                        cmds=restore_fk_constraints_cmd(input["uuid"])
+                    )
+                restore_fk_constraints.set_upstream(restore_data)
+                totalTasks += 1
+
+        ### data feeds
 
         if s3UploadEnabled:
             dfSecrets = []
@@ -1368,7 +798,7 @@ try:
         else:
             s3Upload = DummyOperator(task_id="s3upload-noop", on_success_callback=post_taskend)
         totalTasks += 1
-        s3Upload.set_upstream(table_dumps)
+        s3Upload.set_upstream(restore_fk_constraints)
 
         if customEnabled:
             dfSecrets = []
@@ -1397,141 +827,203 @@ try:
                 on_success_callback=post_taskend,
                 trigger_rule='none_failed'
                 )
-            custom.set_upstream(table_dumps)
+            custom.set_upstream(restore_fk_constraints)
         else:
             custom = DummyOperator(task_id="custom-noop", trigger_rule='none_failed', on_success_callback=post_taskend)
         totalTasks += 1
-        custom.set_upstream(table_dumps)
+        custom.set_upstream(restore_fk_constraints)
 
         if digitalTwinEnabled:
             input_idx = 0
             for input in wf_config["inputs"]:
-                dfSecrets = []
+                if input["inputFunction"] == "source":
+                    dfSecrets = []
 
-                k8s_pg_twin_envvars = {
-                    "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host,
-                    "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
-                    "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
-                    "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
-                    "API_URL": API_URL,
-                    "CONNECTION": "digital-twin"
-                }
-                twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
-                if twin_extra:
-                    if "sslmode" in twin_extra:
-                        k8s_pg_twin_envvars["PGSSLMODE"] = twin_extra["sslmode"]
-                    if "sslrootcert" in twin_extra:
-                        k8s_pg_twin_envvars["PGSSLROOTCERT"] = twin_extra["sslrootcert"]
-                        dfSecrets.append(Secret('volume', "/pgcerts-secrets/" + digitalTwinConfig["dataFeedConfig"]["inputSource"], "pgcert-" + digitalTwinConfig["dataFeedConfig"]["inputSource"]))
-                    if "sslcert" in twin_extra:
-                        # optional
-                        k8s_pg_twin_envvars["PGSSLCERT"] = twin_extra["sslcert"]
-                    if "sslkey" in extra:
-                        # optional
-                        k8s_pg_twin_envvars["PGSSLKEY"] = twin_extra["sslkey"]
+                    k8s_pg_twin_envvars = {
+                        "PGHOST": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).host,
+                        "PGUSER": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).login,
+                        "PGPASSWORD": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).password,
+                        "PGDATABASE": BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
+                        "API_URL": API_URL,
+                        "CONNECTION": "digital-twin"
+                    }
+                    twin_extra = json.loads(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra) if BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).extra else ""
+                    if twin_extra:
+                        if "sslmode" in twin_extra:
+                            k8s_pg_twin_envvars["PGSSLMODE"] = twin_extra["sslmode"]
+                        if "sslrootcert" in twin_extra:
+                            k8s_pg_twin_envvars["PGSSLROOTCERT"] = twin_extra["sslrootcert"]
+                            dfSecrets.append(Secret('volume', "/pgcerts-secrets/" + digitalTwinConfig["dataFeedConfig"]["inputSource"], "pgcert-" + digitalTwinConfig["dataFeedConfig"]["inputSource"]))
+                        if "sslcert" in twin_extra:
+                            # optional
+                            k8s_pg_twin_envvars["PGSSLCERT"] = twin_extra["sslcert"]
+                        if "sslkey" in extra:
+                            # optional
+                            k8s_pg_twin_envvars["PGSSLKEY"] = twin_extra["sslkey"]
 
-                dt_table_resets = KubernetesPodOperator.partial(
-                    task_id="table-resets-dt-" + str(input_idx),
-                    namespace=NAMESPACE,
-                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                    image_pull_policy="Always",
-                    get_logs=True,
-                    env_vars=k8s_pg_twin_envvars,
-                    secrets=dfSecrets,
-                    affinity=affinity,
-                    # resources = {
-                    #     "request_memory": "256Mi"
-                    # },
-                    name="agent-pg-tableresets-dt",
-                    is_delete_operator_pod=is_delete_operator_pod,
-                    in_cluster=True,
-                    hostnetwork=False,
-                    on_failure_callback=post_logs,
-                    on_success_callback=post_taskend,
-                    ).expand(
-                        cmds=gen_table_resets(input["uuid"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema), get_source_db(input["uuid"]), "")
-                    )
-                dt_table_resets.set_upstream(table_dumps)
+                    unique_email_generator = init_unique_email_generator(get_transformation_db())
+                    unique_email_generator.set_upstream(restore_fk_constraints)
+                    totalTasks += 1
 
-                dt_schema_restore = KubernetesPodOperator.partial(
-                    task_id="schema-restore-digitaltwin-" + str(input_idx),
-                    namespace=NAMESPACE,
-                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                    image_pull_policy="Always",
-                    get_logs=True,
-                    env_vars=k8s_pg_twin_envvars,
-                    secrets=dfSecrets,
-                    affinity=affinity,
-                    # resources = {
-                    #     "request_memory": "256Mi"
-                    # },
-                    name="agent-pg-schemarestore-digitaltwin",
-                    is_delete_operator_pod=is_delete_operator_pod,
-                    in_cluster=True,
-                    hostnetwork=False,
-                    on_failure_callback=post_logs,
-                    on_success_callback=post_taskend
-                    ).expand(
-                        cmds=schema_restore_cmds(input["uuid"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
-                    )
-                dt_schema_restore.set_upstream(dt_table_resets)
+                    apply_security_labels = PostgresOperator.partial(
+                        task_id='apply-security-labels',
+                        postgres_conn_id='redacticsDB',
+                        database='redactics_tmp',
+                        on_failure_callback=post_logs,
+                        on_success_callback=post_taskend,
+                        trigger_rule='none_failed'
+                        ).expand(
+                            sql=set_security_label_cmds()
+                        )
+                    apply_security_labels.set_upstream(unique_email_generator)
 
-                trigger_drop_fk_contraints_dt = drop_fk_constraints(get_digital_twin())
-                totalTasks += 1
-                trigger_drop_fk_contraints_dt.set_upstream(dt_schema_restore)
+                    table_dumps = KubernetesPodOperator.partial(
+                        task_id="dump-tables",
+                        namespace=NAMESPACE,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
+                        get_logs=True,
+                        env_vars=k8s_pg_targetdb_envvars,
+                        secrets=secrets,
+                        affinity=affinity,
+                        # resources = {
+                        #     "request_memory": "256Mi"
+                        # },
+                        name="agent-dump-tables",
+                        is_delete_operator_pod=is_delete_operator_pod,
+                        in_cluster=True,
+                        hostnetwork=False,
+                        on_failure_callback=post_logs,
+                        on_success_callback=post_taskend,
+                        #trigger_rule='all_done'
+                        ).expand(
+                            cmds=table_dump_cmds(outputs, input["uuid"])
+                        )
+                    table_dumps.set_upstream(apply_security_labels)
+                    copyTasks += 1
+                    input_idx += 1
 
-                primary_key_schema = conditional_primary_key_init()
-                totalTasks += 1
-                primary_key_schema.set_upstream(dt_schema_restore)
+                    dt_table_resets = KubernetesPodOperator.partial(
+                        task_id="table-resets-dt-" + str(input_idx),
+                        namespace=NAMESPACE,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
+                        get_logs=True,
+                        env_vars=k8s_pg_twin_envvars,
+                        secrets=dfSecrets,
+                        affinity=affinity,
+                        # resources = {
+                        #     "request_memory": "256Mi"
+                        # },
+                        name="agent-pg-tableresets-dt",
+                        is_delete_operator_pod=is_delete_operator_pod,
+                        in_cluster=True,
+                        hostnetwork=False,
+                        on_failure_callback=post_logs,
+                        on_success_callback=post_taskend,
+                        ).expand(
+                            cmds=gen_table_resets(input["uuid"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema), get_db(target_db))
+                        )
+                    dt_table_resets.set_upstream(table_dumps)
+                    totalTasks += 1
 
-                dt_data_restore = KubernetesPodOperator.partial(
-                    task_id="restore-data-digitaltwin-" + str(input_idx),
-                    namespace=NAMESPACE,
-                    image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
-                    image_pull_policy="Always",
-                    get_logs=True,
-                    env_vars=k8s_pg_twin_envvars,
-                    secrets=dfSecrets,
-                    affinity=affinity,
-                    # resources = {
-                    #     "request_memory": "256Mi"
-                    # },
-                    name="agent-restore-data-digitaltwin",
-                    is_delete_operator_pod=is_delete_operator_pod,
-                    in_cluster=True,
-                    hostnetwork=False,
-                    on_failure_callback=post_logs,
-                    on_success_callback=post_taskend,
-                    ).expand(
-                        cmds=gen_dt_table_restore(input["uuid"])
-                    )
-                dt_data_restore.set_upstream([trigger_drop_fk_contraints_dt, primary_key_schema])
-                input_idx += 1
+                    dt_schema_restore = KubernetesPodOperator.partial(
+                        task_id="schema-restore-digitaltwin-" + str(input_idx),
+                        namespace=NAMESPACE,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
+                        get_logs=True,
+                        env_vars=k8s_pg_twin_envvars,
+                        secrets=dfSecrets,
+                        affinity=affinity,
+                        # resources = {
+                        #     "request_memory": "256Mi"
+                        # },
+                        name="agent-pg-schemarestore-digitaltwin",
+                        is_delete_operator_pod=is_delete_operator_pod,
+                        in_cluster=True,
+                        hostnetwork=False,
+                        on_failure_callback=post_logs,
+                        on_success_callback=post_taskend
+                        ).expand(
+                            cmds=schema_restore_cmds(input["uuid"], "{}".format(BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema))
+                        )
+                    dt_schema_restore.set_upstream(dt_table_resets)
+
+                    dt_data_restore = KubernetesPodOperator.partial(
+                        task_id="restore-data-digitaltwin-" + str(input_idx),
+                        namespace=NAMESPACE,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
+                        get_logs=True,
+                        env_vars=k8s_pg_twin_envvars,
+                        secrets=dfSecrets,
+                        affinity=affinity,
+                        # resources = {
+                        #     "request_memory": "256Mi"
+                        # },
+                        name="agent-restore-data-digitaltwin",
+                        is_delete_operator_pod=is_delete_operator_pod,
+                        in_cluster=True,
+                        hostnetwork=False,
+                        on_failure_callback=post_logs,
+                        on_success_callback=post_taskend,
+                        ).expand(
+                            cmds=gen_dt_table_restore(input["uuid"])
+                        )
+                    dt_data_restore.set_upstream(dt_schema_restore)
+                    copyTasks += 1
+
+                    dt_restore_fk_constraints = KubernetesPodOperator.partial(
+                        task_id="dt-restore-fk-constraints-" + str(input_idx),
+                        namespace=NAMESPACE,
+                        image=REGISTRY_URL + "/postgres-client:" + PG_CLIENT_VERSION + "-" + AGENT_VERSION,
+                        image_pull_policy="Always",
+                        get_logs=True,
+                        env_vars=k8s_pg_twin_envvars,
+                        secrets=secrets,
+                        affinity=affinity,
+                        # resources = {
+                        #     "request_memory": "256Mi"
+                        # },
+                        name="dt-restore-fk-constraints",
+                        is_delete_operator_pod=is_delete_operator_pod,
+                        in_cluster=True,
+                        hostnetwork=False,
+                        on_failure_callback=post_logs,
+                        on_success_callback=post_taskend,
+                        ).expand(
+                            cmds=restore_fk_constraints_cmd(input["uuid"])
+                        )
+                    dt_restore_fk_constraints.set_upstream(dt_data_restore)
+                    totalTasks += 1
+
+                    if digitalTwinConfig["dataFeedConfig"]["enablePostUpdatePreparedStatements"]:
+                        apply_prepared_statements = PostgresOperator.partial(
+                            task_id='apply-prepared-statements',
+                            postgres_conn_id=digitalTwinConfig["dataFeedConfig"]["inputSource"],
+                            database=BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
+                            parameters=digitalTwinConfig["dataFeedConfig"]["postUpdateKeyValues"],
+                            on_failure_callback=post_logs,
+                            on_success_callback=post_taskend,
+                            trigger_rule='none_failed'
+                            ).expand(
+                                sql=get_prepared_statements()
+                            )
+                        apply_prepared_statements.set_upstream([s3Upload, custom, dt_restore_fk_constraints])
+                        totalTasks += 1
+                    else:
+                        apply_prepared_statements = DummyOperator(task_id="apply-prepared-statements-noop", on_success_callback=post_taskend, trigger_rule='none_failed')
+                        apply_prepared_statements.set_upstream([s3Upload, custom, dt_restore_fk_constraints])
+                        totalTasks += 1
+                    
+                    input_idx += 1
         else:
-            dt_data_restore = DummyOperator(task_id="dt-noop", on_success_callback=post_taskend)
+            apply_prepared_statements = DummyOperator(task_id="dt-noop", on_success_callback=post_taskend)
             totalTasks += 1
-            dt_data_restore.set_upstream([delta_restore, table_dumps])
+            apply_prepared_statements.set_upstream(restore_fk_constraints)
         
         ### end data feeds
-
-        if digitalTwinEnabled and digitalTwinConfig["dataFeedConfig"]["enablePostUpdatePreparedStatements"]:
-            apply_prepared_statements = PostgresOperator.partial(
-                task_id='apply-prepared-statements',
-                postgres_conn_id=digitalTwinConfig["dataFeedConfig"]["inputSource"],
-                database=BaseHook.get_connection(digitalTwinConfig["dataFeedConfig"]["inputSource"]).schema,
-                parameters=digitalTwinConfig["dataFeedConfig"]["postUpdateKeyValues"],
-                on_failure_callback=post_logs,
-                on_success_callback=post_taskend,
-                trigger_rule='none_failed'
-                ).expand(
-                    sql=get_prepared_statements()
-                )
-            apply_prepared_statements.set_upstream([s3Upload, custom, dt_data_restore, dt_delta_restore])
-            totalTasks += 1
-        else:
-            apply_prepared_statements = DummyOperator(task_id="apply-prepared-statements-noop", on_success_callback=post_taskend, trigger_rule='none_failed')
-            apply_prepared_statements.set_upstream([s3Upload, custom, dt_data_restore, dt_delta_restore])
-            totalTasks += 1
 
         terminate_workflow = terminate_wf()
         terminate_workflow.set_upstream(apply_prepared_statements)

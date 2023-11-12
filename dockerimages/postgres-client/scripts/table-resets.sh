@@ -4,9 +4,9 @@ set -exo pipefail
 
 WORKFLOW=$1
 TARGET_DATABASE=$2
-TABLES=$3
-EXTENSIONS=$4
-OVERRIDE_SCHEMA=$5
+INPUT=$3
+TABLES=$4
+EXTENSIONS=$5
 EXTENSIONS_SCHEMA=$6
 
 /scripts/prep-certs.sh
@@ -22,6 +22,9 @@ then
     printf "CREATE SCHEMA IF NOT EXISTS \"$EXTENSIONS_SCHEMA\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql 
 fi
 
+# drop foreign key constraints
+curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Finput-${INPUT}-drop-constraints.sql | psql
+
 for t in "${tables[@]}"
 do
     schema=$(echo $t | sed -e "s/\..\+$//")
@@ -33,21 +36,7 @@ do
         printf "CREATE SCHEMA IF NOT EXISTS \"$schema\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
         FOUND_SCHEMA+=(${schema})
     fi
-    printf "DROP TABLE IF EXISTS \"${schema}\".\"${table}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-
-    if [ ! -z "$OVERRIDE_SCHEMA" ]
-    then
-        schema=$OVERRIDE_SCHEMA
-        if [[ ! " ${FOUND_SCHEMA[*]} " =~ " ${schema} " ]]; then
-            # create target schema
-            echo "Creating SQL to clean table ${schema}.${table}"
-            printf "CREATE SCHEMA IF NOT EXISTS \"$schema\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-            printf "GRANT ALL ON SCHEMA \"$schema\" TO postgres;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-            printf "GRANT ALL ON SCHEMA \"$schema\" TO \"$schema\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-            FOUND_SCHEMA+=(${schema})
-        fi
-        printf "DROP TABLE IF EXISTS \"${schema}\".\"${table}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
-    fi
+    printf "DROP TABLE IF EXISTS \"${schema}\".\"${table}\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
 done
 
 IFS=', ' read -r -a extensions <<< "$EXTENSIONS"

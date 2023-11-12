@@ -283,6 +283,7 @@ export async function getWorkflow(req: Request, res: Response) {
           tableSelection: i.dataValues.tableSelection,
           fullcopies: fullCopies,
           extensionsSchema: i.dataValues.Input.dataValues.extensionsSchema || 'public',
+          inputFunction: i.dataValues.Input.dataValues.inputFunction,
           enabled: i.dataValues.enabled,
         });
       }
@@ -425,12 +426,8 @@ export async function getWorkflow(req: Request, res: Response) {
       agentId: agent.dataValues.uuid,
       workflowType: workflow.dataValues.workflowType,
       schedule: workflow.dataValues.schedule,
-      // TODO: remove once users are using Agent 2.5.0+
-      deltaUpdateField: workflow.dataValues.deltaUpdateField,
       redactRules,
       indexedRedactRules,
-      userSearchEmailField: workflow.dataValues.userSearchEmailField,
-      userSearchEmailRelations: workflow.dataValues.userSearchEmailRelations,
       export: exportTableDataConfig,
       dataFeeds,
       inputs,

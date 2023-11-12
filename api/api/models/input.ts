@@ -25,6 +25,10 @@ const InputModel = Sequelize.define('Input', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  inputFunction: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
   diskSize: {
     type: DataTypes.INTEGER,
     allowNull: true,
