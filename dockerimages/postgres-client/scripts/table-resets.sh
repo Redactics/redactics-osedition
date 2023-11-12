@@ -22,7 +22,7 @@ then
     printf "CREATE SCHEMA IF NOT EXISTS \"$EXTENSIONS_SCHEMA\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql 
 fi
 
-# drop foreign key constraints
+# drop foreign key constraints (required for individual table drops without cascade)
 curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Finput-${INPUT}-drop-constraints.sql | psql
 
 for t in "${tables[@]}"

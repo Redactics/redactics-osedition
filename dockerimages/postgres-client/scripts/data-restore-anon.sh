@@ -4,6 +4,7 @@ set -exo pipefail
 
 WORKFLOW=$1
 TABLE=$2
+INPUT=$3
 TABLE_NOQUOTES=${TABLE//"\""/}
 # tables are limited to 63 characters, and strip quotation marks
 SCHEMA=$(echo $TABLE | cut -d "." -f 1)
@@ -19,6 +20,10 @@ check=$(curl -s http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQU
 if [ "$check" != "Not Found" ]
 then
     # reset table in the event of task restarts
+
+    # drop foreign key constraints (required for table truncations)
+    curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Finput-${INPUT}-drop-constraints.sql | psql
+
     psql -c "TRUNCATE TABLE ${DEST_TABLE};"
     curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Ftable-${TABLE_NOQUOTES}.csv | psql -c "\copy ${DEST_TABLE} from stdin DELIMITER ',' csv header;"
 fi

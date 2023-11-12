@@ -539,7 +539,7 @@ try:
                         schema = t.split('.')[0]
                         table = t.split('.')[1]
                        
-                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\""])
+                        cmds.append(["/scripts/data-restore-anon.sh", dag_name, "\"" + dag_name + "\".\"" + table + "\"", input_id])
             return cmds
 
         @task(on_failure_callback=post_logs)

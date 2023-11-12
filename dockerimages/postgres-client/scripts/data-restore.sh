@@ -19,7 +19,7 @@ if [ "$check" != "Not Found" ]
 then
     # reset table in the event of task restarts
 
-    # drop foreign key constraints
+    # drop foreign key constraints (required for table truncations)
     curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Finput-${INPUT}-drop-constraints.sql | psql
 
     psql -c "TRUNCATE TABLE \"${SCHEMA}\".\"${TABLE_NOSCHEMA}\";"
