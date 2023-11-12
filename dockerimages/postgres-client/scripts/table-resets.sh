@@ -36,7 +36,7 @@ do
         printf "CREATE SCHEMA IF NOT EXISTS \"$schema\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
         FOUND_SCHEMA+=(${schema})
     fi
-    printf "DROP TABLE IF EXISTS \"${schema}\".\"${table}\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+    printf "DROP TABLE IF EXISTS \"${schema}\".\"${table}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql
 done
 
 IFS=', ' read -r -a extensions <<< "$EXTENSIONS"
