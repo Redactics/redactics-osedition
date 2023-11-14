@@ -23,6 +23,7 @@ spec:
       containers:
       - name: db-migrate
         image: "{{ .Values.image.repository }}:{{ $.Chart.Version }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
         command: ["db-migrate", "up"]
         env:
         - name: NODE_ENV

@@ -327,10 +327,11 @@ try:
                 #runPlan = set_run_plan(**context)
                 totalTasks = 0
                 for input in wf_config["inputs"]:
-                    tableListing = set_input_tables(input, get_db(input["uuid"]), context)
-                    print("TABLE LISTING")
-                    print(tableListing)
-                    Variable.set(dag_name + "-erl-tableListing-" + context["run_id"], json.dumps(tableListing))
+                    if input["inputFunction"] == "source":
+                        tableListing = set_input_tables(input, get_db(input["uuid"]), context)
+                        print("TABLE LISTING")
+                        print(tableListing)
+                        Variable.set(dag_name + "-erl-tableListing-" + context["run_id"], json.dumps(tableListing))
                 totalTasks = totalTasks + tally_dynamic_tasks(tableListing)
                 Variable.set(dag_name + "-erl-totalTasks-" + context["run_id"], totalTasks)
                 Variable.set(dag_name + "-erl-currentWorkflowJobId", response["uuid"])
