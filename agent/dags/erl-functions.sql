@@ -50,14 +50,14 @@ AS $$
 DECLARE
     seq record;
     last_value bigint;
-	sequences text := '';
+	  sequences text := '';
 BEGIN
     FOR seq IN EXECUTE 'SELECT * FROM information_schema.sequences WHERE sequence_schema = ''' || schema || '''' LOOP
         EXECUTE 'SELECT last_value FROM ' || seq.sequence_name || '' INTO last_value;
         sequences := sequences || 'SELECT SETVAL(''' || schema || '.' || seq.sequence_name ||
-       ''', ' || last_value || ');'  || E'\n';
+       ''', ' || last_value || ');' || E'\n';
     END LOOP;
-	RETURN sequences;
+	  RETURN sequences;
 END;
 $$;
 
