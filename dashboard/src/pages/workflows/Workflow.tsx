@@ -349,7 +349,7 @@ class Workflow extends React.Component<IProps, IState> {
       snackbarText: ""
     };
 
-    if (Object.keys(this.props.workflow.exportTableDataConfig).length) {
+    if (this.props.workflow.exportTableDataConfig && Object.keys(this.props.workflow.exportTableDataConfig).length) {
       Object.keys(this.props.workflow.exportTableDataConfig).forEach((idx:any) => {
         const table:string = Object.keys(this.props.workflow.exportTableDataConfig[idx])[0];
         const config:any = this.props.workflow.exportTableDataConfig[idx][table];

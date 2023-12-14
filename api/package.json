@@ -29,6 +29,7 @@
     "cors": "^2.8.5",
     "crypto-random-string": "^3.2.0",
     "date-fns": "^2.16.1",
+    "db-migrate": "^0.11.14",
     "db-migrate-pg": "^1.2.2",
     "express": "^4.17.1",
     "express-validator": "^6.9.0",

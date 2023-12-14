@@ -19,7 +19,7 @@ from airflow.models import Variable
 
 
 # version bumping will result in reinstall of UDFs
-UDF_VERSION = 36
+UDF_VERSION = 38
 TABLE_SCHEMA_VERSION = 3
 
 dag_name = os.path.basename(__file__).split('.')[0]
@@ -31,27 +31,40 @@ REGISTRY_URL = "redactics"
 installedUDFVersion = Variable.get(dag_name + '-installedUDFVersion', default_var=0)
 tableSchemaVersion = Variable.get(dag_name + '-tableSchemaVersion', default_var=0)
 
-def get_landing_db(landing_db):
-    host = BaseHook.get_connection("redacticsDB").host
-    login = BaseHook.get_connection("redacticsDB").login
-    password = BaseHook.get_connection("redacticsDB").password
-    extra = json.loads(BaseHook.get_connection("redacticsDB").extra) if BaseHook.get_connection("redacticsDB").extra else ""
+def get_landing_db_name(wf_config):
+    # returns landing/target DB name
+    return wf_config["name"].lower().replace(" ", "")
+
+def get_landing_db_id(wf_config):
+    # returns landing/target DB UUID
+    landing_db = ""
+    for input in wf_config["inputs"]:
+        if input["inputFunction"] == "target":
+            landing_db = input["uuid"]
+    return landing_db
+
+def get_landing_db_conn(landing_db_conn_id, landing_db_name):
+    # returns landing/target DB connection
+    host = BaseHook.get_connection(landing_db_conn_id).host
+    login = BaseHook.get_connection(landing_db_conn_id).login
+    password = BaseHook.get_connection(landing_db_conn_id).password
+    extra = json.loads(BaseHook.get_connection(landing_db_conn_id).extra) if BaseHook.get_connection(landing_db_conn_id).extra else ""
 
     try:
         connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
                             .format(login=login, password=password,
-                                    host=host, schema=landing_db), connect_args=extra, echo=False)
+                                    host=host, schema=landing_db_name), connect_args=extra, echo=False)
         connection.connect()
     except OperationalError:
         # landing DB has not been created yet, create landing DB
         connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
                             .format(login=login, password=password,
                                     host=host, schema="postgres"), connect_args=extra, echo=False)
-        connection.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE DATABASE " + landing_db)
+        connection.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE DATABASE " + landing_db_name)
 
     connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
                             .format(login=login, password=password,
-                                    host=host, schema=landing_db), connect_args=extra, echo=False)
+                                    host=host, schema=landing_db_name), connect_args=extra, echo=False)
     return connection
 
 default_args = {
@@ -89,13 +102,13 @@ def replication():
             print("TRACE", stackTrace)
         except:
             # headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'x-api-key': API_KEY}
-            # apiUrl = API_URL + '/workflow/' + Variable.get(dag_name + "-piiscanner-currentWorkflowJobId") + '/postException'
+            # api_url = API_URL + '/workflow/' + Variable.get(dag_name + "-piiscanner-currentWorkflowJobId") + '/postException'
             # payload = {
             #     'exception': 'an error occurred, cannot retrieve log output',
             #     'stackTrace': ''
             # }
             # payloadJSON = json.dumps(payload)
-            # request = requests.put(apiUrl, data=payloadJSON, headers=headers)
+            # request = requests.put(api_url, data=payloadJSON, headers=headers)
             # response = request.json()
             # try:
             #     if request.status_code != 200:
@@ -108,93 +121,115 @@ def replication():
 
     @task(on_failure_callback=post_logs)
     def init_landing_db(**context):
-        redactics_tmp = None
         if int(installedUDFVersion) != UDF_VERSION:
             # update UDFs
             print("UPDATING UDFS")
             
             # get landing database (workflow) name
-            apiUrl = API_URL + '/workflow/' + dag_name
-            request = requests.get(apiUrl)
+            api_url = API_URL + '/workflow/' + dag_name
+            request = requests.get(api_url)
             wf_config = request.json()
             print(wf_config)
-            landing_db = wf_config["name"].lower().replace(" ", "")
+            landing_db_name = get_landing_db_name(wf_config)
+            landing_db_conn_id = get_landing_db_id(wf_config)
+            print("LANDING DB CONN ID")
+            print(landing_db_conn_id)
+            print("LANDING DB NAME")
+            print(landing_db_name)
+            landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
 
-            with get_landing_db(landing_db).connect() as con:
+            with landing_db_conn.connect() as con:
                 with open("/opt/airflow/dags/replication-functions.sql") as file:
                     query = text(file.read())
                     con.execution_options(isolation_level="AUTOCOMMIT").execute(query)
 
             Variable.set(dag_name + '-installedUDFVersion', UDF_VERSION)
-            Variable.set(dag_name + '-landingDB', landing_db)
+            Variable.set(dag_name + '-landingDBName', landing_db_name)
+            Variable.set(dag_name + '-landingDBConnID', landing_db_conn_id)
         else:
-            landing_db = Variable.get(dag_name + '-landingDB')
+            landing_db_conn_id = Variable.get(dag_name + '-landingDBConnID')
+            landing_db_name = Variable.get(dag_name + '-landingDBName')
+            print("LANDING DB CONN ID")
+            print(landing_db_conn_id)
+            print("LANDING DB NAME")
+            print(landing_db_name)
+            landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
 
         if int(tableSchemaVersion) == 0:
             # preload anon into future sessions
-            redactics_tmp = get_landing_db(Variable.get(dag_name + '-landingDB'))
-            redactics_tmp.execution_options(isolation_level="AUTOCOMMIT").execute("ALTER DATABASE %(database)s SET session_preload_libraries = 'anon'", {
-                'database': AsIs(landing_db)
+            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("ALTER DATABASE %(database)s SET session_preload_libraries = 'anon'", {
+                'database': AsIs(landing_db_name)
             })
         
         if int(tableSchemaVersion) != TABLE_SCHEMA_VERSION:
             # update table schema
             print("UPDATING TABLE SCHEMA")
 
-            redactics_tmp = get_landing_db(landing_db)
-            with redactics_tmp.connect() as con:
+            with landing_db_conn.connect() as con:
                 with open("/opt/airflow/dags/replication-schema-1.sql") as file:
                     query = text(file.read())
                     con.execution_options(isolation_level="AUTOCOMMIT").execute(query)
             
             if int(tableSchemaVersion) == 0:
                 print("INIT ANON EXTENSION")
-                redactics_tmp.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE EXTENSION anon CASCADE")
-                redactics_tmp.execution_options(isolation_level="AUTOCOMMIT").execute("SELECT anon.init()")
+                landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE EXTENSION anon CASCADE")
+                landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("SELECT anon.init()")
 
             Variable.set(dag_name + '-tableSchemaVersion', TABLE_SCHEMA_VERSION)
 
         # check on Redactics role
         if "LANDING_USERS" in os.environ:
-            if not redactics_tmp:
-                redactics_tmp = get_landing_db(landing_db)
             landing_users = json.loads(os.environ['LANDING_USERS'])
             for user in landing_users:
                 landing_db_user = user["user"]
                 landing_db_pass = user["password"]
-                check_landing_user = redactics_tmp.execute("SELECT * FROM pg_roles WHERE rolname = %(username)s", {
+                check_landing_user = landing_db_conn.execute("SELECT * FROM pg_roles WHERE rolname = %(username)s", {
                     'username': landing_db_user
                 }).fetchone()
                 if not check_landing_user:
                     print("CREATE LANDING DB USER " + landing_db_user)
-                    redactics_tmp.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE ROLE %(username)s WITH LOGIN PASSWORD %(password)s", {
+                    landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE ROLE %(username)s WITH LOGIN PASSWORD %(password)s", {
                         'username': AsIs(landing_db_user),
                         'password': landing_db_pass
                     })
                     # create record of landing db user so that grants can be issued on new schema creation
-                    check_landing_user = redactics_tmp.execute("SELECT * FROM redactics_landingdb_users WHERE username = %(username)s", {
+                    check_landing_user = landing_db_conn.execute("SELECT * FROM redactics_landingdb_users WHERE username = %(username)s", {
                         'username': landing_db_user
                     }).fetchone()
                     if not check_landing_user:
-                        redactics_tmp.execute("INSERT INTO redactics_landingdb_users (username) VALUES (%(username)s)", {
+                        landing_db_conn.execute("INSERT INTO redactics_landingdb_users (username) VALUES (%(username)s)", {
                             'username': landing_db_user
                         })
 
     @task(on_failure_callback=post_logs)
     def update_redaction_rules(**context):
         print("UPDATING REDACT RULES")
-        apiUrl = API_URL + '/workflow/' + dag_name
-        request = requests.get(apiUrl)
+        landing_db_conn = None
+        api_url = API_URL + '/workflow/' + dag_name
+        request = requests.get(api_url)
         wf_config = request.json()
         print(wf_config)
         redact_rules = wf_config["redactRules"]
+        ddl_trigger_init = Variable.get(dag_name + '-ddlTriggerInit', default_var=False)
+        if len(redact_rules) and not ddl_trigger_init:
+            print("APPLY DDL TRIGGERS")
+            landing_db_name = get_landing_db_name(wf_config)
+            landing_db_conn_id = get_landing_db_id(wf_config)
+            landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+            
+            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("DROP EVENT TRIGGER IF EXISTS ddl_trigger")
+            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func()")
+            Variable.set(dag_name + '-ddlTriggerInit', True)
         for rule in redact_rules:
+            if not landing_db_conn:
+                landing_db_name = get_landing_db_name(wf_config)
+                landing_db_conn_id = get_landing_db_id(wf_config)
+                landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+
             last_updated = parser.parse(Variable.get(dag_name + '-lastUpdatedRedactRules', default_var='')) if Variable.get(dag_name + '-lastUpdatedRedactRules', default_var='') else ''
             if not last_updated or (rule["updatedAt"] and parser.parse(rule["updatedAt"]) > last_updated):
                 # upsert to table
-                landing_db = Variable.get(dag_name + '-landingDB')
-                redactics_tmp = get_landing_db(landing_db)
-                rule_check = redactics_tmp.execute("SELECT * FROM redactics_masking_rules WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
+                rule_check = landing_db_conn.execute("SELECT * FROM redactics_masking_rules WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
                     'schema': rule["schema"],
                     'table_name': rule["table"],
                     'column_name': rule["column"]
@@ -203,7 +238,7 @@ def replication():
                 if not rule_check:
                     # insert
                     print("INSERT MASKING RULE")
-                    redactics_tmp.execute("INSERT INTO redactics_masking_rules (schema, table_name, column_name, rule, redact_data, updated_at) VALUES (%(schema)s, %(table_name)s, %(column_name)s, %(rule)s, %(redact_data)s, %(updated_at)s)", {
+                    landing_db_conn.execute("INSERT INTO redactics_masking_rules (schema, table_name, column_name, rule, redact_data, updated_at) VALUES (%(schema)s, %(table_name)s, %(column_name)s, %(rule)s, %(redact_data)s, %(updated_at)s)", {
                         'schema': rule["schema"],
                         'table_name': rule["table"],
                         'column_name': rule["column"],
@@ -214,7 +249,7 @@ def replication():
                 else:
                     # update
                     print("UPDATE MASKING RULE")
-                    redactics_tmp.execute("UPDATE redactics_masking_rules SET rule = %(rule)s, redact_data = %(redact_data)s, updated_at = %(updated_at)s WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
+                    landing_db_conn.execute("UPDATE redactics_masking_rules SET rule = %(rule)s, redact_data = %(redact_data)s, updated_at = %(updated_at)s WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
                         'schema': rule["schema"],
                         'table_name': rule["table"],
                         'column_name': rule["column"],
@@ -223,13 +258,13 @@ def replication():
                         'updated_at': updated_at
                     })
                 # don't apply masking rules if the schema/table hasn't been created yet
-                table_check = redactics_tmp.execute("SELECT 1 FROM pg_tables WHERE schemaname = %(schema)s AND tablename = %(table_name)s", {
+                table_check = landing_db_conn.execute("SELECT 1 FROM pg_tables WHERE schemaname = %(schema)s AND tablename = %(table_name)s", {
                     'schema': rule["schema"],
                     'table_name': rule["table"]
                 }).fetchone()
                 if table_check:
                     print("APPLY MASKING RULES")
-                    redactics_tmp.execution_options(isolation_level="AUTOCOMMIT").execute("SELECT set_redactions(%(schema)s, %(table_name)s)", {
+                    landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("SELECT set_redactions(%(schema)s, %(table_name)s)", {
                         'schema': rule["schema"],
                         'table_name': rule["table"]
                     })

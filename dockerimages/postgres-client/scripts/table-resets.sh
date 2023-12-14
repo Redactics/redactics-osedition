@@ -22,9 +22,6 @@ then
     printf "CREATE SCHEMA IF NOT EXISTS \"$EXTENSIONS_SCHEMA\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql 
 fi
 
-# drop foreign key constraints (required for individual table drops without cascade)
-curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Finput-${INPUT}-drop-constraints.sql | psql
-
 for t in "${tables[@]}"
 do
     schema=$(echo $t | sed -e "s/\..\+$//")
@@ -34,6 +31,10 @@ do
     if [[ ! " ${FOUND_SCHEMA[*]} " =~ " ${schema} " ]]; then
         echo "Creating SQL to clean table ${schema}.${table}"
         printf "CREATE SCHEMA IF NOT EXISTS \"$schema\";\n" >> /tmp/${WORKFLOW}-drop-tables.sql
+
+        # drop foreign key constraints (required for individual table drops without cascade)
+        echo "Dropping foreign key constraints for ${schema}"
+        curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fschema-${schema}-drop-constraints.sql | psql
         FOUND_SCHEMA+=(${schema})
     fi
     printf "DROP TABLE IF EXISTS \"${schema}\".\"${table}\" CASCADE;\n" >> /tmp/${WORKFLOW}-drop-tables.sql

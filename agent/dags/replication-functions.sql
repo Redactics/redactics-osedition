@@ -163,7 +163,7 @@ BEGIN
             PERFORM set_redactions(source_schema, target_table);
 
             target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?(.*)\.(.*)(")?', '\3')));
-            EXECUTE 'CREATE TRIGGER "ct_trigger_' || r.objid || '" AFTER INSERT ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION insert_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
+            EXECUTE 'CREATE TRIGGER "it_trigger_' || r.objid || '" AFTER INSERT ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION insert_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
             EXECUTE 'CREATE TRIGGER "ut_trigger_' || r.objid || '" AFTER UPDATE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION update_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
             EXECUTE 'CREATE TRIGGER "dt_trigger_' || r.objid || '" AFTER DELETE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION delete_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
         elsif (r.command_tag = 'ALTER TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
@@ -352,8 +352,21 @@ BEGIN
 END;
 $$;
 
-DROP EVENT TRIGGER IF EXISTS ddl_trigger;
-CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func();
+CREATE OR REPLACE FUNCTION init_redactics_triggers()
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+DECLARE
+    redactions_defined bigint;
+BEGIN
+    EXECUTE 'SELECT count(*) FROM redactics_masking_rules' INTO redactions_defined;
+    if redactions_defined > 0 then
+        DROP EVENT TRIGGER IF EXISTS ddl_trigger;
+        CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func();
+    END IF;
+END;
+$$;
+SELECT init_redactics_triggers();
 
 CREATE OR REPLACE FUNCTION sql_drop_func()
   RETURNS event_trigger

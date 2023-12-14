@@ -369,6 +369,12 @@ spec:
               value: {{ .Values.audit.clientMinMessages | quote }}
             - name: POSTGRESQL_SHARED_PRELOAD_LIBRARIES
               value: {{ .Values.postgresqlSharedPreloadLibraries | quote }}
+            {{- if .Values.primary.persistence.dataSource.name }}
+            - name: PREP_REDACTICS_ENV
+              value: "true"
+            - name: REDACTICS_DBNAME
+              value: {{ .Values.redactics.dbname | quote }}
+            {{- end }}
             {{- if .Values.primary.extraEnvVars }}
             {{- include "common.tplvalues.render" (dict "value" .Values.primary.extraEnvVars "context" $) | nindent 12 }}
             {{- end }}

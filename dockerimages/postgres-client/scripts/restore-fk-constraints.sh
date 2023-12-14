@@ -3,8 +3,8 @@
 set -exo pipefail
 
 WORKFLOW=$1
-INPUT=$2
+SCHEMA=$2
 
 /scripts/prep-certs.sh
 
-curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Finput-${INPUT}-restore-constraints.sql | psql
+curl -fs http://agent-http-nas:3000/file/${WORKFLOW}%2Fschema-${SCHEMA}-restore-constraints.sql | psql
