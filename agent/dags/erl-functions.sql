@@ -40,3 +40,38 @@ BEGIN
 END
 $$
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER;
+
+CREATE OR REPLACE FUNCTION generate_sequences(
+  schema TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    seq record;
+    last_value bigint;
+	sequences text := '';
+BEGIN
+    FOR seq IN EXECUTE 'SELECT * FROM information_schema.sequences WHERE sequence_schema = ''' || schema || '''' LOOP
+        EXECUTE 'SELECT last_value FROM ' || seq.sequence_name || '' INTO last_value;
+        sequences := sequences || 'SELECT SETVAL(''' || schema || '.' || seq.sequence_name ||
+       ''', ' || last_value || ');'  || E'\n';
+    END LOOP;
+	RETURN sequences;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION init_redactics_triggers()
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+DECLARE
+    redactions_defined bigint;
+BEGIN
+    EXECUTE 'SELECT count(*) FROM redactics_masking_rules' INTO redactions_defined;
+    if redactions_defined > 0 then
+        DROP EVENT TRIGGER IF EXISTS ddl_trigger;
+        CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func();
+    END IF;
+END;
+$$;
