@@ -481,9 +481,10 @@ try:
             return cmds
         
         @task(on_failure_callback=post_logs)
-        def generate_sequences_cmd(input_id, **context):
+        def generate_sequences_cmd(input_id, connection, **context):
             cmds = []
             unique_schema = []
+            sequence_cmds = []
             input_tables = json.loads(Variable.get(dag_name + "-erl-tableListing-" + context["run_id"]))
             for input in wf_config["inputs"]:
                 if input["uuid"] == input_id:
@@ -491,7 +492,15 @@ try:
                         schema = t.split('.')[0]
                         if schema not in unique_schema:
                             unique_schema.append(schema)
-                            cmds.append(["/scripts/generate-sequences-sql.sh", dag_name, schema])
+
+                            # Nulogy sequence generation patch
+                            results = connection.execute("SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = '" + schema + "'").fetchall()
+                            if len(results):
+                                for seq in results:
+                                    result = connection.execute("SELECT last_value FROM " + schema + "." + seq["sequence_name"]).fetchone()
+                                    sequence_cmds.append("SELECT SETVAL('" + schema + "." + str(seq["sequence_name"]) + "', " + str(result["last_value"]) + ");")
+
+                            cmds.append(["/scripts/generate-sequences-sql.sh", dag_name, schema, "\n".join(sequence_cmds)])
             return cmds
         
         @task(on_failure_callback=post_logs)
@@ -694,7 +703,7 @@ try:
                     on_failure_callback=post_logs,
                     on_success_callback=post_taskend,
                     ).expand(
-                        cmds=generate_sequences_cmd(input["uuid"])
+                        cmds=generate_sequences_cmd(input["uuid"], get_db(input["uuid"]))
                     )
                 generate_sequences_sql.set_upstream([init_custom_functions, clean_dir])
                 totalTasks += 1
