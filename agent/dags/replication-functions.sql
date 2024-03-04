@@ -16,7 +16,7 @@ BEGIN
     source_schema := quote_ident(source_schema);
     target_table := quote_ident((SELECT REGEXP_REPLACE(TG_ARGV[1], '(")?[^.]+\.([^.]+).*(")?', '\2')));
 
-    if (source_schema NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+    if (source_schema NOT LIKE 'r\_%' AND source_schema NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
         redacted_columns := (SELECT anon.mask_filters(TG_ARGV[1]::REGCLASS));
         json_record := row_to_json(NEW);
         EXECUTE 'SELECT attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index JOIN pg_attribute ON attrelid = indrelid AND attnum = ANY(indkey) WHERE indrelid = ' || TG_RELID || ' AND indisprimary' INTO pk;
@@ -30,6 +30,48 @@ BEGIN
                 pk_val_int := jsonb_extract_path(json_record, pk.attname);
                 EXECUTE 'INSERT INTO ' || target_schema || '.' || target_table || ' SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ' WHERE ' || pk.attname || ' = ' || pk_val_int;
             END IF;
+        END IF;
+    END IF;
+RETURN NEW;
+END;
+$$
+LANGUAGE 'plpgsql';
+
+CREATE OR REPLACE FUNCTION insert_redactics_dlp_table_func()
+  RETURNS trigger AS
+$$
+DECLARE
+    source_schema varchar;
+    target_schema varchar;
+    target_table varchar;
+    redacted_columns varchar;
+    json_record jsonb;
+    pk record;
+    pk_val_int bigint;
+    pk_val_string varchar;
+BEGIN
+    source_schema := (SELECT REGEXP_REPLACE(TG_ARGV[0],'(")?([^.]+).*(")?','\2'));
+    target_schema := quote_ident('rq_' || source_schema);
+    source_schema := quote_ident(source_schema);
+    target_table := quote_ident((SELECT REGEXP_REPLACE(TG_ARGV[1], '(")?[^.]+\.([^.]+).*(")?', '\2')));
+
+    if (source_schema NOT LIKE 'r\_%' AND source_schema NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+        redacted_columns := (SELECT anon.mask_filters(TG_ARGV[1]::REGCLASS));
+        json_record := row_to_json(NEW);
+        EXECUTE 'SELECT attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index JOIN pg_attribute ON attrelid = indrelid AND attnum = ANY(indkey) WHERE indrelid = ' || TG_RELID || ' AND indisprimary' INTO pk;
+
+        if (pk IS NOT NULL) then
+            if (jsonb_extract_path(json_record, pk.attname)::varchar LIKE '"%"') then
+                -- non numeric primary key
+                pk_val_string := REPLACE(jsonb_extract_path(json_record, pk.attname)::varchar, '"', '');
+                EXECUTE 'INSERT INTO ' || target_schema || '.' || target_table || ' SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ' WHERE ' || pk.attname || ' = ''' || pk_val_string || '''';
+            else
+                pk_val_int := jsonb_extract_path(json_record, pk.attname);
+                EXECUTE 'INSERT INTO ' || target_schema || '.' || target_table || ' SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ' WHERE ' || pk.attname || ' = ' || pk_val_int;
+            END IF;
+
+            -- DLP queue
+            EXECUTE 'INSERT INTO redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || target_schema || ''', ''' || target_table || ''', current_timestamp)';
         END IF;
     END IF;
 RETURN NEW;
@@ -132,6 +174,7 @@ DECLARE
     inner_r record;
     source_schema varchar;
     target_schema varchar;
+    quarantine_schema varchar;
     source_table varchar;
     target_table varchar;
     source_columns int;
@@ -145,7 +188,7 @@ BEGIN
         source_schema := quote_ident(source_schema);
         target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?[^.]+\.([^.]+).*(")?', '\2')));
 
-        if (r.command_tag = 'CREATE TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+        if (r.command_tag = 'CREATE TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
             EXECUTE 'INSERT INTO public.redactics_oid_mapping ("table_name", "oid") VALUES (''' || r.object_identity || ''',' || r.objid || ')';
             target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?(.*)\.(.*)(")?', '\3')));
 
@@ -160,13 +203,13 @@ BEGIN
             END IF;
 
             EXECUTE 'CREATE TABLE IF NOT EXISTS ' || quote_ident(target_schema) || '.' || quote_ident(target_table) || ' (LIKE ' || r.object_identity || ' INCLUDING ALL)';
-            PERFORM set_redactions(source_schema, target_table);
+            PERFORM public.set_redactions(source_schema, target_table);
 
             target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?(.*)\.(.*)(")?', '\3')));
             EXECUTE 'CREATE TRIGGER "it_trigger_' || r.objid || '" AFTER INSERT ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION insert_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
             EXECUTE 'CREATE TRIGGER "ut_trigger_' || r.objid || '" AFTER UPDATE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION update_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
             EXECUTE 'CREATE TRIGGER "dt_trigger_' || r.objid || '" AFTER DELETE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION delete_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
-        elsif (r.command_tag = 'ALTER TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+        elsif (r.command_tag = 'ALTER TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
             -- compare new vs. old schema
             if (target_table NOT LIKE 'redactics\_%') then
                 EXECUTE 'SELECT count(*) FROM information_schema.columns WHERE table_schema=''' || source_schema || ''' AND table_name=''' || target_table || '''' INTO source_columns;
@@ -205,11 +248,113 @@ BEGIN
                 -- security labels need to be reapplied
                 PERFORM reapply_redactions(target_table);
             END IF;
-        elsif (r.command_tag = 'CREATE VIEW' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+        elsif (r.command_tag = 'CREATE VIEW' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
             PERFORM ddl_create_view(source_schema, r);
-        elsif (r.command_tag = 'CREATE INDEX' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+        elsif (r.command_tag = 'CREATE INDEX' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
             PERFORM ddl_create_index(source_schema, r);
-        elsif (r.command_tag = 'CREATE SEQUENCE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+        elsif (r.command_tag = 'CREATE SEQUENCE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+            PERFORM ddl_create_sequence(source_schema, r);
+        END IF;
+    END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ddl_dlp_trigger_func()
+  RETURNS event_trigger
+ LANGUAGE plpgsql
+  AS $$
+DECLARE 
+    r record;
+    u varchar;
+    inner_r record;
+    source_schema varchar;
+    target_schema varchar;
+    quarantine_schema varchar;
+    source_table varchar;
+    target_table varchar;
+    source_columns int;
+    target_columns int;
+    old_column record;
+    schema_check varchar;
+BEGIN
+    FOR r IN SELECT * FROM pg_event_trigger_ddl_commands() LOOP
+        source_schema := (SELECT REGEXP_REPLACE(r.object_identity,'(")?([^.]+).*(")?','\2'));
+        target_schema := quote_ident('r_' || source_schema);
+        quarantine_schema := quote_ident('rq_' || source_schema);
+        source_schema := quote_ident(source_schema);
+        target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?[^.]+\.([^.]+).*(")?', '\2')));
+
+        if (r.command_tag = 'CREATE TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+            EXECUTE 'INSERT INTO public.redactics_oid_mapping ("table_name", "oid") VALUES (''' || r.object_identity || ''',' || r.objid || ')';
+            target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?(.*)\.(.*)(")?', '\3')));
+
+            -- check if schema exists, if it doesn't create it and grant access to schema to all landing DB users
+            EXECUTE 'SELECT schema_name FROM information_schema.schemata WHERE schema_name = ''' || target_schema || '''' INTO schema_check;
+            if schema_check IS NULL then
+                EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || quarantine_schema;
+                EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || target_schema;
+                -- loop through table listing landing DB users and assign grants to target_schema
+                FOR u in EXECUTE 'SELECT username FROM redactics_landingdb_users' LOOP
+                    PERFORM redactics_grants(u, target_schema);
+                END LOOP;
+            END IF;
+
+            EXECUTE 'CREATE TABLE IF NOT EXISTS ' || quote_ident(quarantine_schema) || '.' || quote_ident(target_table) || ' (LIKE ' || r.object_identity || ' INCLUDING ALL)';
+            -- add DLP fields
+            EXECUTE 'ALTER TABLE ' || quote_ident(quarantine_schema) || '.' || quote_ident(target_table) || ' ADD COLUMN r_sensitive_data_scan timestamp';
+            EXECUTE 'CREATE INDEX r_sensitive_data_scan_idx ON ' || quote_ident(quarantine_schema) || '.' || quote_ident(target_table) || '(r_sensitive_data_scan)';
+            PERFORM public.set_redactions(quarantine_schema, target_table);
+
+            EXECUTE 'CREATE TABLE IF NOT EXISTS ' || quote_ident(target_schema) || '.' || quote_ident(target_table) || ' (LIKE ' || r.object_identity || ' INCLUDING ALL)';
+
+            target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?(.*)\.(.*)(")?', '\3')));
+            EXECUTE 'CREATE TRIGGER "it_trigger_' || r.objid || '" AFTER INSERT ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION insert_redactics_dlp_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
+            EXECUTE 'CREATE TRIGGER "ut_trigger_' || r.objid || '" AFTER UPDATE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION update_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
+            EXECUTE 'CREATE TRIGGER "dt_trigger_' || r.objid || '" AFTER DELETE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION delete_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
+        elsif (r.command_tag = 'ALTER TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+            -- compare new vs. old schema
+            if (target_table NOT LIKE 'redactics\_%') then
+                EXECUTE 'SELECT count(*) FROM information_schema.columns WHERE table_schema=''' || source_schema || ''' AND table_name=''' || target_table || '''' INTO source_columns;
+                EXECUTE 'SELECT count(*) FROM information_schema.columns WHERE table_schema=''' || target_schema || ''' AND table_name=''' || target_table || '''' INTO target_columns;
+                if (source_columns = target_columns) then
+                    -- change/rename column, look for renamed columns
+
+                    FOR inner_r IN EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || source_schema || ''' AND table_name = ''' || target_table || ''' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''')' LOOP
+                        -- find old column name based on ordinal position
+                        EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''' AND ordinal_position = ''' || inner_r.ordinal_position || '''' INTO old_column;
+                        PERFORM ddl_rename_col(target_schema, target_table, old_column.column_name::varchar, inner_r.column_name::varchar);
+                    END LOOP;
+
+                    -- find changed column properties
+                    FOR inner_r IN EXECUTE 'SELECT s.table_schema as s_table_schema, s.table_name as s_table_name, s.column_name as s_column_name, s.udt_name as s_udt_name, s.column_default as s_column_default, t.table_schema as t_table_schema, t.table_name as t_table_name, t.column_name as t_column_name, t.udt_name as t_udt_name, t.column_default as t_column_default FROM information_schema.columns s, information_schema.columns t WHERE s.table_schema = ''' || source_schema || ''' AND s.table_name = ''' || target_table || ''' AND t.table_schema = ''' || target_schema || ''' AND t.table_name = ''' || target_table || ''' AND s.column_name = t.column_name' LOOP
+                        PERFORM ddl_change_col(target_schema, target_table, inner_r);
+                    END LOOP;
+                else
+                    if (target_columns = 0) then
+                        -- renamed table
+                        EXECUTE 'SELECT table_name FROM public.redactics_oid_mapping WHERE oid = ' || r.objid INTO source_table;
+                        PERFORM ddl_rename_table(source_schema, source_table, target_table, r.objid);
+                    elsif (source_columns > target_columns) then
+                        -- add column
+                        FOR inner_r IN EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || source_schema || ''' AND table_name = ''' || target_table || ''' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''')' LOOP
+                            PERFORM ddl_add_col(target_schema, target_table, inner_r);
+                        END LOOP;
+                    elsif (source_columns < target_columns) then
+                        -- drop column
+                        FOR inner_r IN EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || source_schema || ''' AND table_name = ''' || target_table || ''')' LOOP
+                            PERFORM ddl_drop_col(target_schema, target_table, inner_r);
+                        END LOOP;
+                    END IF;
+                END IF;
+
+                -- security labels need to be reapplied
+                PERFORM reapply_redactions(target_table);
+            END IF;
+        elsif (r.command_tag = 'CREATE VIEW' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+            PERFORM ddl_create_view(source_schema, r);
+        elsif (r.command_tag = 'CREATE INDEX' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+            PERFORM ddl_create_index(source_schema, r);
+        elsif (r.command_tag = 'CREATE SEQUENCE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
             PERFORM ddl_create_sequence(source_schema, r);
         END IF;
     END LOOP;
@@ -223,14 +368,15 @@ CREATE OR REPLACE FUNCTION set_redactions(source_schema varchar, target_table va
 DECLARE
 	ruleset record;
 BEGIN
-    FOR ruleset IN EXECUTE 'SELECT * FROM redactics_masking_rules WHERE schema = ''' || source_schema || ''' AND table_name = ''' || target_table || '''' LOOP
+    EXECUTE 'SET SEARCH_PATH = ' || source_schema;
+    FOR ruleset IN EXECUTE 'SELECT * FROM public.redactics_masking_rules WHERE schema = ''' || source_schema || ''' AND table_name = ''' || target_table || '''' LOOP
         if (ruleset.rule = 'destruction') then
             EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH VALUE NULL''';
         elsif (ruleset.rule = 'redact_email') then
             if ((ruleset.redact_data->>'primaryKeyDataType')::text = 'id') then
-                EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH FUNCTION ' || source_schema || '.redact_email_id(' || ruleset.table_name || '.' || ruleset.column_name || ',' || ruleset.table_name || '.' || (ruleset.redact_data->>'primaryKey')::text || ',''''' || (ruleset.redact_data->>'prefix')::text || ''''',''''' || (ruleset.redact_data->>'domain')::text || ''''')''';
+                EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH FUNCTION public.redact_email_id(' || ruleset.table_name || '.' || ruleset.column_name || ',' || ruleset.table_name || '.' || (ruleset.redact_data->>'primaryKey')::text || ',''''' || (ruleset.redact_data->>'prefix')::text || ''''',''''' || (ruleset.redact_data->>'domain')::text || ''''')''';
             elsif ((ruleset.redact_data->>'primaryKeyDataType')::text = 'uuid') then
-                EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH FUNCTION ' || source_schema || '.redact_email_uuid(' || ruleset.table_name || '.' || ruleset.column_name || ',' || ruleset.table_name || '.' || (ruleset.redact_data->>'primaryKey')::text || ',''''' || (ruleset.redact_data->>'prefix')::text || ''''',''''' || (ruleset.redact_data->>'domain')::text || ''''')''';
+                EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH FUNCTION public.redact_email_uuid(' || ruleset.table_name || '.' || ruleset.column_name || ',' || ruleset.table_name || '.' || (ruleset.redact_data->>'primaryKey')::text || ',''''' || (ruleset.redact_data->>'prefix')::text || ''''',''''' || (ruleset.redact_data->>'domain')::text || ''''')''';
             END IF;
         elsif (ruleset.rule = 'replacement') then
             EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH VALUE ''''' || (ruleset.redact_data->>'replacement')::text || '''''''';
@@ -352,21 +498,24 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION init_redactics_triggers()
-  RETURNS void
- LANGUAGE plpgsql
-  AS $$
-DECLARE
-    redactions_defined bigint;
-BEGIN
-    EXECUTE 'SELECT count(*) FROM redactics_masking_rules' INTO redactions_defined;
-    if redactions_defined > 0 then
-        DROP EVENT TRIGGER IF EXISTS ddl_trigger;
-        CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func();
-    END IF;
-END;
-$$;
-SELECT init_redactics_triggers();
+-- CREATE OR REPLACE FUNCTION init_redactics_triggers()
+--   RETURNS void
+--  LANGUAGE plpgsql
+--   AS $$
+-- DECLARE
+--     redactions_defined bigint;
+-- BEGIN
+--     -- TODO: support without any redaction rules so long as workflow is enabled?
+--     EXECUTE 'SELECT count(*) FROM redactics_masking_rules' INTO redactions_defined;
+--     if redactions_defined > 0 then
+--         DROP EVENT TRIGGER IF EXISTS ddl_trigger;
+--         -- TODO: make this conditional
+--         -- CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func();
+--         CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_dlp_trigger_func();
+--     END IF;
+-- END;
+-- $$;
+-- SELECT init_redactics_triggers();
 
 CREATE OR REPLACE FUNCTION sql_drop_func()
   RETURNS event_trigger

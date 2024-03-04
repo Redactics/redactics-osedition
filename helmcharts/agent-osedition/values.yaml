@@ -234,6 +234,8 @@ env:
   value: "False"
 - name: AIRFLOW__API__AUTH_BACKENDS
   value: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+- name: _PIP_ADDITIONAL_REQUIREMENTS
+  value: google.cloud.dlp==3.14.0
 
 # Secrets for all airflow containers
 secret: []
@@ -279,6 +281,10 @@ extraSecrets:
   '{{ .Release.Name }}-usersecrets':  
     data: |
       LANDING_USERS: {{ .Values.redactics.landingUsers | toJson | b64enc | quote }}
+  '{{ .Release.Name }}-dlp-serviceaccount':
+    data: |
+      google_service_account: {{ .Values.redactics.dlpServiceAccount | b64enc }}
+
 
 # Extra ConfigMaps that will be managed by the chart
 # (You can use them with extraEnv or extraEnvFrom or some of the extraVolumes values).
@@ -320,6 +326,8 @@ extraEnv: ~
 extraEnvFrom: |
   - configMapRef:
       name: '{{ .Release.Name }}-userparams'
+  - secretRef:
+      name: '{{ .Release.Name }}-usersecrets'
 # eg:
 # extraEnvFrom: |
 #   - secretRef:
@@ -646,9 +654,15 @@ scheduler:
       secret:
         secretName: agent-connections
         defaultMode: 0755
+    - name: google-dlp-serviceaccount
+      secret:
+        secretName: agent-dlp-serviceaccount
+        defaultMode: 0755
   extraVolumeMounts:
     - name: connections
       mountPath: /opt/connections
+    - name: google-dlp-serviceaccount
+      mountPath: /opt/google-dlp-serviceaccount
 
   # Select certain nodes for airflow scheduler pods.
   nodeSelector: {}
