@@ -49,36 +49,29 @@ def get_landing_db_id(wf_config):
     return landing_db
 
 def get_landing_db_conn(landing_db_conn_id, landing_db_name):
-    # returns landing/target DB cursor
+    # returns landing/target DB connection
     host = BaseHook.get_connection(landing_db_conn_id).host
     login = BaseHook.get_connection(landing_db_conn_id).login
     password = BaseHook.get_connection(landing_db_conn_id).password
     extra = json.loads(BaseHook.get_connection(landing_db_conn_id).extra) if BaseHook.get_connection(landing_db_conn_id).extra else ""
 
     # TODO: support SSL/extra
-    # TODO: create landing DB if necessary
-    connection = psycopg2.connect("dbname='" + landing_db_name + "' user='" + login + "' host='" + host + "' password='" + password + 
+    try:
+        connection = psycopg2.connect("dbname='" + landing_db_name + "' user='" + login + "' host='" + host + "' password='" + password + 
+    "'")
+    except:
+        # can't connect to DB, likely missing landing database, create landing database
+        connection = psycopg2.connect("dbname='postgres' user='" + login + "' host='" + host + "' password='" + password + 
+        "'")
+        connection.autocommit = True
+        connection.cursor().execute("CREATE DATABASE " + landing_db_name)
+
+        connection = psycopg2.connect("dbname='" + landing_db_name + "' user='" + login + "' host='" + host + "' password='" + password + 
     "'")
     return connection
 
-    # try:
-    #     connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-    #                         .format(login=login, password=password,
-    #                                 host=host, schema=landing_db_name), connect_args=extra, echo=False)
-    #     connection.connect()
-    # except OperationalError:
-    #     # landing DB has not been created yet, create landing DB
-    #     connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-    #                         .format(login=login, password=password,
-    #                                 host=host, schema="postgres"), connect_args=extra, echo=False)
-    #     connection.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE DATABASE " + landing_db_name)
-
-    # connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-    #                         .format(login=login, password=password,
-    #                                 host=host, schema=landing_db_name), connect_args=extra, echo=False)
-    # return connection
-
 def get_landing_db_cur(connection):
+    # returns landing/target DB cursor
     return connection.cursor(cursor_factory=RealDictCursor)
 
 default_args = {
@@ -151,11 +144,14 @@ def replication():
             print("LANDING DB NAME")
             print(landing_db_name)
             landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+            landing_db_cur = get_landing_db_cur(landing_db_conn)
 
-            with landing_db_conn.connect() as con:
-                with open("/opt/airflow/dags/replication-functions.sql") as file:
-                    query = text(file.read())
-                    con.execution_options(isolation_level="AUTOCOMMIT").execute(query)
+            with open("/opt/airflow/dags/replication-functions.sql") as file:
+                functions = text(file.read())
+                landing_db_cur.execute("%(functions)s", {
+                    'functions': AsIs(functions)
+                })
+                landing_db_conn.commit()
 
             Variable.set(dag_name + '-installedUDFVersion', UDF_VERSION)
             Variable.set(dag_name + '-landingDBName', landing_db_name)
@@ -176,18 +172,26 @@ def replication():
                 'database': AsIs(landing_db_name)
             })
             landing_db_conn.commit()
+            # reconnect
+            landing_db_conn.close()
+            landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+            landing_db_cur = get_landing_db_cur(landing_db_conn)
         
         if int(tableSchemaVersion) != TABLE_SCHEMA_VERSION:
             # update table schema
             print("UPDATING TABLE SCHEMA")
 
-            with landing_db_conn.connect() as con:
-                with open("/opt/airflow/dags/replication-schema-1.sql") as file:
-                    query = text(file.read())
-                    con.execution_options(isolation_level="AUTOCOMMIT").execute(query)
+            with open("/opt/airflow/dags/replication-schema-1.sql") as file:
+                schema = text(file.read())
+                landing_db_cur.execute("%(schema)s", {
+                    'schema': AsIs(schema)
+                })
+                landing_db_conn.commit()
             
             if int(tableSchemaVersion) == 0:
                 print("INIT ANON EXTENSION")
+                landing_db_cur.execute("DROP EXTENSION IF EXISTS anon CASCADE")
+                landing_db_conn.commit()
                 landing_db_cur.execute("CREATE EXTENSION anon CASCADE")
                 landing_db_conn.commit()
                 landing_db_cur.execute("SELECT anon.init()")
@@ -325,6 +329,8 @@ def replication():
                             'table_name': rule["table"],
                             'column_name': rule["column"]
                         })
+                        landing_db_conn.commit()
+                        landing_db_cur.execute("SET SEARCH_PATH = public")
                         landing_db_conn.commit()
                     landing_db_cur.execute("INSERT INTO public.redactics_masking_rules (schema, table_name, column_name, rule, redact_data, updated_at) VALUES (%(schema)s, %(table_name)s, %(column_name)s, %(rule)s, %(redact_data)s, %(updated_at)s)", {
                         'schema': rule["schema"],
