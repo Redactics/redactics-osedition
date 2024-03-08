@@ -2,10 +2,13 @@ from datetime import timedelta, datetime, timezone, date
 from dateutil import parser
 from urllib.parse import urlparse
 from psycopg2.extensions import AsIs
+from psycopg2 import sql
+from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from airflow.decorators import dag, task
 
+import psycopg2
 import glob
 import airflow
 import json
@@ -46,28 +49,37 @@ def get_landing_db_id(wf_config):
     return landing_db
 
 def get_landing_db_conn(landing_db_conn_id, landing_db_name):
-    # returns landing/target DB connection
+    # returns landing/target DB cursor
     host = BaseHook.get_connection(landing_db_conn_id).host
     login = BaseHook.get_connection(landing_db_conn_id).login
     password = BaseHook.get_connection(landing_db_conn_id).password
     extra = json.loads(BaseHook.get_connection(landing_db_conn_id).extra) if BaseHook.get_connection(landing_db_conn_id).extra else ""
 
-    try:
-        connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-                            .format(login=login, password=password,
-                                    host=host, schema=landing_db_name), connect_args=extra, echo=False)
-        connection.connect()
-    except OperationalError:
-        # landing DB has not been created yet, create landing DB
-        connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-                            .format(login=login, password=password,
-                                    host=host, schema="postgres"), connect_args=extra, echo=False)
-        connection.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE DATABASE " + landing_db_name)
-
-    connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
-                            .format(login=login, password=password,
-                                    host=host, schema=landing_db_name), connect_args=extra, echo=False)
+    # TODO: support SSL/extra
+    # TODO: create landing DB if necessary
+    connection = psycopg2.connect("dbname='" + landing_db_name + "' user='" + login + "' host='" + host + "' password='" + password + 
+    "'")
     return connection
+
+    # try:
+    #     connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
+    #                         .format(login=login, password=password,
+    #                                 host=host, schema=landing_db_name), connect_args=extra, echo=False)
+    #     connection.connect()
+    # except OperationalError:
+    #     # landing DB has not been created yet, create landing DB
+    #     connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
+    #                         .format(login=login, password=password,
+    #                                 host=host, schema="postgres"), connect_args=extra, echo=False)
+    #     connection.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE DATABASE " + landing_db_name)
+
+    # connection = create_engine('postgresql://{login}:{password}@{host}/{schema}'
+    #                         .format(login=login, password=password,
+    #                                 host=host, schema=landing_db_name), connect_args=extra, echo=False)
+    # return connection
+
+def get_landing_db_cur(connection):
+    return connection.cursor(cursor_factory=RealDictCursor)
 
 default_args = {
     #'depends_on_past': False,
@@ -156,12 +168,14 @@ def replication():
             print("LANDING DB NAME")
             print(landing_db_name)
             landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+            landing_db_cur = get_landing_db_cur(landing_db_conn)
 
         if int(tableSchemaVersion) == 0:
             # preload anon into future sessions
-            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("ALTER DATABASE %(database)s SET session_preload_libraries = 'anon'", {
+            landing_db_cur.execute("ALTER DATABASE %(database)s SET session_preload_libraries = 'anon'", {
                 'database': AsIs(landing_db_name)
             })
+            landing_db_conn.commit()
         
         if int(tableSchemaVersion) != TABLE_SCHEMA_VERSION:
             # update table schema
@@ -174,8 +188,10 @@ def replication():
             
             if int(tableSchemaVersion) == 0:
                 print("INIT ANON EXTENSION")
-                landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE EXTENSION anon CASCADE")
-                landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("SELECT anon.init()")
+                landing_db_cur.execute("CREATE EXTENSION anon CASCADE")
+                landing_db_conn.commit()
+                landing_db_cur.execute("SELECT anon.init()")
+                landing_db_conn.commit()
 
             Variable.set(dag_name + '-tableSchemaVersion', TABLE_SCHEMA_VERSION)
 
@@ -185,23 +201,27 @@ def replication():
             for user in landing_users:
                 landing_db_user = user["user"]
                 landing_db_pass = user["password"]
-                check_landing_user = landing_db_conn.execute("SELECT * FROM pg_roles WHERE rolname = %(username)s", {
+                landing_db_cur.execute("SELECT * FROM pg_roles WHERE rolname = %(username)s", {
                     'username': landing_db_user
-                }).fetchone()
+                })
+                check_landing_user = landing_db_cur.fetchone()
                 if not check_landing_user:
                     print("CREATE LANDING DB USER " + landing_db_user)
-                    landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE ROLE %(username)s WITH LOGIN PASSWORD %(password)s", {
+                    landing_db_cur.execute("CREATE ROLE %(username)s WITH LOGIN PASSWORD %(password)s", {
                         'username': AsIs(landing_db_user),
                         'password': landing_db_pass
                     })
+                    landing_db_conn.commit()
                     # create record of landing db user so that grants can be issued on new schema creation
-                    check_landing_user = landing_db_conn.execute("SELECT * FROM redactics_landingdb_users WHERE username = %(username)s", {
+                    landing_db_cur.execute("SELECT * FROM redactics_landingdb_users WHERE username = %(username)s", {
                         'username': landing_db_user
-                    }).fetchone()
+                    })
+                    check_landing_user = landing_db_cur.fetchone()
                     if not check_landing_user:
-                        landing_db_conn.execute("INSERT INTO redactics_landingdb_users (username) VALUES (%(username)s)", {
+                        landing_db_cur.execute("INSERT INTO redactics_landingdb_users (username) VALUES (%(username)s)", {
                             'username': landing_db_user
                         })
+                        landing_db_conn.commit()
 
     @task(on_failure_callback=post_logs)
     def update_redaction_rules(**context):
@@ -216,13 +236,17 @@ def replication():
         landing_db_name = get_landing_db_name(wf_config)
         landing_db_conn_id = get_landing_db_id(wf_config)
         landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+        landing_db_cur = get_landing_db_cur(landing_db_conn)
         toggle_dlp = False
         if wf_config["dlpEnabled"] and str(wf_config["dlpEnabled"]) != Variable.get(dag_name + '-dlpEnabled', default_var=False):
             # enable DLP
             print("ENABLE DLP TRIGGERS")
-            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("DROP EVENT TRIGGER IF EXISTS ddl_trigger")
-            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("DROP EVENT TRIGGER IF EXISTS ddl_dlp_trigger")
-            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE EVENT TRIGGER ddl_dlp_trigger ON ddl_command_end EXECUTE FUNCTION ddl_dlp_trigger_func()")
+            landing_db_cur.execute("DROP EVENT TRIGGER IF EXISTS ddl_trigger")
+            landing_db_conn.commit()
+            landing_db_cur.execute("DROP EVENT TRIGGER IF EXISTS ddl_dlp_trigger")
+            landing_db_conn.commit()
+            landing_db_cur.execute("CREATE EVENT TRIGGER ddl_dlp_trigger ON ddl_command_end EXECUTE FUNCTION ddl_dlp_trigger_func()")
+            landing_db_conn.commit()
             Variable.set(dag_name + '-dlpEnabled', True)
             # mark redaction rules for reset
             Variable.delete(dag_name + '-lastUpdatedRedactRules')
@@ -230,16 +254,20 @@ def replication():
         elif not wf_config["dlpEnabled"] and str(wf_config["dlpEnabled"]) != Variable.get(dag_name + '-dlpEnabled', default_var=False):
             # disable DLP
             print("DISABLE DLP TRIGGERS")
-            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("DROP EVENT TRIGGER IF EXISTS ddl_trigger")
-            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("DROP EVENT TRIGGER IF EXISTS ddl_dlp_trigger")
-            landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func()")
+            landing_db_cur.execute("DROP EVENT TRIGGER IF EXISTS ddl_trigger")
+            landing_db_conn.commit()
+            landing_db_cur.execute("DROP EVENT TRIGGER IF EXISTS ddl_dlp_trigger")
+            landing_db_conn.commit()
+            landing_db_cur.execute("CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func()")
+            landing_db_conn.commit()
             Variable.set(dag_name + '-dlpEnabled', False)
             # mark redaction rules for reset
             Variable.delete(dag_name + '-lastUpdatedRedactRules')
             toggle_dlp = True
 
         # gather scan action decisions and update ruleset
-        scan_actions = landing_db_conn.execute("SELECT id, schema, table_name, primary_key, primary_key_name, primary_key_type, scan_action, scan_result FROM public.redactics_quarantine_results WHERE scan_action IS NOT NULL").fetchall()
+        landing_db_cur.execute("SELECT id, schema, table_name, primary_key, primary_key_name, primary_key_type, scan_action, scan_result FROM public.redactics_quarantine_results WHERE scan_action IS NOT NULL")
+        scan_actions = landing_db_cur.fetchall()
         unquarantine = {}
         quarantine_ids = []
         for q in scan_actions:
@@ -254,19 +282,21 @@ def replication():
 
             if (q["schema"] + "." + q["table_name"]) not in unquarantine:
                 unquarantine[q["schema"] + "." + q["table_name"]] = {}
-            if "primaryKeys" not in (q["schema"] + "." + q["table_name"]):
+            if "primaryKeys" not in unquarantine[q["schema"] + "." + q["table_name"]]:
                 unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeys"] = []
             unquarantine[q["schema"] + "." + q["table_name"]]["schema"] = q["schema"]
             unquarantine[q["schema"] + "." + q["table_name"]]["table_name"] = q["table_name"]
-            unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeys"].append("'" + q["primary_key"] + "'" if q["primary_key_type"] == "uuid" else q["primary_key"])
+            if q["primary_key"] not in unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeys"]:
+                unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeys"].append(q["primary_key"])
             unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeyName"] = q["primary_key_name"]
             quarantine_ids.append(q["id"])
-
+        
         for rule in redact_rules:
-            if not landing_db_conn:
+            if not landing_db_cur:
                 landing_db_name = get_landing_db_name(wf_config)
                 landing_db_conn_id = get_landing_db_id(wf_config)
                 landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+                landing_db_cur = get_landing_db_cur(landing_db_conn)
             orig_schema = rule["schema"]
             if wf_config["dlpEnabled"]:
                 # apply redaction rules to quarantine queue instead
@@ -275,11 +305,12 @@ def replication():
             last_updated = parser.parse(Variable.get(dag_name + '-lastUpdatedRedactRules', default_var='')) if Variable.get(dag_name + '-lastUpdatedRedactRules', default_var='') else ''
             if not last_updated or (rule["updatedAt"] and parser.parse(rule["updatedAt"]) > last_updated):
                 # upsert to table
-                rule_check = landing_db_conn.execute("SELECT * FROM public.redactics_masking_rules WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
+                landing_db_cur.execute("SELECT * FROM public.redactics_masking_rules WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
                     'schema': rule["schema"],
                     'table_name': rule["table"],
                     'column_name': rule["column"]
-                }).fetchone()
+                })
+                rule_check = landing_db_cur.fetchone()
                 updated_at = datetime.now(timezone.utc).isoformat()
                 if not rule_check:
                     # insert
@@ -287,10 +318,15 @@ def replication():
                     if toggle_dlp:
                         # DLP selection has changed, delete old security label
                         print("REMOVE SECURITY LABEL FOR " + orig_schema + "." + rule["table"] + "." + rule["column"])
-                        landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("SET SEARCH_PATH = " + orig_schema)
-                        landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("SECURITY LABEL FOR anon ON COLUMN " + rule["table"] + "." + rule["column"] + " IS NULL")
-                        landing_db_conn.execute("DELETE FROM public.redactics_masking_rules WHERE schema = '" + orig_schema + "' AND table_name = '" + rule["table"] + "' AND column_name = '" + rule["column"] + "'")
-                    landing_db_conn.execute("INSERT INTO public.redactics_masking_rules (schema, table_name, column_name, rule, redact_data, updated_at) VALUES (%(schema)s, %(table_name)s, %(column_name)s, %(rule)s, %(redact_data)s, %(updated_at)s)", {
+                        landing_db_cur.execute("SET SEARCH_PATH = " + orig_schema)
+                        landing_db_cur.execute("SECURITY LABEL FOR anon ON COLUMN " + rule["table"] + "." + rule["column"] + " IS NULL")
+                        landing_db_cur.execute("DELETE FROM public.redactics_masking_rules WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
+                           'schema': orig_schema,
+                            'table_name': rule["table"],
+                            'column_name': rule["column"]
+                        })
+                        landing_db_conn.commit()
+                    landing_db_cur.execute("INSERT INTO public.redactics_masking_rules (schema, table_name, column_name, rule, redact_data, updated_at) VALUES (%(schema)s, %(table_name)s, %(column_name)s, %(rule)s, %(redact_data)s, %(updated_at)s)", {
                         'schema': rule["schema"],
                         'table_name': rule["table"],
                         'column_name': rule["column"],
@@ -298,10 +334,11 @@ def replication():
                         'redact_data': json.dumps(rule["redactData"]),
                         'updated_at': updated_at
                     })
+                    landing_db_conn.commit()
                 else:
                     # update
                     print("UPDATE MASKING RULE")
-                    landing_db_conn.execute("UPDATE public.redactics_masking_rules SET rule = %(rule)s, redact_data = %(redact_data)s, updated_at = %(updated_at)s WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
+                    landing_db_cur.execute("UPDATE public.redactics_masking_rules SET rule = %(rule)s, redact_data = %(redact_data)s, updated_at = %(updated_at)s WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
                         'schema': rule["schema"],
                         'table_name': rule["table"],
                         'column_name': rule["column"],
@@ -309,35 +346,57 @@ def replication():
                         'redact_data': json.dumps(rule["redactData"]),
                         'updated_at': updated_at
                     })
+                    landing_db_conn.commit()
                 # don't apply masking rules if the schema/table hasn't been created yet
-                table_check = landing_db_conn.execute("SELECT 1 FROM pg_tables WHERE schemaname = %(schema)s AND tablename = %(table_name)s", {
+                landing_db_cur.execute("SELECT 1 FROM pg_tables WHERE schemaname = %(schema)s AND tablename = %(table_name)s", {
                     'schema': rule["schema"],
                     'table_name': rule["table"]
-                }).fetchone()
+                })
+                table_check = landing_db_cur.fetchone()
                 if table_check:
                     print("APPLY MASKING RULES")   
-                    landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("SET SEARCH_PATH = " + rule["schema"])     
-                    landing_db_conn.execution_options(isolation_level="AUTOCOMMIT").execute("SELECT public.set_redactions(%(schema)s, %(table_name)s)", {
+                    landing_db_cur.execute("SET SEARCH_PATH = " + rule["schema"])     
+                    landing_db_cur.execute("SELECT public.set_redactions(%(schema)s, %(table_name)s)", {
                         'schema': rule["schema"],
                         'table_name': rule["table"]
                     })
+                    landing_db_conn.commit()
                     Variable.set(dag_name + '-lastUpdatedRedactRules', updated_at)
 
         # transfer data from quarantine to redacted tables when all decisions have been made for table
         for t in unquarantine.keys():
-            table_findings = landing_db_conn.execute("SELECT id, schema, table_name, primary_key, primary_key_name, primary_key_type, scan_action, scan_result FROM public.redactics_quarantine_results WHERE schema = '" + unquarantine[t]["schema"] + "' AND table_name = '" + unquarantine[t]["table_name"] + "' AND scan_action IS NULL").fetchall()
+            landing_db_cur.execute("SELECT id, schema, table_name, primary_key, primary_key_name, primary_key_type, scan_action, scan_result FROM public.redactics_quarantine_results WHERE schema = %(schema)s AND table_name = %(table_name)s AND scan_action IS NULL", {
+                'schema': unquarantine[t]["schema"],
+                'table_name': unquarantine[t]["table_name"]
+            })
+            table_findings = landing_db_cur.fetchall()
             if not table_findings:
-                target_table = re.sub(r'^rq_', 'r_', t)
-                redacted_columns_query = landing_db_conn.execute("SELECT anon.mask_filters('" + t + "'::REGCLASS)").fetchone()
+                target_schema = re.sub(r'^rq_', 'r_', unquarantine[t]["schema"])
+                target_table = unquarantine[t]["table_name"]
+                landing_db_cur.execute("SELECT anon.mask_filters(%(table)s::REGCLASS)", {
+                    'table': t
+                })
+                redacted_columns_query = landing_db_cur.fetchone()
                 # remove Redactics injected r_sensitive_data_scan column
                 redacted_columns = redacted_columns_query["mask_filters"].replace(',r_sensitive_data_scan','')
                 redacted_columns = redacted_columns.replace('r_sensitive_data_scan,','')
-                print("INSERT INTO " + target_table + " SELECT " + redacted_columns + " FROM " + t + " WHERE " + unquarantine[t]["primaryKeyName"] + " IN (" + ",".join(unquarantine[t]["primaryKeys"]) + ")")
-                landing_db_conn.execute("INSERT INTO " + target_table + " SELECT " + redacted_columns + " FROM " + t + " WHERE " + unquarantine[t]["primaryKeyName"] + " IN (" + ",".join(unquarantine[t]["primaryKeys"]) + ")")
+                # print("INSERT INTO " + target_table + " SELECT " + redacted_columns + " FROM " + t + " WHERE " + unquarantine[t]["primaryKeyName"] + " IN (" + ",".join(unquarantine[t]["primaryKeys"]) + ")")
+                landing_db_cur.execute(sql.SQL("INSERT INTO {} SELECT %(redacted_columns)s FROM {} WHERE {} IN (%(primary_keys)s)").format(
+                    sql.Identifier(target_schema, target_table),
+                    sql.Identifier(unquarantine[t]["schema"], unquarantine[t]["table_name"]),
+                    sql.Identifier(unquarantine[t]["primaryKeyName"])
+                ), {
+                    'redacted_columns': AsIs(redacted_columns),
+                    'primary_keys': AsIs(",".join(unquarantine[t]["primaryKeys"]))
+                })
+                landing_db_conn.commit()
             # TODO: test inserting multiple rows
         # delete from quarantine table
         for id in quarantine_ids:
-            landing_db_conn.execute("DELETE FROM public.redactics_quarantine_results WHERE id = " + str(id))
+            landing_db_cur.execute("DELETE FROM public.redactics_quarantine_results WHERE id = %(id)s", {
+                'id': id
+            })
+            landing_db_conn.commit()
 
     @task(on_failure_callback=post_logs)
     def process_quarantine_queue(**context):
@@ -349,8 +408,10 @@ def replication():
         landing_db_conn_id = Variable.get(dag_name + '-landingDBConnID')
         landing_db_name = Variable.get(dag_name + '-landingDBName')
         landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+        landing_db_cur = get_landing_db_cur(landing_db_conn)
 
-        check_quarantine_queue = landing_db_conn.execute("SELECT distinct schema, table_name FROM redactics_quarantine_log").fetchall()
+        landing_db_cur.execute("SELECT distinct schema, table_name FROM public.redactics_quarantine_log")
+        check_quarantine_queue = landing_db_cur.fetchall()
         if len(check_quarantine_queue):
             potentials = []
             # TODO: fetch info_types from Redactics API
@@ -364,12 +425,20 @@ def replication():
             parent = "projects/redactics-prod-310503"
 
             for qidx, q in enumerate(check_quarantine_queue):
-                scan_queue = landing_db_conn.execute("SELECT * FROM \"" + q["schema"] + "\".\"" + q["table_name"] + "\" WHERE r_sensitive_data_scan IS NULL").fetchall()
+                query = sql.SQL("SELECT * FROM {} WHERE r_sensitive_data_scan IS NULL").format(
+                    sql.Identifier(q["schema"], q["table_name"])
+                )
+                landing_db_cur.execute(query)
+                scan_queue = landing_db_cur.fetchall()
 
                 if scan_queue:
                     # get list of fields potentially containing sensitive info
                     # TODO: add additional data_types
-                    potentials_query = landing_db_conn.execute("SELECT * FROM information_schema.columns WHERE table_schema = '" + q["schema"] + "' AND table_name = '" + q["table_name"] + "' AND data_type IN ('character varying')").fetchall()
+                    landing_db_cur.execute("SELECT * FROM information_schema.columns WHERE table_schema = %(schema)s AND table_name = %(table_name)s AND data_type IN ('character varying')", {
+                        'schema': q["schema"],
+                        'table_name': q["table_name"]
+                    })
+                    potentials_query = landing_db_cur.fetchall()
                     for pidx, p in enumerate(potentials_query):
                         # TODO: exclude ignored/whitelisted columns
                         potentials.append(p["column_name"])
@@ -377,7 +446,13 @@ def replication():
 
                     for sidx, s in enumerate(scan_queue):
                         # get primary key
-                        primary_key_query = landing_db_conn.execute("SELECT pg_attribute.attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index, pg_class, pg_attribute, pg_namespace WHERE pg_class.oid = '" + q["schema"] + "." + q["table_name"] + "'::regclass AND indrelid = pg_class.oid AND nspname = '" + q["schema"] + "' AND pg_class.relnamespace = pg_namespace.oid AND pg_attribute.attrelid = pg_class.oid AND pg_attribute.attnum = any(pg_index.indkey) AND indisprimary").fetchone()
+                        # TODO: test camel case schema/tables with this query
+                        oid = q["schema"] + "." + q["table_name"]
+                        landing_db_cur.execute("SELECT pg_attribute.attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index, pg_class, pg_attribute, pg_namespace WHERE pg_class.oid = %(oid)s::regclass AND indrelid = pg_class.oid AND nspname = %(schema)s AND pg_class.relnamespace = pg_namespace.oid AND pg_attribute.attrelid = pg_class.oid AND pg_attribute.attnum = any(pg_index.indkey) AND indisprimary", {
+                            'oid': oid,
+                            'schema': q["schema"]
+                        })
+                        primary_key_query = landing_db_cur.fetchone()
                         if primary_key_query:
                             primary_key_field = str(primary_key_query["attname"])
                             primary_key = s[primary_key_query["attname"]]
@@ -400,18 +475,46 @@ def replication():
                                                 except AttributeError:
                                                     # TODO: better exception handling?
                                                     pass
-                                                landing_db_conn.execute("INSERT INTO public.redactics_quarantine_results (schema, table_name, primary_key, column_name, scan_value, scan_result, created_at) VALUES ('" + q["schema"] + "', '" + q["table_name"] + "', '" + str(primary_key) + "', '" + p + "', '" + finding.quote + "', '" + json.dumps({"info_type":finding.info_type.name, "likelihood": finding.likelihood.name}) + "', current_timestamp)")
-
+                                                # prevent duplicates
+                                                landing_db_cur.execute("SELECT * FROM public.redactics_quarantine_results WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s AND scan_value = %(scan_value)s", {
+                                                    'schema': q["schema"],
+                                                    'table_name': q["table_name"],
+                                                    'column_name': p,
+                                                    'scan_value': finding.quote
+                                                })
+                                                dupe_check = landing_db_cur.fetchone()
+                                                if not dupe_check:
+                                                    print("WRITING TO QUARANTINE TABLE")
+                                                    landing_db_cur.execute("INSERT INTO public.redactics_quarantine_results (schema, table_name, primary_key, primary_key_name, primary_key_type, column_name, scan_value, scan_result, created_at) VALUES (%(schema)s, %(table_name)s, %(primary_key)s, %(primary_key_field)s, %(primary_key_datatype)s, %(column_name)s, %(scan_value)s, %(scan_result)s, current_timestamp)", {
+                                                        'schema': q["schema"],
+                                                        'table_name': q["table_name"],
+                                                        'primary_key': primary_key,
+                                                        'primary_key_field': primary_key_field,
+                                                        'primary_key_datatype': primary_key_datatype,
+                                                        'column_name': p,
+                                                        'scan_value': finding.quote,
+                                                        'scan_result': json.dumps({"info_type":finding.info_type.name, "likelihood": finding.likelihood.name})
+                                                    })
+                                                    landing_db_conn.commit()
+                                                   
+                                                print("MARK AS SCANNED")
                                                 # mark row as scanned
-                                                if primary_key_datatype == "uuid":
-                                                    landing_db_conn.execute("UPDATE \"" + q["schema"] + "\".\"" + q["table_name"] + "\" SET r_sensitive_data_scan = current_timestamp WHERE " + primary_key_field + " = '" + primary_key + "'")
-                                                else:
-                                                    landing_db_conn.execute("UPDATE \"" + q["schema"] + "\".\"" + q["table_name"] + "\" SET r_sensitive_data_scan = current_timestamp WHERE " + primary_key_field + " = " + str(primary_key))
+                                                landing_db_cur.execute(sql.SQL("UPDATE {} SET r_sensitive_data_scan = current_timestamp WHERE {} = %(primary_key)s").format(
+                                                    sql.Identifier(q["schema"], q["table_name"]),
+                                                    sql.Identifier(primary_key_field)
+                                                ), {
+                                                    'primary_key': primary_key
+                                                })
+                                                landing_db_conn.commit()
 
                                                 # notify Redactics API for notification triggers
 
                                                 # delete from quarantine log
-                                                landing_db_conn.execute("DELETE FROM public.redactics_quarantine_log WHERE schema = '" + q["schema"] + "' AND table_name = '" + q["table_name"] + "'")
+                                                landing_db_cur.execute("DELETE FROM public.redactics_quarantine_log WHERE schema = %(schema)s AND table_name = %(table_name)s", {
+                                                    'schema': q["schema"],
+                                                    'table_name': q["table_name"]
+                                                })
+                                                landing_db_conn.commit()
                                         else:
                                             print(f"No findings: {response}")
 
