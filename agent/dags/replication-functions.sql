@@ -71,7 +71,7 @@ BEGIN
             END IF;
 
             -- DLP queue
-            EXECUTE 'INSERT INTO redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || target_schema || ''', ''' || target_table || ''', current_timestamp)';
+            EXECUTE 'INSERT INTO public.redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || target_schema || ''', ''' || target_table || ''', current_timestamp)';
         END IF;
     END IF;
 RETURN NEW;
@@ -102,7 +102,7 @@ BEGIN
     redacted_columns := (SELECT anon.mask_filters(TG_ARGV[1]::REGCLASS));
     json_record := row_to_json(NEW);
 
-    if (source_schema NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+    if (source_schema NOT LIKE 'r\_%' AND source_schema NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
         -- get columns
         FOR col IN EXECUTE 'SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || quote_ident(TG_ARGV[0]) || ''' AND table_name = ''' || target_table || ''''
         LOOP
@@ -144,18 +144,20 @@ DECLARE
     cols varchar;
 BEGIN
     source_schema := (SELECT REGEXP_REPLACE(TG_ARGV[0],'(")?([^.]+).*(")?','\2'));
-    target_schema := quote_ident('r_' || source_schema);
+    target_schema := quote_ident('rq_' || source_schema);
     source_schema := quote_ident(source_schema);
     target_table := quote_ident((SELECT REGEXP_REPLACE(TG_ARGV[1], '(")?[^.]+\.([^.]+).*(")?', '\2')));
     redacted_columns := (SELECT anon.mask_filters(TG_ARGV[1]::REGCLASS));
     json_record := row_to_json(NEW);
 
-    if (source_schema NOT LIKE 'r\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+    if (source_schema NOT LIKE 'r\_%' AND source_schema NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
         -- get columns
         FOR col IN EXECUTE 'SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || quote_ident(TG_ARGV[0]) || ''' AND table_name = ''' || target_table || ''''
         LOOP
             cols_arr := array_append(cols_arr, col.column_name || '=source_table.' || col.column_name);
         END LOOP;
+        -- reprocess updated field
+        cols_arr := array_append(cols_arr, 'r_sensitive_data_scan = NULL');
         cols := array_to_string(cols_arr, ',');
         EXECUTE 'SELECT attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index JOIN pg_attribute ON attrelid = indrelid AND attnum = ANY(indkey) WHERE indrelid = ' || TG_RELID || ' AND indisprimary' INTO pk;
 
@@ -168,6 +170,9 @@ BEGIN
                 pk_val_int := jsonb_extract_path(json_record, pk.attname);
                 EXECUTE 'UPDATE ' || target_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || target_schema || '.' || target_table || '.' || pk.attname;
             END IF;
+
+            -- DLP queue
+            EXECUTE 'INSERT INTO public.redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || target_schema || ''', ''' || target_table || ''', current_timestamp)';
         END IF;
     END IF;
 RETURN NEW;
@@ -203,6 +208,47 @@ BEGIN
                 EXECUTE 'DELETE FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ''' || pk_val_string || '''';
             else
                 pk_val_int := jsonb_extract_path(json_record, pk.attname);
+                EXECUTE 'DELETE FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ' || pk_val_int;
+            END IF;
+        END IF;
+    END IF;
+RETURN NEW;
+END;
+$$
+LANGUAGE 'plpgsql';
+
+CREATE OR REPLACE FUNCTION delete_redactics_dlp_table_func()
+  RETURNS trigger AS
+$$
+DECLARE
+    source_schema varchar;
+    quarantine_schema varchar;
+    target_schema varchar;
+    target_table varchar;
+    json_record jsonb;
+    pk record;
+    pk_val_int bigint;
+    pk_val_string varchar;
+BEGIN
+    source_schema := (SELECT REGEXP_REPLACE(TG_ARGV[0],'(")?([^.]+).*(")?','\2'));
+    quarantine_schema := quote_ident('rq_' || source_schema);
+	target_schema := quote_ident('r_' || source_schema);
+    source_schema := quote_ident(source_schema);
+    target_table := quote_ident((SELECT REGEXP_REPLACE(TG_ARGV[1], '(")?[^.]+\.([^.]+).*(")?', '\2')));
+
+    if (source_schema NOT LIKE 'r\_%' AND source_schema NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
+        json_record := row_to_json(OLD);
+        EXECUTE 'SELECT attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index JOIN pg_attribute ON attrelid = indrelid AND attnum = ANY(indkey) WHERE indrelid = ' || TG_RELID || ' AND indisprimary' INTO pk;
+
+        if (pk IS NOT NULL) then
+            if (jsonb_extract_path(json_record, pk.attname)::varchar LIKE '"%"') then
+                -- non numeric primary key
+                pk_val_string := REPLACE(jsonb_extract_path(json_record, pk.attname)::varchar, '"', '');
+                EXECUTE 'DELETE FROM ' || quarantine_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ''' || pk_val_string || '''';
+                EXECUTE 'DELETE FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ''' || pk_val_string || '''';
+            else
+                pk_val_int := jsonb_extract_path(json_record, pk.attname);
+                EXECUTE 'DELETE FROM ' || quarantine_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ' || pk_val_int;
                 EXECUTE 'DELETE FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ' || pk_val_int;
             END IF;
         END IF;
@@ -357,8 +403,8 @@ BEGIN
 
             target_table := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?(.*)\.(.*)(")?', '\3')));
             EXECUTE 'CREATE TRIGGER "it_trigger_' || r.objid || '" AFTER INSERT ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION public.insert_redactics_dlp_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
-            EXECUTE 'CREATE TRIGGER "ut_trigger_' || r.objid || '" AFTER UPDATE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION public.update_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
-            EXECUTE 'CREATE TRIGGER "dt_trigger_' || r.objid || '" AFTER DELETE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION public.delete_redactics_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
+            EXECUTE 'CREATE TRIGGER "ut_trigger_' || r.objid || '" AFTER UPDATE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION public.update_redactics_dlp_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
+            EXECUTE 'CREATE TRIGGER "dt_trigger_' || r.objid || '" AFTER DELETE ON ' || source_schema || '.' || quote_ident(target_table) || ' FOR EACH ROW EXECUTE FUNCTION public.delete_redactics_dlp_table_func(' || source_schema || ',' || quote_ident(r.object_identity) || ')';
         elsif (r.command_tag = 'ALTER TABLE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
             -- compare new vs. old schema
             if (target_table NOT LIKE 'redactics\_%') then

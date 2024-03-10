@@ -228,6 +228,181 @@ def replication():
                         landing_db_conn.commit()
 
     @task(on_failure_callback=post_logs)
+    def process_quarantine_queue(**context):
+        # TODO: skip if service account is missing
+        credentials = service_account.Credentials.from_service_account_file(
+    '/opt/google-dlp-serviceaccount/google_service_account')
+        dlp_client = google.cloud.dlp_v2.DlpServiceClient(credentials=credentials)
+
+        landing_db_conn_id = Variable.get(dag_name + '-landingDBConnID')
+        landing_db_name = Variable.get(dag_name + '-landingDBName')
+        landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
+        landing_db_cur = get_landing_db_cur(landing_db_conn)
+
+        landing_db_cur.execute("SELECT distinct schema, table_name FROM public.redactics_quarantine_log")
+        check_quarantine_queue = landing_db_cur.fetchall()
+        if len(check_quarantine_queue):
+            potentials = []
+            # TODO: fetch info_types from Redactics API
+            info_types = [{"name": "EMAIL_ADDRESS"}, {"name": "PERSON_NAME"}]
+            include_quote = True
+            inspect_config = {
+                "info_types": info_types,
+                "include_quote": include_quote,
+            }
+            # TODO: don't hardcode this
+            parent = "projects/redactics-prod-310503"
+
+            for qidx, q in enumerate(check_quarantine_queue):
+                query = sql.SQL("SELECT * FROM {} WHERE r_sensitive_data_scan IS NULL").format(
+                    sql.Identifier(q["schema"], q["table_name"])
+                )
+                landing_db_cur.execute(query)
+                scan_queue = landing_db_cur.fetchall()
+
+                if scan_queue:
+                    # get list of fields potentially containing sensitive info
+                    # TODO: add additional data_types
+                    landing_db_cur.execute("SELECT s.table_schema, s.table_name, s.column_name, mr.rule FROM information_schema.columns s LEFT JOIN public.redactics_masking_rules mr ON (s.table_schema = mr.schema AND s.table_name = mr.table_name AND s.column_name = mr.column_name) WHERE s.table_schema = %(schema)s AND s.table_name = %(table_name)s AND s.data_type IN ('character varying')", {
+                        'schema': q["schema"],
+                        'table_name': q["table_name"]
+                    })
+                    potentials_query = landing_db_cur.fetchall()
+                    for pidx, p in enumerate(potentials_query):
+                        if not p["rule"]:
+                            # no rule has been set for column, queue for DLP scan
+                            potentials.append(p["column_name"])
+                    print(f"potentials: {potentials}")
+
+                    # get primary key
+                    landing_db_cur.execute(sql.SQL("SELECT pg_attribute.attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index, pg_class, pg_attribute, pg_namespace WHERE pg_class.oid = '{}'::regclass AND indrelid = pg_class.oid AND nspname = %(schema)s AND pg_class.relnamespace = pg_namespace.oid AND pg_attribute.attrelid = pg_class.oid AND pg_attribute.attnum = any(pg_index.indkey) AND indisprimary").format(
+                        sql.Identifier(q["schema"], q["table_name"])
+                    ), {
+                        'schema': q["schema"]
+                    })
+                    primary_key_query = landing_db_cur.fetchone()
+
+                    findings = 0
+                    for sidx, s in enumerate(scan_queue):
+                        if primary_key_query:
+                            primary_key_field = str(primary_key_query["attname"])
+                            primary_key = s[primary_key_query["attname"]]
+                            primary_key_datatype = primary_key_query["format_type"]
+
+                            if primary_key:
+                                for p in potentials:
+                                    print(f"Examining potential: {p}")
+                                    content = s[p]
+                                    if content:
+                                        scan_item = {"value": content}
+                                        # check to see if there has already been a decision made to skip DLP API call
+                                        # and prefill scan_action field
+
+                                        response = dlp_client.inspect_content(
+                                            request={"parent": parent, "inspect_config": inspect_config, "item": scan_item}
+                                        )
+                                        if response.result.findings:
+                                            findings += 1
+                                            for finding in response.result.findings:
+                                                #print(f"finding: {finding}")
+                                                try:
+                                                    print(f"Quote: {finding.quote}")
+                                                except AttributeError:
+                                                    # TODO: better exception handling?
+                                                    pass
+                                                # prevent duplicates
+                                                landing_db_cur.execute("SELECT * FROM public.redactics_quarantine_results WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s AND scan_value = %(scan_value)s", {
+                                                    'schema': q["schema"],
+                                                    'table_name': q["table_name"],
+                                                    'column_name': p,
+                                                    'scan_value': finding.quote
+                                                })
+                                                dupe_check = landing_db_cur.fetchone()
+                                                if not dupe_check:
+                                                    print("WRITING TO QUARANTINE TABLE")
+                                                    landing_db_cur.execute("INSERT INTO public.redactics_quarantine_results (schema, table_name, primary_key, primary_key_name, primary_key_type, column_name, scan_value, scan_result, created_at) VALUES (%(schema)s, %(table_name)s, %(primary_key)s, %(primary_key_field)s, %(primary_key_datatype)s, %(column_name)s, %(scan_value)s, %(scan_result)s, current_timestamp)", {
+                                                        'schema': q["schema"],
+                                                        'table_name': q["table_name"],
+                                                        'primary_key': primary_key,
+                                                        'primary_key_field': primary_key_field,
+                                                        'primary_key_datatype': primary_key_datatype,
+                                                        'column_name': p,
+                                                        'scan_value': finding.quote,
+                                                        'scan_result': json.dumps({"info_type":finding.info_type.name, "likelihood": finding.likelihood.name})
+                                                    })
+                                                    landing_db_conn.commit()
+
+                                                # notify Redactics API for notification triggers
+
+                                                # delete from quarantine log
+                                                landing_db_cur.execute("DELETE FROM public.redactics_quarantine_log WHERE schema = %(schema)s AND table_name = %(table_name)s", {
+                                                    'schema': q["schema"],
+                                                    'table_name': q["table_name"]
+                                                })
+                                                landing_db_conn.commit()
+                                        else:
+                                            print(f"No findings: {response}")
+
+                                if not findings:
+                                    # transfer directly to final table
+                                    print("NO SCAN FIELDS, SKIPPING QUARANTINE")
+                                    target_schema = re.sub(r'^rq_', 'r_', q["schema"])
+                                    landing_db_cur.execute("SELECT anon.mask_filters(%(table)s::REGCLASS)", {
+                                        'table': q["schema"] + "." + q["table_name"]
+                                    })
+                                    redacted_columns_query = landing_db_cur.fetchone()
+                                    # remove Redactics injected r_sensitive_data_scan column
+                                    redacted_columns = redacted_columns_query["mask_filters"].replace(',r_sensitive_data_scan','')
+                                    redacted_columns = redacted_columns.replace('r_sensitive_data_scan,','')
+                                    # print("INSERT INTO " + target_table + " SELECT " + redacted_columns + " FROM " + t + " WHERE " + unquarantine[t]["primaryKeyName"] + " IN (" + ",".join(unquarantine[t]["primaryKeys"]) + ")")
+                                    landing_db_cur.execute(sql.SQL("INSERT INTO {} SELECT %(redacted_columns)s FROM {} WHERE {} = %(primary_keys)s").format(
+                                        sql.Identifier(target_schema, q["table_name"]),
+                                        sql.Identifier(q["schema"], q["table_name"]),
+                                        sql.Identifier(primary_key_field)
+                                    ), {
+                                        'redacted_columns': AsIs(redacted_columns),
+                                        'primary_keys': AsIs(primary_key)
+                                    })
+                                    landing_db_conn.commit()
+
+                                
+                                print("MARK AS SCANNED")
+                                # mark row as scanned
+                                landing_db_cur.execute(sql.SQL("UPDATE {} SET r_sensitive_data_scan = current_timestamp WHERE {} = %(primary_key)s").format(
+                                    sql.Identifier(q["schema"], q["table_name"]),
+                                    sql.Identifier(primary_key_field)
+                                ), {
+                                    'primary_key': primary_key
+                                })
+                                landing_db_conn.commit()
+
+        # GET info types
+        # request = google.cloud.dlp_v2.ListInfoTypesRequest()
+
+        # response = dlp_client.list_info_types(request=request)
+        # print(response)
+    
+    def assign_ruleset(dlp_info_type):
+        if dlp_info_type == "EMAIL_ADDRESS":
+            print('email')
+            rule = {
+                'rule': 'redact_email',
+                'redactData': {
+                    'domain': 'redactics.com'
+                }
+            }
+        elif dlp_info_type == 'PERSON_NAME':
+            print('person name')
+            rule = {
+                'rule': 'replacement',
+                'redactData': {
+                    'replacement': 'redacted'
+                }
+            }
+
+        return rule
+
+    @task(on_failure_callback=post_logs)
     def update_redaction_rules(**context):
         landing_db_conn = None
         api_url = API_URL + '/workflow/' + dag_name
@@ -270,19 +445,28 @@ def replication():
             toggle_dlp = True
 
         # gather scan action decisions and update ruleset
-        landing_db_cur.execute("SELECT id, schema, table_name, primary_key, primary_key_name, primary_key_type, scan_action, scan_result FROM public.redactics_quarantine_results WHERE scan_action IS NOT NULL")
+        landing_db_cur.execute("SELECT id, schema, table_name, column_name, primary_key, primary_key_name, primary_key_type, scan_action, scan_result FROM public.redactics_quarantine_results WHERE scan_action IS NOT NULL")
         scan_actions = landing_db_cur.fetchall()
         unquarantine = {}
         quarantine_ids = []
         for q in scan_actions:
             if q["scan_action"] == "ignore":
-                # API call to redact rules
+                # API call to redact rules to create ignore whitelist/stub to block future scanning of column
                 # add to local ruleset
                 print("ignore")
             elif q["scan_action"] == "accept":
                 # API call to redact rules
                 # add to local ruleset
-                print("accept")
+                rule = assign_ruleset(q["scan_result"]["info_type"])
+
+                redact_rules.append({
+                    'schema': q["schema"],
+                    'table': q["table_name"],
+                    'column': q["column_name"],
+                    'rule': rule['rule'],
+                    'redactData': rule['redactData'],
+                    'updatedAt': datetime.now(timezone.utc).isoformat()
+                })
 
             if (q["schema"] + "." + q["table_name"]) not in unquarantine:
                 unquarantine[q["schema"] + "." + q["table_name"]] = {}
@@ -295,6 +479,7 @@ def replication():
             unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeyName"] = q["primary_key_name"]
             quarantine_ids.append(q["id"])
         
+        updated_at = datetime.now(timezone.utc).isoformat()
         for rule in redact_rules:
             if not landing_db_cur:
                 landing_db_name = get_landing_db_name(wf_config)
@@ -302,12 +487,13 @@ def replication():
                 landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
                 landing_db_cur = get_landing_db_cur(landing_db_conn)
             orig_schema = rule["schema"]
-            if wf_config["dlpEnabled"]:
+            if wf_config["dlpEnabled"] and not rule["schema"].startswith('rq_'):
                 # apply redaction rules to quarantine queue instead
                 rule["schema"] = "rq_" + rule["schema"]
 
             last_updated = parser.parse(Variable.get(dag_name + '-lastUpdatedRedactRules', default_var='')) if Variable.get(dag_name + '-lastUpdatedRedactRules', default_var='') else ''
             if not last_updated or (rule["updatedAt"] and parser.parse(rule["updatedAt"]) > last_updated):
+                print("UPSERT")
                 # upsert to table
                 landing_db_cur.execute("SELECT * FROM public.redactics_masking_rules WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
                     'schema': rule["schema"],
@@ -315,7 +501,6 @@ def replication():
                     'column_name': rule["column"]
                 })
                 rule_check = landing_db_cur.fetchone()
-                updated_at = datetime.now(timezone.utc).isoformat()
                 if not rule_check:
                     # insert
                     print("INSERT MASKING RULE")
@@ -360,14 +545,16 @@ def replication():
                 })
                 table_check = landing_db_cur.fetchone()
                 if table_check:
-                    print("APPLY MASKING RULES")   
-                    landing_db_cur.execute("SET SEARCH_PATH = " + rule["schema"])     
+                    print("APPLY MASKING RULES")
+                    landing_db_cur.execute("SET SEARCH_PATH = " + rule["schema"])  
                     landing_db_cur.execute("SELECT public.set_redactions(%(schema)s, %(table_name)s)", {
                         'schema': rule["schema"],
                         'table_name': rule["table"]
                     })
                     landing_db_conn.commit()
-                    Variable.set(dag_name + '-lastUpdatedRedactRules', updated_at)
+                    landing_db_cur.execute("SET SEARCH_PATH = public")
+                    landing_db_conn.commit()
+        Variable.set(dag_name + '-lastUpdatedRedactRules', updated_at)
 
         # transfer data from quarantine to redacted tables when all decisions have been made for table
         for t in unquarantine.keys():
@@ -378,7 +565,6 @@ def replication():
             table_findings = landing_db_cur.fetchall()
             if not table_findings:
                 target_schema = re.sub(r'^rq_', 'r_', unquarantine[t]["schema"])
-                target_table = unquarantine[t]["table_name"]
                 landing_db_cur.execute("SELECT anon.mask_filters(%(table)s::REGCLASS)", {
                     'table': t
                 })
@@ -388,7 +574,7 @@ def replication():
                 redacted_columns = redacted_columns.replace('r_sensitive_data_scan,','')
                 # print("INSERT INTO " + target_table + " SELECT " + redacted_columns + " FROM " + t + " WHERE " + unquarantine[t]["primaryKeyName"] + " IN (" + ",".join(unquarantine[t]["primaryKeys"]) + ")")
                 landing_db_cur.execute(sql.SQL("INSERT INTO {} SELECT %(redacted_columns)s FROM {} WHERE {} IN (%(primary_keys)s)").format(
-                    sql.Identifier(target_schema, target_table),
+                    sql.Identifier(target_schema, unquarantine[t]["table_name"]),
                     sql.Identifier(unquarantine[t]["schema"], unquarantine[t]["table_name"]),
                     sql.Identifier(unquarantine[t]["primaryKeyName"])
                 ), {
@@ -403,132 +589,6 @@ def replication():
                 'id': id
             })
             landing_db_conn.commit()
-
-    @task(on_failure_callback=post_logs)
-    def process_quarantine_queue(**context):
-        # TODO: skip if service account is missing
-        credentials = service_account.Credentials.from_service_account_file(
-    '/opt/google-dlp-serviceaccount/google_service_account')
-        dlp_client = google.cloud.dlp_v2.DlpServiceClient(credentials=credentials)
-
-        landing_db_conn_id = Variable.get(dag_name + '-landingDBConnID')
-        landing_db_name = Variable.get(dag_name + '-landingDBName')
-        landing_db_conn = get_landing_db_conn(landing_db_conn_id, landing_db_name)
-        landing_db_cur = get_landing_db_cur(landing_db_conn)
-
-        landing_db_cur.execute("SELECT distinct schema, table_name FROM public.redactics_quarantine_log")
-        check_quarantine_queue = landing_db_cur.fetchall()
-        if len(check_quarantine_queue):
-            potentials = []
-            # TODO: fetch info_types from Redactics API
-            info_types = [{"name": "EMAIL_ADDRESS"}, {"name": "PERSON_NAME"}]
-            include_quote = True
-            inspect_config = {
-                "info_types": info_types,
-                "include_quote": include_quote,
-            }
-            # TODO: don't hardcode this
-            parent = "projects/redactics-prod-310503"
-
-            for qidx, q in enumerate(check_quarantine_queue):
-                query = sql.SQL("SELECT * FROM {} WHERE r_sensitive_data_scan IS NULL").format(
-                    sql.Identifier(q["schema"], q["table_name"])
-                )
-                landing_db_cur.execute(query)
-                scan_queue = landing_db_cur.fetchall()
-
-                if scan_queue:
-                    # get list of fields potentially containing sensitive info
-                    # TODO: add additional data_types
-                    landing_db_cur.execute("SELECT * FROM information_schema.columns WHERE table_schema = %(schema)s AND table_name = %(table_name)s AND data_type IN ('character varying')", {
-                        'schema': q["schema"],
-                        'table_name': q["table_name"]
-                    })
-                    potentials_query = landing_db_cur.fetchall()
-                    for pidx, p in enumerate(potentials_query):
-                        # TODO: exclude ignored/whitelisted columns
-                        potentials.append(p["column_name"])
-                    print(f"potentials: {potentials}")
-
-                    for sidx, s in enumerate(scan_queue):
-                        # get primary key
-                        # TODO: test camel case schema/tables with this query
-                        oid = q["schema"] + "." + q["table_name"]
-                        landing_db_cur.execute("SELECT pg_attribute.attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index, pg_class, pg_attribute, pg_namespace WHERE pg_class.oid = %(oid)s::regclass AND indrelid = pg_class.oid AND nspname = %(schema)s AND pg_class.relnamespace = pg_namespace.oid AND pg_attribute.attrelid = pg_class.oid AND pg_attribute.attnum = any(pg_index.indkey) AND indisprimary", {
-                            'oid': oid,
-                            'schema': q["schema"]
-                        })
-                        primary_key_query = landing_db_cur.fetchone()
-                        if primary_key_query:
-                            primary_key_field = str(primary_key_query["attname"])
-                            primary_key = s[primary_key_query["attname"]]
-                            primary_key_datatype = primary_key_query["format_type"]
-
-                            if primary_key:
-                                for p in potentials:
-                                    print(f"Examining potential: {p}")
-                                    content = s[p]
-                                    if content:
-                                        scan_item = {"value": content}
-                                        response = dlp_client.inspect_content(
-                                            request={"parent": parent, "inspect_config": inspect_config, "item": scan_item}
-                                        )
-                                        if response.result.findings:
-                                            for finding in response.result.findings:
-                                                #print(f"finding: {finding}")
-                                                try:
-                                                    print(f"Quote: {finding.quote}")
-                                                except AttributeError:
-                                                    # TODO: better exception handling?
-                                                    pass
-                                                # prevent duplicates
-                                                landing_db_cur.execute("SELECT * FROM public.redactics_quarantine_results WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s AND scan_value = %(scan_value)s", {
-                                                    'schema': q["schema"],
-                                                    'table_name': q["table_name"],
-                                                    'column_name': p,
-                                                    'scan_value': finding.quote
-                                                })
-                                                dupe_check = landing_db_cur.fetchone()
-                                                if not dupe_check:
-                                                    print("WRITING TO QUARANTINE TABLE")
-                                                    landing_db_cur.execute("INSERT INTO public.redactics_quarantine_results (schema, table_name, primary_key, primary_key_name, primary_key_type, column_name, scan_value, scan_result, created_at) VALUES (%(schema)s, %(table_name)s, %(primary_key)s, %(primary_key_field)s, %(primary_key_datatype)s, %(column_name)s, %(scan_value)s, %(scan_result)s, current_timestamp)", {
-                                                        'schema': q["schema"],
-                                                        'table_name': q["table_name"],
-                                                        'primary_key': primary_key,
-                                                        'primary_key_field': primary_key_field,
-                                                        'primary_key_datatype': primary_key_datatype,
-                                                        'column_name': p,
-                                                        'scan_value': finding.quote,
-                                                        'scan_result': json.dumps({"info_type":finding.info_type.name, "likelihood": finding.likelihood.name})
-                                                    })
-                                                    landing_db_conn.commit()
-                                                   
-                                                print("MARK AS SCANNED")
-                                                # mark row as scanned
-                                                landing_db_cur.execute(sql.SQL("UPDATE {} SET r_sensitive_data_scan = current_timestamp WHERE {} = %(primary_key)s").format(
-                                                    sql.Identifier(q["schema"], q["table_name"]),
-                                                    sql.Identifier(primary_key_field)
-                                                ), {
-                                                    'primary_key': primary_key
-                                                })
-                                                landing_db_conn.commit()
-
-                                                # notify Redactics API for notification triggers
-
-                                                # delete from quarantine log
-                                                landing_db_cur.execute("DELETE FROM public.redactics_quarantine_log WHERE schema = %(schema)s AND table_name = %(table_name)s", {
-                                                    'schema': q["schema"],
-                                                    'table_name': q["table_name"]
-                                                })
-                                                landing_db_conn.commit()
-                                        else:
-                                            print(f"No findings: {response}")
-
-        # GET info types
-        # request = google.cloud.dlp_v2.ListInfoTypesRequest()
-
-        # response = dlp_client.list_info_types(request=request)
-        # print(response)
     
     landing_db_step = init_landing_db()
 
