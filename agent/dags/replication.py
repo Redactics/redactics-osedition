@@ -383,6 +383,7 @@ def replication():
         # print(response)
     
     def assign_ruleset(dlp_info_type):
+        # TODO: redact data values from workflow config
         if dlp_info_type == "EMAIL_ADDRESS":
             print('email')
             rule = {
@@ -454,9 +455,19 @@ def replication():
                 # API call to redact rules to create ignore whitelist/stub to block future scanning of column
                 # add to local ruleset
                 print("ignore")
+
+                redact_rules.append({
+                    'schema': q["schema"],
+                    'table': q["table_name"],
+                    'column': q["column_name"],
+                    'rule': 'ignore',
+                    'redactData': '',
+                    'updatedAt': datetime.now(timezone.utc).isoformat()
+                })
             elif q["scan_action"] == "accept":
                 # API call to redact rules
                 # add to local ruleset
+                print("accept")
                 rule = assign_ruleset(q["scan_result"]["info_type"])
 
                 redact_rules.append({
@@ -546,7 +557,6 @@ def replication():
                 table_check = landing_db_cur.fetchone()
                 if table_check:
                     print("APPLY MASKING RULES")
-                    landing_db_cur.execute("SET SEARCH_PATH = " + rule["schema"])  
                     landing_db_cur.execute("SELECT public.set_redactions(%(schema)s, %(table_name)s)", {
                         'schema': rule["schema"],
                         'table_name': rule["table"]

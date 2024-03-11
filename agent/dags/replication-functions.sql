@@ -464,7 +464,9 @@ DECLARE
 BEGIN
     EXECUTE 'SET SEARCH_PATH = ' || source_schema;
     FOR ruleset IN EXECUTE 'SELECT * FROM public.redactics_masking_rules WHERE schema = ''' || source_schema || ''' AND table_name = ''' || target_table || '''' LOOP
-        if (ruleset.rule = 'destruction') then
+        if (ruleset.rule = 'ignore') then
+            EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS NULL';
+        elsif (ruleset.rule = 'destruction') then
             EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH VALUE NULL''';
         elsif (ruleset.rule = 'redact_email') then
             if ((ruleset.redact_data->>'primaryKeyDataType')::text = 'id') then
