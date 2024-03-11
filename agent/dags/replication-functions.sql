@@ -469,10 +469,10 @@ BEGIN
         elsif (ruleset.rule = 'destruction') then
             EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH VALUE NULL''';
         elsif (ruleset.rule = 'redact_email') then
-            if ((ruleset.redact_data->>'primaryKeyDataType')::text = 'id') then
-                EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH FUNCTION public.redact_email_id(' || ruleset.table_name || '.' || ruleset.column_name || ',' || ruleset.table_name || '.' || (ruleset.redact_data->>'primaryKey')::text || ',''''' || (ruleset.redact_data->>'prefix')::text || ''''',''''' || (ruleset.redact_data->>'domain')::text || ''''')''';
-            elsif ((ruleset.redact_data->>'primaryKeyDataType')::text = 'uuid') then
+            if ((ruleset.redact_data->>'primaryKeyDataType')::text = 'uuid') then
                 EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH FUNCTION public.redact_email_uuid(' || ruleset.table_name || '.' || ruleset.column_name || ',' || ruleset.table_name || '.' || (ruleset.redact_data->>'primaryKey')::text || ',''''' || (ruleset.redact_data->>'prefix')::text || ''''',''''' || (ruleset.redact_data->>'domain')::text || ''''')''';
+            else
+                EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH FUNCTION public.redact_email_id(' || ruleset.table_name || '.' || ruleset.column_name || ',' || ruleset.table_name || '.' || (ruleset.redact_data->>'primaryKey')::text || ',''''' || (ruleset.redact_data->>'prefix')::text || ''''',''''' || (ruleset.redact_data->>'domain')::text || ''''')''';
             END IF;
         elsif (ruleset.rule = 'replacement') then
             EXECUTE 'SECURITY LABEL FOR anon ON COLUMN ' || quote_ident(ruleset.table_name) || '.' || quote_ident(ruleset.column_name) || ' IS ''MASKED WITH VALUE ''''' || (ruleset.redact_data->>'replacement')::text || '''''''';

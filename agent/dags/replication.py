@@ -382,14 +382,16 @@ def replication():
         # response = dlp_client.list_info_types(request=request)
         # print(response)
     
-    def assign_ruleset(dlp_info_type):
-        # TODO: redact data values from workflow config
+    def assign_ruleset(dlp_info_type, redact_data):
         if dlp_info_type == "EMAIL_ADDRESS":
             print('email')
             rule = {
                 'rule': 'redact_email',
                 'redactData': {
-                    'domain': 'redactics.com'
+                    'primaryKeyDataType': redact_data["primaryKeyDataType"],
+                    'primaryKey': redact_data["primaryKey"],
+                    'domain': redact_data["domain"],
+                    'prefix': redact_data["prefix"]
                 }
             }
         elif dlp_info_type == 'PERSON_NAME':
@@ -467,8 +469,14 @@ def replication():
             elif q["scan_action"] == "accept":
                 # API call to redact rules
                 # add to local ruleset
+                # TODO: redact data values from workflow config
                 print("accept")
-                rule = assign_ruleset(q["scan_result"]["info_type"])
+                rule = assign_ruleset(q["scan_result"]["info_type"], {
+                    'primaryKeyDataType': q["primary_key_type"],
+                    'primaryKey': q["primary_key_name"],
+                    'prefix': 'redacted',
+                    'domain': 'redactics.com'
+                })
 
                 redact_rules.append({
                     'schema': q["schema"],
