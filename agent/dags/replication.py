@@ -532,6 +532,7 @@ def replication():
             if q["primary_key"] not in unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeys"]:
                 unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeys"].append(q["primary_key"])
             unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeyName"] = q["primary_key_name"]
+            unquarantine[q["schema"] + "." + q["table_name"]]["primaryKeyType"] = q["primary_key_type"]
             quarantine_ids.append(q["id"])
         
         updated_at = datetime.now(timezone.utc).isoformat()
@@ -626,17 +627,15 @@ def replication():
                 # remove Redactics injected r_sensitive_data_scan column
                 redacted_columns = redacted_columns_query["mask_filters"].replace(',r_sensitive_data_scan','')
                 redacted_columns = redacted_columns.replace('r_sensitive_data_scan,','')
-                # print("INSERT INTO " + target_table + " SELECT " + redacted_columns + " FROM " + t + " WHERE " + unquarantine[t]["primaryKeyName"] + " IN (" + ",".join(unquarantine[t]["primaryKeys"]) + ")")
                 landing_db_cur.execute(sql.SQL("INSERT INTO {} SELECT %(redacted_columns)s FROM {} WHERE {} IN (%(primary_keys)s)").format(
                     sql.Identifier(target_schema, unquarantine[t]["table_name"]),
                     sql.Identifier(unquarantine[t]["schema"], unquarantine[t]["table_name"]),
                     sql.Identifier(unquarantine[t]["primaryKeyName"])
                 ), {
                     'redacted_columns': AsIs(redacted_columns),
-                    'primary_keys': AsIs(",".join(unquarantine[t]["primaryKeys"]))
+                    'primary_keys': AsIs(",".join("'" + key + "'" for key in unquarantine[t]["primaryKeys"])) if unquarantine[t]["primaryKeyType"] == "uuid" else AsIs(",".join(unquarantine[t]["primaryKeys"]))
                 })
                 landing_db_conn.commit()
-            # TODO: test inserting multiple rows
         # delete from quarantine table
         for id in quarantine_ids:
             landing_db_cur.execute("DELETE FROM public.redactics_quarantine_results WHERE id = %(id)s", {

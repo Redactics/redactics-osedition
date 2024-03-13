@@ -162,7 +162,6 @@ BEGIN
         FOR col IN EXECUTE 'SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || quote_ident(TG_ARGV[0]) || ''' AND table_name = ''' || target_table || ''''
         LOOP
             cols_arr := array_append(cols_arr, col.column_name || '=source_table.' || col.column_name);
-            quarantine_cols_arr := cols_arr;
         END LOOP;
         -- get primary key
         EXECUTE 'SELECT attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index JOIN pg_attribute ON attrelid = indrelid AND attnum = ANY(indkey) WHERE indrelid = ' || TG_RELID || ' AND indisprimary' INTO pk;
@@ -181,10 +180,10 @@ BEGIN
                 EXECUTE 'SELECT ' || pk.attname || ' FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ''' || pk_val_string || '''' INTO target_check;
                 if (target_check IS NOT NULL) then
                     -- skip quarantine, update quaranting landing and target tables
-                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
                     EXECUTE 'UPDATE ' || target_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || quarantine_schema || '.' || target_table || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || target_schema || '.' || target_table || '.' || pk.attname;
                 else
-                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
                     -- DLP queue
                     EXECUTE 'INSERT INTO public.redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || quarantine_schema || ''', ''' || target_table || ''', current_timestamp)';
                 END IF;
@@ -196,11 +195,11 @@ BEGIN
                 EXECUTE 'SELECT ' || pk.attname || ' FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ' || pk_val_int INTO target_check;
                 if (target_check IS NOT NULL) then
                     -- skip quarantine, update quaranting landing and target tables
-                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
                     EXECUTE 'UPDATE ' || target_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || quarantine_schema || '.' || target_table || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || target_schema || '.' || target_table || '.' || pk.attname;
                 else
                     -- use quarantine_cols to reset r_sensitive_data_scan to trigger scan
-                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
                     -- DLP queue
                     EXECUTE 'INSERT INTO public.redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || quarantine_schema || ''', ''' || target_table || ''', current_timestamp)';
                 END IF;
