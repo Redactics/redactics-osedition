@@ -311,11 +311,10 @@ def replication():
                                                     # TODO: better exception handling?
                                                     pass
                                                 # prevent duplicates
-                                                landing_db_cur.execute("SELECT * FROM public.redactics_quarantine_results WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s AND scan_value = %(scan_value)s", {
+                                                landing_db_cur.execute("SELECT * FROM public.redactics_quarantine_results WHERE schema = %(schema)s AND table_name = %(table_name)s AND column_name = %(column_name)s", {
                                                     'schema': q["schema"],
                                                     'table_name': q["table_name"],
-                                                    'column_name': p,
-                                                    'scan_value': finding.quote
+                                                    'column_name': p
                                                 })
                                                 dupe_check = landing_db_cur.fetchone()
                                                 if not dupe_check:
@@ -331,6 +330,13 @@ def replication():
                                                         'scan_result': json.dumps({"info_type":finding.info_type.name, "likelihood": finding.likelihood.name})
                                                     })
                                                     landing_db_conn.commit()
+                                                else:
+                                                    print("UPDATING QUARANTINE TABLE")
+                                                    landing_db_cur.execute("UPDATE public.redactics_quarantine_results SET scan_value = %(scan_value)s, scan_result = %(scan_result)s WHERE id = %(quarantine_id)s", {
+                                                        'scan_value': finding.quote,
+                                                        'scan_result': json.dumps({"info_type":finding.info_type.name, "likelihood": finding.likelihood.name}),
+                                                        'quarantine_id': dupe_check["id"]
+                                                    })
 
                                                 # notify Redactics API for notification triggers
 
@@ -429,6 +435,21 @@ def replication():
             landing_db_conn.commit()
             landing_db_cur.execute("CREATE EVENT TRIGGER ddl_dlp_trigger ON ddl_command_end EXECUTE FUNCTION ddl_dlp_trigger_func()")
             landing_db_conn.commit()
+            landing_db_cur.execute("SELECT trigger_name, event_object_schema, event_object_table, event_manipulation, action_statement FROM information_schema.triggers")
+            triggers = landing_db_cur.fetchall()
+            for t in triggers:
+                if t["event_manipulation"] == "INSERT" and re.search("^EXECUTE FUNCTION (public\.)?insert_redactics_table_func", t["action_statement"]):
+                    trigger_func = re.sub(r"^EXECUTE FUNCTION (public\.)?insert_redactics_table_func", "EXECUTE FUNCTION public.insert_redactics_dlp_table_func", t["action_statement"])
+                    landing_db_cur.execute("CREATE OR REPLACE TRIGGER " + t["trigger_name"] + " AFTER INSERT ON " + t["event_object_schema"] + "." + t["event_object_table"] + " FOR EACH ROW " + trigger_func)
+                    landing_db_conn.commit()
+                elif t["event_manipulation"] == "UPDATE" and re.search("^EXECUTE FUNCTION (public\.)?update_redactics_table_func", t["action_statement"]):
+                    trigger_func = re.sub(r"^EXECUTE FUNCTION (public\.)?update_redactics_table_func", "EXECUTE FUNCTION public.update_redactics_dlp_table_func", t["action_statement"])
+                    landing_db_cur.execute("CREATE OR REPLACE TRIGGER " + t["trigger_name"] + " AFTER UPDATE ON " + t["event_object_schema"] + "." + t["event_object_table"] + " FOR EACH ROW " + trigger_func)
+                    landing_db_conn.commit()
+                elif t["event_manipulation"] == "DELETE" and re.search("^EXECUTE FUNCTION (public\.)?delete_redactics_table_func", t["action_statement"]):
+                    trigger_func = re.sub(r"^EXECUTE FUNCTION (public\.)?delete_redactics_table_func", "EXECUTE FUNCTION public.delete_redactics_dlp_table_func", t["action_statement"])
+                    landing_db_cur.execute("CREATE OR REPLACE TRIGGER " + t["trigger_name"] + " AFTER DELETE ON " + t["event_object_schema"] + "." + t["event_object_table"] + " FOR EACH ROW " + trigger_func)
+                    landing_db_conn.commit()
             Variable.set(dag_name + '-dlpEnabled', True)
             # mark redaction rules for reset
             Variable.delete(dag_name + '-lastUpdatedRedactRules')
@@ -442,6 +463,21 @@ def replication():
             landing_db_conn.commit()
             landing_db_cur.execute("CREATE EVENT TRIGGER ddl_trigger ON ddl_command_end EXECUTE FUNCTION ddl_trigger_func()")
             landing_db_conn.commit()
+            landing_db_cur.execute("SELECT trigger_name, event_object_schema, event_object_table, event_manipulation, action_statement FROM information_schema.triggers")
+            triggers = landing_db_cur.fetchall()
+            for t in triggers:
+                if t["event_manipulation"] == "INSERT" and t["action_statement"].startswith('EXECUTE FUNCTION public.insert_redactics_dlp_table_func'):
+                    trigger_func = t["action_statement"].replace('EXECUTE FUNCTION public.insert_redactics_dlp_table_func', 'EXECUTE FUNCTION public.insert_redactics_table_func')
+                    landing_db_cur.execute("CREATE OR REPLACE TRIGGER " + t["trigger_name"] + " AFTER INSERT ON " + t["event_object_schema"] + "." + t["event_object_table"] + " FOR EACH ROW " + trigger_func)
+                    landing_db_conn.commit()
+                elif t["event_manipulation"] == "UPDATE" and t["action_statement"].startswith('EXECUTE FUNCTION public.update_redactics_dlp_table_func'):
+                    trigger_func = t["action_statement"].replace('EXECUTE FUNCTION public.update_redactics_dlp_table_func', 'EXECUTE FUNCTION public.update_redactics_table_func')
+                    landing_db_cur.execute("CREATE OR REPLACE TRIGGER " + t["trigger_name"] + " AFTER UPDATE ON " + t["event_object_schema"] + "." + t["event_object_table"] + " FOR EACH ROW " + trigger_func)
+                    landing_db_conn.commit()
+                elif t["event_manipulation"] == "DELETE" and t["action_statement"].startswith('EXECUTE FUNCTION public.delete_redactics_dlp_table_func'):
+                    trigger_func = t["action_statement"].replace('EXECUTE FUNCTION public.delete_redactics_dlp_table_func', 'EXECUTE FUNCTION public.delete_redactics_table_func')
+                    landing_db_cur.execute("CREATE OR REPLACE TRIGGER " + t["trigger_name"] + " AFTER DELETE ON " + t["event_object_schema"] + "." + t["event_object_table"] + " FOR EACH ROW " + trigger_func)
+                    landing_db_conn.commit()
             Variable.set(dag_name + '-dlpEnabled', False)
             # mark redaction rules for reset
             Variable.delete(dag_name + '-lastUpdatedRedactRules')

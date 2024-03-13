@@ -132,22 +132,29 @@ CREATE OR REPLACE FUNCTION update_redactics_dlp_table_func()
 $$
 DECLARE
     source_schema varchar;
+    quarantine_schema varchar;
     target_schema varchar;
     target_table varchar;
     redacted_columns varchar;
+    unredacted_columns varchar;
     json_record jsonb;
     pk record;
+    target_check record;
     pk_val_int bigint;
     pk_val_string varchar;
     col record;
     cols_arr varchar[];
+    quarantine_cols_arr varchar[];
     cols varchar;
+    quarantine_cols varchar;
 BEGIN
     source_schema := (SELECT REGEXP_REPLACE(TG_ARGV[0],'(")?([^.]+).*(")?','\2'));
-    target_schema := quote_ident('rq_' || source_schema);
+    quarantine_schema := quote_ident('rq_' || source_schema);
+    target_schema := quote_ident('r_' || source_schema);
     source_schema := quote_ident(source_schema);
     target_table := quote_ident((SELECT REGEXP_REPLACE(TG_ARGV[1], '(")?[^.]+\.([^.]+).*(")?', '\2')));
-    redacted_columns := (SELECT anon.mask_filters(TG_ARGV[1]::REGCLASS));
+    EXECUTE 'SELECT anon.mask_filters(''' || quarantine_schema || '.' || target_table || '''::REGCLASS)' INTO redacted_columns;
+    unredacted_columns := (SELECT anon.mask_filters(TG_ARGV[1]::REGCLASS));
     json_record := row_to_json(NEW);
 
     if (source_schema NOT LIKE 'r\_%' AND source_schema NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
@@ -155,24 +162,49 @@ BEGIN
         FOR col IN EXECUTE 'SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || quote_ident(TG_ARGV[0]) || ''' AND table_name = ''' || target_table || ''''
         LOOP
             cols_arr := array_append(cols_arr, col.column_name || '=source_table.' || col.column_name);
+            quarantine_cols_arr := cols_arr;
         END LOOP;
-        -- reprocess updated field
-        cols_arr := array_append(cols_arr, 'r_sensitive_data_scan = NULL');
-        cols := array_to_string(cols_arr, ',');
+        -- get primary key
         EXECUTE 'SELECT attname, format_type(pg_attribute.atttypid, pg_attribute.atttypmod) FROM pg_index JOIN pg_attribute ON attrelid = indrelid AND attnum = ANY(indkey) WHERE indrelid = ' || TG_RELID || ' AND indisprimary' INTO pk;
 
         if (pk IS NOT NULL) then
+            -- append redactics injected field to quarantine table column listing
+            quarantine_cols_arr := array_append(cols_arr, 'r_sensitive_data_scan = NULL');
+            quarantine_cols := array_to_string(quarantine_cols_arr, ',');
+            cols := array_to_string(cols_arr, ',');
+
             if (jsonb_extract_path(json_record, pk.attname)::varchar LIKE '"%"') then
                 -- non numeric primary key
                 pk_val_string := REPLACE(jsonb_extract_path(json_record, pk.attname)::varchar, '"', '');
-                EXECUTE 'UPDATE ' || target_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || target_schema || '.' || target_table || '.' || pk.attname;
-            else
-                pk_val_int := jsonb_extract_path(json_record, pk.attname);
-                EXECUTE 'UPDATE ' || target_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || target_schema || '.' || target_table || '.' || pk.attname;
-            END IF;
 
-            -- DLP queue
-            EXECUTE 'INSERT INTO public.redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || target_schema || ''', ''' || target_table || ''', current_timestamp)';
+                -- check if entry has passed quarantine
+                EXECUTE 'SELECT ' || pk.attname || ' FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ''' || pk_val_string || '''' INTO target_check;
+                if (target_check IS NOT NULL) then
+                    -- skip quarantine, update quaranting landing and target tables
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    EXECUTE 'UPDATE ' || target_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || quarantine_schema || '.' || target_table || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || target_schema || '.' || target_table || '.' || pk.attname;
+                else
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ''' || pk_val_string || ''' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    -- DLP queue
+                    EXECUTE 'INSERT INTO public.redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || quarantine_schema || ''', ''' || target_table || ''', current_timestamp)';
+                END IF;
+            else
+                -- numeric primary key
+                pk_val_int := jsonb_extract_path(json_record, pk.attname);
+
+                -- check if entry has passed quarantine
+                EXECUTE 'SELECT ' || pk.attname || ' FROM ' || target_schema || '.' || target_table || ' WHERE ' || pk.attname || ' = ' || pk_val_int INTO target_check;
+                if (target_check IS NOT NULL) then
+                    -- skip quarantine, update quaranting landing and target tables
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || unredacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    EXECUTE 'UPDATE ' || target_schema || '.' || target_table || ' SET ' || cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || quarantine_schema || '.' || target_table || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || target_schema || '.' || target_table || '.' || pk.attname;
+                else
+                    -- use quarantine_cols to reset r_sensitive_data_scan to trigger scan
+                    EXECUTE 'UPDATE ' || quarantine_schema || '.' || target_table || ' SET ' || quarantine_cols || ' FROM (SELECT ' || redacted_columns || ' FROM ' || TG_ARGV[1] || ') AS source_table WHERE source_table.' || pk.attname || ' = ' || pk_val_int || ' AND source_table.' || pk.attname || ' = ' || quarantine_schema || '.' || target_table || '.' || pk.attname;
+                    -- DLP queue
+                    EXECUTE 'INSERT INTO public.redactics_quarantine_log ("schema", "table_name", "created_at") VALUES (''' || quarantine_schema || ''', ''' || target_table || ''', current_timestamp)';
+                END IF;
+            END IF;
         END IF;
     END IF;
 RETURN NEW;
@@ -396,7 +428,7 @@ BEGIN
             EXECUTE 'CREATE TABLE IF NOT EXISTS ' || quote_ident(quarantine_schema) || '.' || quote_ident(target_table) || ' (LIKE ' || r.object_identity || ' INCLUDING ALL)';
             -- add DLP fields
             EXECUTE 'ALTER TABLE ' || quote_ident(quarantine_schema) || '.' || quote_ident(target_table) || ' ADD COLUMN r_sensitive_data_scan timestamp';
-            EXECUTE 'CREATE INDEX r_sensitive_data_scan_idx ON ' || quote_ident(quarantine_schema) || '.' || quote_ident(target_table) || '(r_sensitive_data_scan)';
+            EXECUTE 'CREATE INDEX ' || target_table || '_r_sensitive_data_scan ON ' || quote_ident(quarantine_schema) || '.' || quote_ident(target_table) || '(r_sensitive_data_scan)';
             PERFORM public.set_redactions(quarantine_schema, target_table);
 
             EXECUTE 'CREATE TABLE IF NOT EXISTS ' || quote_ident(target_schema) || '.' || quote_ident(target_table) || ' (LIKE ' || r.object_identity || ' INCLUDING ALL)';
