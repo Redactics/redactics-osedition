@@ -447,40 +447,41 @@ BEGIN
                     FOR inner_r IN EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || source_schema || ''' AND table_name = ''' || target_table || ''' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''')' LOOP
                         -- find old column name based on ordinal position
                         EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''' AND ordinal_position = ''' || inner_r.ordinal_position || '''' INTO old_column;
-                        PERFORM public.ddl_rename_col(target_schema, target_table, old_column.column_name::varchar, inner_r.column_name::varchar);
+                        PERFORM public.ddl_dlp_rename_col(quarantine_schema, target_schema, target_table, old_column.column_name::varchar, inner_r.column_name::varchar);
                     END LOOP;
 
                     -- find changed column properties
                     FOR inner_r IN EXECUTE 'SELECT s.table_schema as s_table_schema, s.table_name as s_table_name, s.column_name as s_column_name, s.udt_name as s_udt_name, s.column_default as s_column_default, t.table_schema as t_table_schema, t.table_name as t_table_name, t.column_name as t_column_name, t.udt_name as t_udt_name, t.column_default as t_column_default FROM information_schema.columns s, information_schema.columns t WHERE s.table_schema = ''' || source_schema || ''' AND s.table_name = ''' || target_table || ''' AND t.table_schema = ''' || target_schema || ''' AND t.table_name = ''' || target_table || ''' AND s.column_name = t.column_name' LOOP
-                        PERFORM public.ddl_change_col(target_schema, target_table, inner_r);
+                        PERFORM public.ddl_dlp_change_col(quarantine_schema, target_schema, target_table, inner_r);
                     END LOOP;
                 else
                     if (target_columns = 0) then
                         -- renamed table
                         EXECUTE 'SELECT table_name FROM public.redactics_oid_mapping WHERE oid = ' || r.objid INTO source_table;
-                        PERFORM public.ddl_rename_table(source_schema, source_table, target_table, r.objid);
+                        PERFORM public.ddl_dlp_rename_table(source_schema, source_table, target_table, r.objid);
                     elsif (source_columns > target_columns) then
                         -- add column
                         FOR inner_r IN EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || source_schema || ''' AND table_name = ''' || target_table || ''' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''')' LOOP
-                            PERFORM public.ddl_add_col(target_schema, target_table, inner_r);
+                            PERFORM public.ddl_dlp_add_col(quarantine_schema, target_schema, target_table, inner_r);
                         END LOOP;
                     elsif (source_columns < target_columns) then
                         -- drop column
                         FOR inner_r IN EXECUTE 'SELECT * FROM information_schema.columns WHERE table_schema = ''' || target_schema || ''' AND table_name = ''' || target_table || ''' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_schema = ''' || source_schema || ''' AND table_name = ''' || target_table || ''')' LOOP
-                            PERFORM public.ddl_drop_col(target_schema, target_table, inner_r);
+                            PERFORM public.ddl_dlp_drop_col(quarantine_schema, target_schema, target_table, inner_r);
                         END LOOP;
                     END IF;
                 END IF;
 
                 -- security labels need to be reapplied
+                -- TODO: is this still needed?
                 PERFORM public.reapply_redactions(target_table);
             END IF;
         elsif (r.command_tag = 'CREATE VIEW' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
-            PERFORM public.ddl_create_view(source_schema, r);
+            PERFORM public.ddl_dlp_create_view(source_schema, r);
         elsif (r.command_tag = 'CREATE INDEX' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
-            PERFORM public.ddl_create_index(source_schema, r);
+            PERFORM public.ddl_dlp_create_index(source_schema, r);
         elsif (r.command_tag = 'CREATE SEQUENCE' AND r.schema_name NOT IN ('mask', 'anon') AND r.schema_name NOT LIKE 'r\_%' AND r.schema_name NOT LIKE 'rq\_%' AND target_table NOT LIKE 'redactics\_%') THEN
-            PERFORM public.ddl_create_sequence(source_schema, r);
+            PERFORM public.ddl_dlp_create_sequence(source_schema, r);
         END IF;
     END LOOP;
 END;
@@ -529,6 +530,21 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION ddl_dlp_create_view(source_schema varchar, r record)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+DECLARE
+	view_name varchar;
+	view_definition varchar;
+BEGIN
+	view_name := (SELECT REGEXP_REPLACE(r.object_identity, '(")?[^.]+\.([^.]+).*(")?', '\2'));
+    EXECUTE 'SELECT definition FROM pg_views WHERE viewname = ''' || view_name || '''' into view_definition;
+    EXECUTE 'CREATE OR REPLACE VIEW rq_' || source_schema || '.' || view_name || ' AS ' || view_definition; 
+	EXECUTE 'CREATE OR REPLACE VIEW r_' || source_schema || '.' || view_name || ' AS ' || view_definition; 
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION ddl_create_sequence(source_schema varchar, r record)
   RETURNS void
  LANGUAGE plpgsql
@@ -541,6 +557,25 @@ BEGIN
 	sequence_name := (SELECT REGEXP_REPLACE(r.object_identity, '(")?[^.]+\.([^.]+).*(")?', '\2'));
 	target_sequence_name := 'r_' || r.object_identity;
 	EXECUTE 'SELECT * FROM information_schema.sequences WHERE sequence_schema = ''' || source_schema || ''' AND sequence_name = ''' || sequence_name || '''' into seq_record;
+    EXECUTE 'CREATE SEQUENCE IF NOT EXISTS ' || target_sequence_name || ' AS ' || seq_record.data_type || ' INCREMENT BY ' || seq_record.increment || ' MINVALUE ' || seq_record.minimum_value || ' MAXVALUE ' || seq_record.maximum_value || ' START ' || seq_record.start_value;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ddl_dlp_create_sequence(source_schema varchar, r record)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+DECLARE
+	seq_record record;
+	sequence_name varchar;
+    quarantine_sequence_name varchar;
+	target_sequence_name varchar;
+BEGIN
+	sequence_name := (SELECT REGEXP_REPLACE(r.object_identity, '(")?[^.]+\.([^.]+).*(")?', '\2'));
+    quarantine_sequence_name := 'rq_' || r.object_identity;
+	target_sequence_name := 'r_' || r.object_identity;
+	EXECUTE 'SELECT * FROM information_schema.sequences WHERE sequence_schema = ''' || source_schema || ''' AND sequence_name = ''' || sequence_name || '''' into seq_record;
+    EXECUTE 'CREATE SEQUENCE IF NOT EXISTS ' || quarantine_sequence_name || ' AS ' || seq_record.data_type || ' INCREMENT BY ' || seq_record.increment || ' MINVALUE ' || seq_record.minimum_value || ' MAXVALUE ' || seq_record.maximum_value || ' START ' || seq_record.start_value;
     EXECUTE 'CREATE SEQUENCE IF NOT EXISTS ' || target_sequence_name || ' AS ' || seq_record.data_type || ' INCREMENT BY ' || seq_record.increment || ' MINVALUE ' || seq_record.minimum_value || ' MAXVALUE ' || seq_record.maximum_value || ' START ' || seq_record.start_value;
 END;
 $$;
@@ -566,11 +601,44 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION ddl_dlp_create_index(source_schema varchar, r record)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+DECLARE
+    source_index record;
+	target_index int;
+	index_name varchar;
+	index_cmd varchar;
+BEGIN
+	index_name := quote_ident((SELECT REGEXP_REPLACE(r.object_identity, '(")?[^.]+\.([^.]+).*(")?', '\2')));
+	EXECUTE 'SELECT * FROM pg_indexes WHERE schemaname = ''' || source_schema || ''' AND indexname = ''' || index_name || '''' INTO source_index;
+    EXECUTE 'SELECT count(*) FROM pg_indexes WHERE schemaname = ''r_' || source_schema || ''' AND indexname = ''' || index_name || '''' INTO target_index;
+    if (target_index = 0) then
+        -- skip creating the index if it has already been created via initial table creation
+        EXECUTE 'SELECT REPLACE(''' || source_index.indexdef || ''', ''' || source_schema || ''', ''rq_' || source_schema || ''')' INTO index_cmd;
+        EXECUTE index_cmd;
+        EXECUTE 'SELECT REPLACE(''' || source_index.indexdef || ''', ''' || source_schema || ''', ''r_' || source_schema || ''')' INTO index_cmd;
+        EXECUTE index_cmd;
+    END IF;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION ddl_drop_col(target_schema varchar, target_table varchar, r record)
   RETURNS void
  LANGUAGE plpgsql
   AS $$
 BEGIN
+    EXECUTE 'ALTER TABLE ' || target_schema || '.' || target_table || ' DROP COLUMN ' || r.column_name;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ddl_dlp_drop_col(quarantine_schema varchar, target_schema varchar, target_table varchar, r record)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+BEGIN
+    EXECUTE 'ALTER TABLE ' || quarantine_schema || '.' || target_table || ' DROP COLUMN ' || r.column_name;
     EXECUTE 'ALTER TABLE ' || target_schema || '.' || target_table || ' DROP COLUMN ' || r.column_name;
 END;
 $$;
@@ -584,11 +652,32 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION ddl_dlp_add_col(quarantine_schema varchar, target_schema varchar, target_table varchar, r record)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+BEGIN
+    EXECUTE 'ALTER TABLE ' || quarantine_schema || '.' || target_table || ' ADD COLUMN ' || r.column_name || ' ' || r.udt_name;
+    EXECUTE 'ALTER TABLE ' || target_schema || '.' || target_table || ' ADD COLUMN ' || r.column_name || ' ' || r.udt_name;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION ddl_rename_table(source_schema varchar, source_table varchar, target_table varchar, table_oid oid)
   RETURNS void
  LANGUAGE plpgsql
   AS $$
 BEGIN
+    EXECUTE 'ALTER TABLE r_' || source_table || ' RENAME TO ' || target_table;
+    EXECUTE 'UPDATE public.redactics_oid_mapping SET table_name = ''' || source_schema || '.' || target_table || ''' WHERE oid = ' || table_oid;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ddl_dlp_rename_table(source_schema varchar, source_table varchar, target_table varchar, table_oid oid)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+BEGIN
+    EXECUTE 'ALTER TABLE rq_' || source_table || ' RENAME TO ' || target_table;
     EXECUTE 'ALTER TABLE r_' || source_table || ' RENAME TO ' || target_table;
     EXECUTE 'UPDATE public.redactics_oid_mapping SET table_name = ''' || source_schema || '.' || target_table || ''' WHERE oid = ' || table_oid;
 END;
@@ -607,11 +696,36 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION ddl_dlp_change_col(quarantine_schema varchar, target_schema varchar, target_table varchar, r record)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+BEGIN
+    if r.s_udt_name != r.t_udt_name then
+        EXECUTE 'ALTER TABLE ' || quarantine_schema || '.' || target_table || ' ALTER COLUMN ' || r.s_column_name || ' TYPE ' || r.s_udt_name;
+        EXECUTE 'ALTER TABLE ' || target_schema || '.' || target_table || ' ALTER COLUMN ' || r.s_column_name || ' TYPE ' || r.s_udt_name;
+    elsif COALESCE(r.s_column_default,'') != COALESCE(r.t_column_default,'') then
+        EXECUTE 'ALTER TABLE ' || quarantine_schema || '.' || target_table || ' ALTER COLUMN ' || r.s_column_name || ' SET DEFAULT ' || COALESCE(r.s_column_default,'NULL');
+        EXECUTE 'ALTER TABLE ' || target_schema || '.' || target_table || ' ALTER COLUMN ' || r.s_column_name || ' SET DEFAULT ' || COALESCE(r.s_column_default,'NULL');
+    END IF;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION ddl_rename_col(target_schema varchar, target_table varchar, old_column varchar, new_column varchar)
   RETURNS void
  LANGUAGE plpgsql
   AS $$
 BEGIN
+    EXECUTE 'ALTER TABLE ' || target_schema || '.' || target_table || ' RENAME COLUMN ' || old_column || ' TO ' || new_column;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ddl_dlp_rename_col(quarantine_schema varchar, target_schema varchar, target_table varchar, old_column varchar, new_column varchar)
+  RETURNS void
+ LANGUAGE plpgsql
+  AS $$
+BEGIN
+    EXECUTE 'ALTER TABLE ' || quarantine_schema || '.' || target_table || ' RENAME COLUMN ' || old_column || ' TO ' || new_column;
     EXECUTE 'ALTER TABLE ' || target_schema || '.' || target_table || ' RENAME COLUMN ' || old_column || ' TO ' || new_column;
 END;
 $$;
@@ -654,12 +768,16 @@ BEGIN
     FOR obj_dropped IN SELECT * FROM pg_event_trigger_dropped_objects() LOOP
         if (obj_dropped.object_type = 'table' AND obj_dropped.schema_name NOT LIKE 'r\_%') then
             EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident('r_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
+            EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident('rq_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
         elsif (obj_dropped.object_type = 'index' AND obj_dropped.schema_name NOT LIKE 'r\_%') then
             EXECUTE 'DROP INDEX IF EXISTS ' || quote_ident('r_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
+            EXECUTE 'DROP INDEX IF EXISTS ' || quote_ident('rq_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
         elsif (obj_dropped.object_type = 'sequence' AND obj_dropped.schema_name NOT LIKE 'r\_%') then
             EXECUTE 'DROP SEQUENCE IF EXISTS ' || quote_ident('r_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
+            EXECUTE 'DROP SEQUENCE IF EXISTS ' || quote_ident('rq_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
         elsif (obj_dropped.object_type = 'view' AND obj_dropped.schema_name NOT LIKE 'r\_%') then
             EXECUTE 'DROP VIEW IF EXISTS ' || quote_ident('r_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
+            EXECUTE 'DROP VIEW IF EXISTS ' || quote_ident('rq_' || obj_dropped.schema_name) || '.' || quote_ident(obj_dropped.object_name);
         END IF;
     END LOOP;
 END;
