@@ -242,7 +242,7 @@ try:
         dag_id=dag_name,
         default_args=default_args,
         description='Redactics workflow',
-        start_date=airflow.utils.dates.days_ago(1),
+        start_date=airflow.utils.dates.days_ago(365),
         schedule_interval=wf_config["schedule"] if wf_config["schedule"] != 'None' else None,
         catchup=False,
         max_active_runs=1,
